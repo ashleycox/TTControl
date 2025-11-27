@@ -86,6 +86,7 @@
 
 // --- UI Strings ---
 #define STANDBY_MESSAGE "TT Control Standby"
+#define WELCOME_MESSAGE "Welcome to TT Control"
 
 // --- Storage Schema ---
 #define SETTINGS_SCHEMA_VERSION 4

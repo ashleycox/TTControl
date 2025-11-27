@@ -51,7 +51,7 @@ void UserInterface::begin() {
     display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
     
-    const char* msg = "Welcome to TT Control";
+    const char* msg = WELCOME_MESSAGE;
     int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
