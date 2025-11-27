@@ -12,7 +12,11 @@
 #include "hal.h"
 
 MotorController::MotorController() {
-    _state = STATE_STANDBY;
+    if (ENABLE_STANDBY) {
+        _state = STATE_STANDBY;
+    } else {
+        _state = STATE_STOPPED;
+    }
     
     // Check if we should auto-boot into a specific state
     if (settings.get().autoBoot) {
@@ -44,10 +48,19 @@ MotorController::MotorController() {
 void MotorController::begin() {
     // Configure hardware pins via HAL
     hal.setPinMode(PIN_RELAY_STANDBY, OUTPUT);
-    hal.setPinMode(PIN_MUTE_PHASE_A, OUTPUT);
-    hal.setPinMode(PIN_MUTE_PHASE_B, OUTPUT);
-    hal.setPinMode(PIN_MUTE_PHASE_C, OUTPUT);
-    hal.setPinMode(PIN_MUTE_PHASE_D, OUTPUT);
+    hal.setPinMode(PIN_RELAY_STANDBY, OUTPUT);
+    
+    if (ENABLE_MUTE_RELAYS) {
+        if (ENABLE_DPDT_RELAYS) {
+            hal.setPinMode(PIN_RELAY_DPDT_1, OUTPUT);
+            hal.setPinMode(PIN_RELAY_DPDT_2, OUTPUT);
+        } else {
+            hal.setPinMode(PIN_MUTE_PHASE_A, OUTPUT);
+            hal.setPinMode(PIN_MUTE_PHASE_B, OUTPUT);
+            hal.setPinMode(PIN_MUTE_PHASE_C, OUTPUT);
+            hal.setPinMode(PIN_MUTE_PHASE_D, OUTPUT);
+        }
+    }
     
     // Initialize relays to OFF state
     _relaysActive = false;
@@ -257,18 +270,51 @@ void MotorController::update() {
     
     // --- Relay Staggering Logic ---
     // Prevents current spikes by turning on relays sequentially
-    if (_relaysActive && _relayStage < 4) {
-        if (now - _relayStageTime > 100) { // 100ms stagger delay
-            _relayStageTime = now;
-            _relayStage++;
-            bool activeHigh = settings.get().relayActiveHigh;
-            int pin = -1;
-            if (_relayStage == 1) pin = PIN_MUTE_PHASE_A;
-            else if (_relayStage == 2) pin = PIN_MUTE_PHASE_B;
-            else if (_relayStage == 3) pin = PIN_MUTE_PHASE_C;
-            else if (_relayStage == 4) pin = PIN_MUTE_PHASE_D;
-            
-            if (pin != -1) hal.digitalWrite(pin, activeHigh ? HIGH : LOW);
+    if (ENABLE_MUTE_RELAYS && _relaysActive) {
+        bool activeHigh = settings.get().relayActiveHigh;
+        
+        if (ENABLE_DPDT_RELAYS) {
+            // DPDT Logic: 2 stages
+            if (_relayStage < 2) {
+                if (now - _relayStageTime > 100) {
+                    _relayStageTime = now;
+                    _relayStage++;
+                    
+                    int pin = -1;
+                    int phaseMode = settings.get().phaseMode;
+                    
+                    if (_relayStage == 1) {
+                        // DPDT 1: Always used (Phase A/B or 1/2)
+                        pin = PIN_RELAY_DPDT_1;
+                    } else if (_relayStage == 2) {
+                        // DPDT 2: Only used for 3 or 4 phase modes
+                        if (phaseMode >= 3) {
+                            pin = PIN_RELAY_DPDT_2;
+                        }
+                    }
+                    
+                    if (pin != -1) hal.digitalWrite(pin, activeHigh ? HIGH : LOW);
+                }
+            }
+        } else {
+            // SPST Logic: 4 stages
+            if (_relayStage < 4) {
+                if (now - _relayStageTime > 100) { // 100ms stagger delay
+                    _relayStageTime = now;
+                    _relayStage++;
+                    
+                    int pin = -1;
+                    int phaseMode = settings.get().phaseMode;
+                    
+                    // Only switch relays required for current phase mode
+                    if (_relayStage == 1) pin = PIN_MUTE_PHASE_A;
+                    else if (_relayStage == 2 && phaseMode >= 2) pin = PIN_MUTE_PHASE_B;
+                    else if (_relayStage == 3 && phaseMode >= 3) pin = PIN_MUTE_PHASE_C;
+                    else if (_relayStage == 4 && phaseMode >= 4) pin = PIN_MUTE_PHASE_D;
+                    
+                    if (pin != -1) hal.digitalWrite(pin, activeHigh ? HIGH : LOW);
+                }
+            }
         }
     }
     
@@ -404,6 +450,8 @@ void MotorController::toggleStartStop() {
 }
 
 void MotorController::toggleStandby() {
+    if (!ENABLE_STANDBY) return;
+
     if (_state == STATE_STANDBY) {
         // Waking up
         _state = STATE_STOPPED;
@@ -536,6 +584,8 @@ void MotorController::applySettings() {
 }
 
 void MotorController::setRelays(bool active) {
+    if (!ENABLE_MUTE_RELAYS) return;
+
     bool activeHigh = settings.get().relayActiveHigh;
     
     // Safety: Enforce Power On Delay
@@ -558,10 +608,16 @@ void MotorController::setRelays(bool active) {
         // Immediate Mute (All Off)
         _relaysActive = false;
         _relayStage = 0;
-        hal.digitalWrite(PIN_MUTE_PHASE_A, activeHigh ? LOW : HIGH);
-        hal.digitalWrite(PIN_MUTE_PHASE_B, activeHigh ? LOW : HIGH);
-        hal.digitalWrite(PIN_MUTE_PHASE_C, activeHigh ? LOW : HIGH);
-        hal.digitalWrite(PIN_MUTE_PHASE_D, activeHigh ? LOW : HIGH);
+        
+        if (ENABLE_DPDT_RELAYS) {
+             hal.digitalWrite(PIN_RELAY_DPDT_1, activeHigh ? LOW : HIGH);
+             hal.digitalWrite(PIN_RELAY_DPDT_2, activeHigh ? LOW : HIGH);
+        } else {
+            hal.digitalWrite(PIN_MUTE_PHASE_A, activeHigh ? LOW : HIGH);
+            hal.digitalWrite(PIN_MUTE_PHASE_B, activeHigh ? LOW : HIGH);
+            hal.digitalWrite(PIN_MUTE_PHASE_C, activeHigh ? LOW : HIGH);
+            hal.digitalWrite(PIN_MUTE_PHASE_D, activeHigh ? LOW : HIGH);
+        }
     }
     
     // Handle Standby Relay Linking

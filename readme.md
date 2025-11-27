@@ -54,10 +54,10 @@ All code is extensively commented. The menu system is data-driven and arranged a
 | 14 | Secondary (Pitch) Encoder DT | **Optional, controlled by compile flag.** |
 | 15 | Secondary (Pitch) Encoder SW | **Optional, controlled by compile flag.** |
 | 16 | Standby Relay Control | Active High Default (Configurable). |
-| 17 | Phase A Muting Control | Active High Default (Configurable). |
-| 18 | Phase B Muting Control | Active High Default (Configurable). |
-| 19 | Phase C Muting Control | Active High Default (Configurable). |
-| 20 | Phase D Muting Control | Active High Default (Configurable). |
+| 17 | Phase A Muting Control | Active High Default (Configurable). Acts as DPDT Relay 1 if `ENABLE_DPDT_RELAYS` is true. |
+| 18 | Phase B Muting Control | Active High Default (Configurable). Acts as DPDT Relay 2 if `ENABLE_DPDT_RELAYS` is true. |
+| 19 | Phase C Muting Control | Active High Default (Configurable). Unused if `ENABLE_DPDT_RELAYS` is true. |
+| 20 | Phase D Muting Control | Active High Default (Configurable). Unused if `ENABLE_DPDT_RELAYS` is true. |
 | 21 | Standby Button | **Optional, controlled by compile flag.** |
 | 22 | Speed Button | **Optional, controlled by compile flag.** |
 | 23 | Start / Stop Button | **Optional, controlled by compile flag.** |
@@ -230,20 +230,23 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.8. Power Management
-- **Standby Mode:** Standby mode to enter low power state.
-- **Relay Control:** Relay control for secondary power to drive load driving circuitry.
-- **Output Muting:** Output muting pins assigned for each channel to control relays or drive the mute lines of amplifiers.
-- **Staggered Switching:** Staggered switching of muting pins with configurable switching delays.
-- **Muting Logic:** Setting to switch muting relays with standby, or on motor start / stop.
-- **Relay Delay:** Configurable Power-On Relay Delay (0-10s) to prevent audible pop or transient during initialization.
-- **Auto Standby:** Configurable auto standby (0-60 minutes, 1 minute steps). 0 = Off.
-- **Auto Dim:** Configurable auto dim (0-60 minutes, 1 minute steps). 0 = Off.
-- **Auto Boot:** Configurable auto boot, boot directly into operation and bypass standby.
-- **Auto Start:** Configurable motor auto start, starts the motor immediately after waking from standby.
-- **Display Sleep:** Configurable display sleep modes (Off, 10s, 20s, 30s, 1m, 5m, 10m).
-- **Standby Display:** Option to disable display in standby, or display a standby message.
-- **Screensaver:** Screensaver mode, changes position of standby message on display if enabled to prevent burn in.
-- **Low-Power Idle:** Low-power idle when in standby.
+- Standby mode to enter low power state
+  - **Compile-time Flag**: `ENABLE_STANDBY` (default `true`). If disabled, the system boots directly to STOPPED state and all standby features are hidden.
+- Relay control for secondary power to drive load driving circuitry
+- Output muting pins assigned for each channel to control relays or drive the mute lines of amplifiers
+  - **Compile-time Flag**: `ENABLE_MUTE_RELAYS` (default `true`). If disabled, relay logic is skipped.
+  - **DPDT Support**: `ENABLE_DPDT_RELAYS` (default `false`) allows using 2 DPDT relays instead of 4 SPST relays.
+- Staggered switching of muting pins with configurable switching delays
+- Setting to switch muting relays with standby, or on motor start / stop
+- Configurable Power-On Relay Delay (0-10s) to prevent audible pop or transient during initialisation.
+- Configurable auto standby (0-60 minutes, 1 minute steps). 0 = Off.
+- Configurable auto dim (0-60 minutes, 1 minute steps). 0 = Off.
+- Configurable auto boot, boot directly into operation and bypass standby
+- Configurable motor auto start, starts the motor immediately after waking from standby
+- Configurable display sleep modes (Off, 10s, 20s, 30s, 1m, 5m, 10m).
+- option to disable display in standby, or display a standby message
+- screensaver mode, changes position of standby message on display if enabled to prevent burn in.
+- Low-power idle when in standby
 
 ---
 
@@ -307,6 +310,8 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `error dump` | Dump error log |
 | `error clear` | Clear error log |
 | `f` | Factory Reset |
+
+
 
 #### Available Settings Keys
 Use these keys with `set` and `get`. Speed-specific settings apply to the **currently selected speed**.
@@ -430,6 +435,9 @@ The menu structure is designed for a data-driven implementation.
 | **Presets** | `MAX_PRESET_SLOTS` | Defines the maximum number of user-configurable presets. | `5` | Used to size the data structure for presets. |
 | **Serial/Debug** | `SERIAL_MONITOR_ENABLE` | Enables/Disables all Serial Monitor functionality and setup. | `true` or `false` | Global toggle for serial output. |
 | **Serial/Debug** | `DUPLICATE_DISPLAY_TO_SERIAL` | Duplicates all display output to the serial monitor. | `true` or `false` | Requires `SERIAL_MONITOR_ENABLE` to be true. |
+| **Features** | `ENABLE_STANDBY` | Enable/Disable Standby Mode | `true` | Controls standby functionality. |
+| **Features** | `ENABLE_MUTE_RELAYS` | Enable/Disable Mute Relays | `true` | Controls relay logic. |
+| **Features** | `ENABLE_DPDT_RELAYS` | Use 2x DPDT instead of 4x SPST | `false` | Changes relay switching logic. |
 | **Optional Pins**| `PITCH_CONTROL_ENABLE` | Enables the secondary (Pitch) encoder functionality and logic. | `false` (Disabled) | **Required** flag for the optional pitch feature (3.3). |
 | **Optional Pins**| `PITCH_ENCODER_CLK_PIN` | Assigns the pin for the Pitch Encoder Clock. | `13` | Only compiled if `PITCH_CONTROL_ENABLE` is true. |
 | **Optional Pins**| `PITCH_ENCODER_DT_PIN` | Assigns the pin for the Pitch Encoder Data. | `14` | Only compiled if `PITCH_CONTROL_ENABLE` is true. |

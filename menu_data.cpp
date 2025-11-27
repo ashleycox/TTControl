@@ -231,11 +231,20 @@ void buildMenuSystem() {
 
     // --- Power Page (Global) ---
     pagePower = new MenuPage("Power Control");
-    pagePower->addItem(new MenuBool("Rly: ActHi", &settings.get().relayActiveHigh));
-    pagePower->addItem(new MenuBool("Rly: Stby", &settings.get().muteRelayLinkStandby));
-    pagePower->addItem(new MenuBool("Rly: S/S", &settings.get().muteRelayLinkStartStop));
-    pagePower->addItem(new MenuInt("Rly: Delay", (int*)&settings.get().powerOnRelayDelay, 0, 10));
-    pagePower->addItem(new MenuInt("Auto Stby", (int*)&settings.get().autoStandbyDelay, 0, 60));
+    
+    if (ENABLE_MUTE_RELAYS) {
+        pagePower->addItem(new MenuBool("Rly: ActHi", &settings.get().relayActiveHigh));
+        if (ENABLE_STANDBY) {
+            pagePower->addItem(new MenuBool("Rly: Stby", &settings.get().muteRelayLinkStandby));
+        }
+        pagePower->addItem(new MenuBool("Rly: S/S", &settings.get().muteRelayLinkStartStop));
+        pagePower->addItem(new MenuInt("Rly: Delay", (int*)&settings.get().powerOnRelayDelay, 0, 10));
+    }
+    
+    if (ENABLE_STANDBY) {
+        pagePower->addItem(new MenuInt("Auto Stby", (int*)&settings.get().autoStandbyDelay, 0, 60));
+    }
+    
     pagePower->addItem(new MenuBool("Auto Boot", &settings.get().autoBoot));
     pagePower->addItem(new MenuAction("Back", [](){ ui.back(); }));
 

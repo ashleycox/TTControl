@@ -42,7 +42,12 @@
 #define SPEED_BUTTON_ENABLE false
 #define START_STOP_BUTTON_ENABLE false
 
-// --- Pin Assignments (RP2040) ---
+// --- Feature Flags ---
+#define ENABLE_STANDBY true         // Set to false to disable all standby functionality
+#define ENABLE_MUTE_RELAYS true     // Set to false to disable muting relays entirely
+#define ENABLE_DPDT_RELAYS false    // Set to true to use 2x DPDT relays instead of 4x SPST
+
+// --- Pin Assignments (RP2040 / RP2053) ---
 
 // PWM Outputs (Waveform Generation)
 #define PIN_PWM_PHASE_A 0
@@ -69,6 +74,11 @@
 #define PIN_MUTE_PHASE_B 18
 #define PIN_MUTE_PHASE_C 19
 #define PIN_MUTE_PHASE_D 20
+
+// DPDT Relay Pins (only used if ENABLE_DPDT_RELAYS is true)
+// Defaults to reusing Phase A and Phase B mute pins
+#define PIN_RELAY_DPDT_1 PIN_MUTE_PHASE_A
+#define PIN_RELAY_DPDT_2 PIN_MUTE_PHASE_B
 
 #define PIN_BTN_STANDBY 21
 #define PIN_BTN_SPEED 22
