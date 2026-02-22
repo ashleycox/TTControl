@@ -100,6 +100,9 @@ Default angles depend on phase mode and can be adjusted.
 - **Independent Channel Offsets:** Independent phase offset adjustment (per-channel).
 - **Fixed Reference:** Phase A is always fixed at 0 degrees.
 - **Per-Speed Offsets:** Independent phase offset settings per speed.
+- **Resonance Sweep:** gently sweeps the symmetrical phase separation angle back and forth while the motor continues spinning at its target frequency.
+  - Allows you to physically find the optimal phase offset that best nullifies mechanical resonance and vibration.
+  - Pressing the encoder when the motor vibration is at its lowest instantly locks and saves the phase parameters.
 
 ---
 
@@ -222,6 +225,9 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Optional Enable:** Optional, enabled or disabled by compile-time configuration flags.
 - **Interactive CLI:** Full command-line interface for control and configuration.
 - **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, and more.
+- **JSON Preset Export/Import:** Advanced configuration sharing.
+  - `export preset <1-5>`: Dumps the entire layout of the requested preset, along with all global constraints and brake configurations, into a single minified JSON string.
+  - `import preset <1-5> <json>`: Instantly parses and injects a shared JSON configuration string directly into the specified preset slot.
 - **Keyboard Control:** Keyboard control over encoder and key functions (j/l/k/m/s/t/i/f).
 - **Status Reporting:** Comprehensive status printing and error reporting to serial monitor, set by compile time flag.
 
@@ -235,6 +241,10 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Flash Capacity:** The Pimoroni Pico+2 has 16MB of flash, which can be split at compile time. A standard Pico has more than enough flash for this application also.
 - **Wear Levelling:** Flash wear levelling.
 - **Factory Reset:** Factory reset with two-level confirmation.
+- **Hardware Safe Mode Boot:** A catastrophic state recovery mechanism.
+  - Holding down the primary encoder button during system power-on intercepts the boot sequence, bypassing loading configuration from Flash entirely.
+  - The system boots directly into a safe, factory-default RAM state (33.3Hz, 0% Amplitude, no filters, standard offsets).
+  - This prevents boot-looping or hardware damage caused by corrupted or dangerous parameters, allowing the user to examine the system or overwrite the corrupted settings.
 - **Critical Confirmations:** Confirmations for critical settings, such as phase mode and max amplitude changes.
 - **Settings File Schema:**
   - **Storage Location:** Stored on LittleFS.

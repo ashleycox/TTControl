@@ -81,6 +81,28 @@ void MotorController::begin() {
     }
 }
 
+void MotorController::startSymmetricSweep(float minSep, float maxSep, float speed) {
+    if (settings.get().phaseMode == 4) return; // Invalid for 4-phase twin motors
+    
+    _wasRunningBeforeSweep = isRunning();
+    if (!isRunning()) {
+        start();
+    }
+    
+    _isSweepingMode = true;
+    _sweepMinSeparation = minSep;
+    _sweepMaxSeparation = maxSep;
+    _sweepSpeed = speed;
+}
+
+void MotorController::stopSymmetricSweep() {
+    _isSweepingMode = false;
+    
+    if (!_wasRunningBeforeSweep) {
+        stop();
+    }
+}
+
 void MotorController::update() {
     uint32_t now = hal.getMillis();
     
@@ -240,6 +262,35 @@ void MotorController::update() {
                 
                 // 4. Update Runtime Counter
                 settings.updateRuntime();
+                
+                // 5. Diagnostic Resonance Sweep
+                if (_isSweepingMode) {
+                    float timeSec = now / 1000.0;
+                    float range = _sweepMaxSeparation - _sweepMinSeparation;
+                    if (range > 0 && _sweepSpeed > 0) {
+                        float period = (range * 2.0) / _sweepSpeed;
+                        float modTime = fmod(timeSec, period);
+                        float currentSep = 0;
+                        
+                        if (modTime < period / 2.0) {
+                            // Rising
+                            currentSep = _sweepMinSeparation + (modTime * _sweepSpeed);
+                        } else {
+                            // Falling
+                            currentSep = _sweepMaxSeparation - ((modTime - period / 2.0) * _sweepSpeed);
+                        }
+                        
+                        SpeedSettings& s = settings.getCurrentSpeedSettings();
+                        if (settings.get().phaseMode == 2) {
+                            s.phaseOffset[1] = currentSep;
+                        } else if (settings.get().phaseMode == 3) {
+                            s.phaseOffset[1] = currentSep;
+                            s.phaseOffset[2] = currentSep * 2.0;
+                        }
+                        
+                        waveform.updateSettings(_targetFreq, s);
+                    }
+                }
             }
             break;
             

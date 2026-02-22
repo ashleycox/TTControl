@@ -20,6 +20,12 @@ extern MotorController motor;
 // We use a shadow copy of settings for editing, allowing the user to "Save" or "Cancel" changes.
 char speedLabelBuffer[32];
 
+// --- Sweep Diagnostic ---
+float sweepMinSep = 80.0;
+float sweepMaxSep = 100.0;
+float sweepSpeed = 1.0;
+MenuPage* pageSweep = nullptr;
+
 void updateSpeedLabel() {
     if (menuShadowSpeedIndex == 0) snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 33");
     else if (menuShadowSpeedIndex == 1) snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 45");
@@ -184,6 +190,25 @@ void actionEnterPresets() {
     ui.navigateTo(pagePresets);
 }
 
+void actionEnterSweep() {
+    if (settings.get().phaseMode == 4) {
+        ui.showError("N/A 4-Phase", 2000);
+        return;
+    }
+    
+    if (!pageSweep) pageSweep = new MenuPage("Symmetric Sweep");
+    pageSweep->clear();
+    pageSweep->addItem(new MenuFloat("Min Sep", &sweepMinSep, 1.0, 0.0, 180.0));
+    pageSweep->addItem(new MenuFloat("Max Sep", &sweepMaxSep, 1.0, 0.0, 180.0));
+    pageSweep->addItem(new MenuFloat("Speed/s", &sweepSpeed, 0.1, 0.1, 10.0));
+    pageSweep->addItem(new MenuAction("Start Sweep", [](){
+        motor.startSymmetricSweep(sweepMinSep, sweepMaxSep, sweepSpeed);
+        // UI intercepts draw and input now
+    }));
+    pageSweep->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    ui.navigateTo(pageSweep);
+}
+
 // --- Menu Builder ---
 
 
@@ -204,6 +229,7 @@ void buildMenuSystem() {
     pagePhase->addItem(new MenuFloat("Ph 2 Offs", &menuShadowSettings.phaseOffset[1], 0.1, -360.0, 360.0));
     pagePhase->addItem(new MenuFloat("Ph 3 Offs", &menuShadowSettings.phaseOffset[2], 0.1, -360.0, 360.0));
     pagePhase->addItem(new MenuFloat("Ph 4 Offs", &menuShadowSettings.phaseOffset[3], 0.1, -360.0, 360.0));
+    pagePhase->addItem(new MenuAction("Sweep Diag.", actionEnterSweep));
     pagePhase->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- Motor Page (Mixed) ---
@@ -292,8 +318,16 @@ void buildMenuSystem() {
     
     // --- Main Menu ---
     pageMain = new MenuPage("Main Menu");
+    
+    extern bool safeModeActive;
+    if (safeModeActive) {
+        pageMain->addItem(new MenuAction("Exit Safe Mode", [](){
+            hal.watchdogReboot();
+        }));
+    }
+    
     // The first item toggles which speed we are editing in the submenus
-    pageMain->addItem(new MenuAction(speedLabelBuffer, actionNextSpeed)); 
+    pageMain->addItem(new MenuAction(speedLabelBuffer, actionNextSpeed));  
     
     pageMain->addItem(new MenuNav("Speed Tuning", pageSpeedTuning));
     pageMain->addItem(new MenuNav("Phase", pagePhase));

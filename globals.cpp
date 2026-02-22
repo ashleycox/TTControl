@@ -27,5 +27,8 @@ SpeedSettings menuShadowSettings;
 int menuShadowSpeedIndex = 0;
 
 // --- Core Synchronization ---
-// Flag to indicate Core 0 has completed setup, allowing Core 1 to proceed
+// Set to true when Core 0 has finished initializing shared resources
 volatile bool systemInitialized = false;
+
+// Safe Mode Boot Flag (Set in setup() if encoder held)
+bool safeModeActive = false;

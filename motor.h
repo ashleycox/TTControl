@@ -52,6 +52,7 @@ public:
     // --- Accessors ---
     bool isRunning() { return _state == STATE_RUNNING || _state == STATE_STARTING; }
     bool isStandby() { return _state == STATE_STANDBY; }
+    bool isSweepingMode() { return _isSweepingMode; }
     SpeedMode getSpeed() { return _currentSpeedMode; }
     float getCurrentFrequency() { return _currentFreq; }
     float getPitchPercent() { return currentPitchPercent; }
@@ -61,6 +62,10 @@ public:
     
     // Apply current settings to waveform generator
     void applySettings();
+
+    // --- Diagnostic Modes ---
+    void startSymmetricSweep(float minSep, float maxSep, float speed);
+    void stopSymmetricSweep();
 
 private:
     MotorState _state;
@@ -116,6 +121,13 @@ private:
     void updateState();
     float calculateSoftStartAmp(float elapsed, float duration);
     void handleBraking(uint32_t now);
+    
+    // Diagnostic Sweep State
+    bool _isSweepingMode;
+    bool _wasRunningBeforeSweep;
+    float _sweepMinSeparation;
+    float _sweepMaxSeparation;
+    float _sweepSpeed;
     
     // Deferred Settings Save
     bool _settingsDirty;

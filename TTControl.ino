@@ -41,6 +41,13 @@ void setup() {
     // Initialize Hardware Abstraction Layer
     hal.begin();
 
+    // Check for Hardware Safe Mode Boot
+    // If the encoder button is held during power-on/reset, enter Safe Mode
+    hal.setPinMode(PIN_ENC_MAIN_SW, INPUT_PULLUP);
+    if (hal.digitalRead(PIN_ENC_MAIN_SW) == LOW) {
+        safeModeActive = true;
+    }
+
     // Initialize Serial for debugging
     if (SERIAL_MONITOR_ENABLE) {
         Serial.begin(115200);

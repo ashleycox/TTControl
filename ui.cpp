@@ -182,6 +182,21 @@ void UserInterface::handleInput() {
     InputEvent evt = _input.getEvent();
     int delta = _input.getEncoderDelta();
     
+    // --- Sweep UI Trap ---
+    if (motor.isSweepingMode()) {
+        if (evt == EVT_SELECT || evt == EVT_DOUBLE_CLICK || evt == EVT_BACK) {
+            motor.stopSymmetricSweep();
+            // The phase offsets in settings.getCurrentSpeedSettings() were dynamically updated by motor.cpp.
+            // We just need to save them.
+            extern class Settings settings;
+            settings.save();
+            showMessage("Locked & Saved!", 2000);
+            exitMenu();
+        }
+        // Block other inputs
+        return;
+    }
+    
     // Reset Inactivity Timer on any input
     if (evt != EVT_NONE || delta != 0 || _input.isButtonDown()) {
         _lastInputTime = millis();
@@ -197,9 +212,6 @@ void UserInterface::handleInput() {
             return; 
         }
     }
-    
-    // --- Global Button Handling ---
-    // These work EVERYWHERE (Menu, Dashboard, etc.)
     
     // --- Global Button Handling ---
     // These work EVERYWHERE (Menu, Dashboard, etc.)
@@ -412,7 +424,6 @@ void UserInterface::draw() {
     // Better to check a dirty flag or just do it.
     // SSD1306 command is fast.
     // But let's only do it if we are not in Dim mode (which handles its own dimming)
-    // But let's only do it if we are not in Dim mode (which handles its own dimming)
     if (_statusMode != 2 && !_screensaverActive) {
         uint8_t target = settings.get().displayBrightness;
         if (target != _lastBrightness) {
@@ -425,9 +436,7 @@ void UserInterface::draw() {
     display.clearDisplay();
     
     // Render based on current state priority
-    if (_screensaverActive) {
-        drawScreensaver();
-    } else if (_showingError) {
+    if (_showingError) {
         drawError();
     } else if (_showingConfirm) {
         drawConfirm();
@@ -435,6 +444,10 @@ void UserInterface::draw() {
         drawMessage();
     } else if (_showingGoodbye) {
         drawGoodbye();
+    } else if (motor.isSweepingMode()) {
+        drawSweepScreen();
+    } else if (_screensaverActive) {
+        drawScreensaver();
     } else if (_inMenu && _currentPage) {
         drawMenu();
     } else {
@@ -578,6 +591,7 @@ void UserInterface::drawMenu() {
 
 void UserInterface::drawDashboard() {
     // --- Graphical Dashboard ---
+    extern bool safeModeActive;
     
     // Mode 2: Dim / Minimal
     if (_statusMode == 2) {
@@ -606,15 +620,25 @@ void UserInterface::drawDashboard() {
     display.dim(false); // Normal contrast
     
     // 1. Status Icons (Top Row)
-    if (motor.isRunning()) {
-        display.drawBitmap(0, 0, icon_play_bits, 16, 16, SSD1306_WHITE);
+    if (safeModeActive) {
+        // Draw a completely obvious "SAFE MODE" banner instead of the standard icon set
+        display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
+        display.setTextColor(SSD1306_BLACK);
+        display.setCursor(35, 4);
+        display.print("SAFE MODE");
+        display.setTextColor(SSD1306_WHITE); // reset
     } else {
-        display.drawBitmap(0, 0, icon_stop_bits, 16, 16, SSD1306_WHITE);
-    }
-    
-    // Lock Icon (if speed is stable)
-    if (motor.isRunning()) {
-        display.drawBitmap(112, 0, icon_lock_bits, 16, 16, SSD1306_WHITE);
+        // Normal icons
+        if (motor.isRunning()) {
+            display.drawBitmap(0, 0, icon_play_bits, 16, 16, SSD1306_WHITE);
+        } else {
+            display.drawBitmap(0, 0, icon_stop_bits, 16, 16, SSD1306_WHITE);
+        }
+        
+        // Lock Icon (if speed is stable)
+        if (motor.isRunning()) {
+            display.drawBitmap(112, 0, icon_lock_bits, 16, 16, SSD1306_WHITE);
+        }
     }
     
     // Mode 1: Stats
@@ -853,12 +877,44 @@ void UserInterface::drawConfirm() {
     int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(_confirmMsg, 0, 0, &x1, &y1, &w, &h);
-    display.setCursor((128 - w) / 2, 20);
-    display.println(_confirmMsg);
+    display.setCursor(10 + (108 - w) / 2, 25);
+    display.print(_confirmMsg);
     
-    display.setCursor(30, 40);
-    if (_confirmResult) display.print(F("> YES   NO"));
-    else display.print(F("  YES > NO"));
+    // Draw Yes/No
+    display.setCursor(20, 40);
+    if (_confirmResult) {
+        display.print("[YES]  NO ");
+    } else {
+        display.print(" YES  [NO]");
+    }
+}
+
+void UserInterface::drawSweepScreen() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    
+    // Title
+    display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    display.setCursor(5, 4);
+    display.print("SWEEPING RESONANCE");
+    display.setTextColor(SSD1306_WHITE);
+    
+    extern class Settings settings;
+    float ph2 = settings.getCurrentSpeedSettings().phaseOffset[1];
+    float ph3 = settings.getCurrentSpeedSettings().phaseOffset[2];
+    
+    display.setCursor(0, 25);
+    display.print("Phase 2: "); display.print(ph2, 1); display.print((char)247);
+    
+    if (settings.get().phaseMode == 3) {
+        display.setCursor(0, 40);
+        display.print("Phase 3: "); display.print(ph3, 1); display.print((char)247);
+    }
+    
+    display.setCursor(0, 56);
+    display.print("PRESS TO LOCK & SAVE");
 }
 
 void UserInterface::drawMessage() {

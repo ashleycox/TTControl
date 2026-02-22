@@ -227,6 +227,40 @@ void handleSerialCommands() {
             if (!found) Serial.println("Unknown setting key");
         }
         
+        // --- Preset Import/Export ---
+        else if (input.startsWith("export preset ")) {
+            int slot = input.substring(14).toInt() - 1; // 1-based to 0-based
+            if (slot >= 0 && slot < MAX_PRESET_SLOTS) {
+                String out;
+                if (settings.exportPresetToJSON(slot, out)) {
+                    Serial.println(out);
+                } else {
+                    Serial.println("Error exporting preset.");
+                }
+            } else {
+                Serial.println("Invalid preset slot (1-5)");
+            }
+        }
+        else if (input.startsWith("import preset ")) {
+            int firstSpace = input.indexOf(' ', 14);
+            if (firstSpace > 14) {
+                int slot = input.substring(14, firstSpace).toInt() - 1;
+                String jsonStr = input.substring(firstSpace + 1);
+                
+                if (slot >= 0 && slot < MAX_PRESET_SLOTS) {
+                    if (settings.importPresetFromJSON(slot, jsonStr)) {
+                        Serial.println("Preset imported successfully.");
+                    } else {
+                        Serial.println("Failed to import preset.");
+                    }
+                } else {
+                    Serial.println("Invalid preset slot (1-5)");
+                }
+            } else {
+                Serial.println("Usage: import preset <1-5> <json_string>");
+            }
+        }
+        
         // --- UI Injection ---
         else if (input == "j") ui.injectInput(-1, false);
         else if (input == "l") ui.injectInput(1, false);
@@ -273,6 +307,8 @@ void printHelp() {
     Serial.println("list - List all settings");
     Serial.println("set <key> <val> - Set setting");
     Serial.println("get <key> - Get setting");
+    Serial.println("export preset <1-5> - Dump JSON");
+    Serial.println("import preset <1-5> <json> - Load JSON");
     Serial.println("error dump, error clear");
     Serial.println("f - Factory Reset");
 }

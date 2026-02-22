@@ -7,6 +7,7 @@
  */
 
 #include "settings.h"
+#include <ArduinoJson.h>
 
 // --- Helper Functions for Preset Management ---
 
@@ -77,7 +78,20 @@ void Settings::begin() {
             return;
         }
     }
-    load();
+    
+    // Check Hardware Safe Mode Flag
+    extern bool safeModeActive;
+    if (safeModeActive) {
+        Serial.println("HARDWARE SAFE MODE ENGAGED. Bypassing Flash Load.");
+        setDefaults(); // Load baseline safe settings to RAM
+        // Emphatically DO NOT call save() here to protect the underlying flash files
+        
+        // Name the preset to make it obvious
+        strncpy(_data.presetNames[0], "SAFE MODE", 16);
+        for(int i=1; i<5; i++) strncpy(_data.presetNames[i], "LOCKED", 16);
+    } else {
+        load(); // Normal operation
+    }
 }
 
 void Settings::load() {
@@ -516,6 +530,131 @@ void Settings::saveToSlot(uint8_t slot) {
 void Settings::loadFromSlot(uint8_t slot) {
     // Legacy wrapper
     loadPreset(slot);
+}
+
+// --- Serialization ---
+bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
+    if (slot >= MAX_PRESET_SLOTS) return false;
+    
+    GlobalSettings target;
+    // Load existing settings from slot. If fail, fall back to current active data.
+    if (!loadFromSlot(slot, target)) {
+        target = _data; 
+    }
+    
+    // Create a JSON document (adjust size based on fields, approx 1024 bytes is safe for this)
+    JsonDocument doc;
+    
+    // Global Motor Parameters
+    doc["pm"] = target.phaseMode;
+    doc["maxAmp"] = target.maxAmplitude;
+    doc["ssCurve"] = target.softStartCurve;
+    doc["fda"] = target.freqDependentAmplitude;
+    doc["vfLF"] = target.vfLowFreq;
+    doc["vfLB"] = target.vfLowBoost;
+    doc["vfMF"] = target.vfMidFreq;
+    doc["vfMB"] = target.vfMidBoost;
+    
+    // Braking
+    doc["brkMd"] = target.brakeMode;
+    doc["brkDur"] = target.brakeDuration;
+    doc["brkPG"] = target.brakePulseGap;
+    doc["brkSF"] = target.brakeStartFreq;
+    doc["brkStF"] = target.brakeStopFreq;
+    doc["brkCut"] = target.softStopCutoff;
+    
+    // Speeds array
+    JsonArray speeds = doc["speeds"].to<JsonArray>();
+    for (int i=0; i<3; i++) {
+        JsonObject spd = speeds.add<JsonObject>();
+        spd["f"] = target.speeds[i].frequency;
+        spd["minF"] = target.speeds[i].minFrequency;
+        spd["maxF"] = target.speeds[i].maxFrequency;
+        
+        JsonArray ph = spd["ph"].to<JsonArray>();
+        for (int p=0; p<4; p++) ph.add(target.speeds[i].phaseOffset[p]);
+        
+        spd["ssD"] = target.speeds[i].softStartDuration;
+        spd["rAmp"] = target.speeds[i].reducedAmplitude;
+        spd["aDly"] = target.speeds[i].amplitudeDelay;
+        spd["kick"] = target.speeds[i].startupKick;
+        spd["kDur"] = target.speeds[i].startupKickDuration;
+        spd["kRmp"] = target.speeds[i].startupKickRampDuration;
+        
+        spd["fTyp"] = target.speeds[i].filterType;
+        spd["iir"] = target.speeds[i].iirAlpha;
+        spd["fir"] = target.speeds[i].firProfile;
+    }
+    
+    serializeJson(doc, outStr);
+    return true;
+}
+
+bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
+    if (slot >= MAX_PRESET_SLOTS) return false;
+    
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, jsonStr);
+    
+    if (error) {
+        Serial.print("JSON Error: ");
+        Serial.println(error.c_str());
+        return false;
+    }
+    
+    GlobalSettings target;
+    // Base it off of existing slot, or current config so we don't wipe screensaver/boot settings
+    if (!loadFromSlot(slot, target)) {
+        target = _data; 
+    }
+    
+    // Global Motor Parameters
+    if (doc.containsKey("pm")) target.phaseMode = doc["pm"];
+    if (doc.containsKey("maxAmp")) target.maxAmplitude = doc["maxAmp"];
+    if (doc.containsKey("ssCurve")) target.softStartCurve = doc["ssCurve"];
+    if (doc.containsKey("fda")) target.freqDependentAmplitude = doc["fda"];
+    if (doc.containsKey("vfLF")) target.vfLowFreq = doc["vfLF"];
+    if (doc.containsKey("vfLB")) target.vfLowBoost = doc["vfLB"];
+    if (doc.containsKey("vfMF")) target.vfMidFreq = doc["vfMF"];
+    if (doc.containsKey("vfMB")) target.vfMidBoost = doc["vfMB"];
+    
+    if (doc.containsKey("brkMd")) target.brakeMode = doc["brkMd"];
+    if (doc.containsKey("brkDur")) target.brakeDuration = doc["brkDur"];
+    if (doc.containsKey("brkPG")) target.brakePulseGap = doc["brkPG"];
+    if (doc.containsKey("brkSF")) target.brakeStartFreq = doc["brkSF"];
+    if (doc.containsKey("brkStF")) target.brakeStopFreq = doc["brkStF"];
+    if (doc.containsKey("brkCut")) target.softStopCutoff = doc["brkCut"];
+    
+    // Speeds array
+    if (doc.containsKey("speeds")) {
+        JsonArray speeds = doc["speeds"];
+        for (int i=0; i<3 && i<speeds.size(); i++) {
+            JsonObject spd = speeds[i];
+            if (spd.containsKey("f")) target.speeds[i].frequency = spd["f"];
+            if (spd.containsKey("minF")) target.speeds[i].minFrequency = spd["minF"];
+            if (spd.containsKey("maxF")) target.speeds[i].maxFrequency = spd["maxF"];
+            
+            if (spd.containsKey("ph")) {
+                JsonArray ph = spd["ph"];
+                for (int p=0; p<4 && p<ph.size(); p++) target.speeds[i].phaseOffset[p] = ph[p];
+            }
+            
+            if (spd.containsKey("ssD")) target.speeds[i].softStartDuration = spd["ssD"];
+            if (spd.containsKey("rAmp")) target.speeds[i].reducedAmplitude = spd["rAmp"];
+            if (spd.containsKey("aDly")) target.speeds[i].amplitudeDelay = spd["aDly"];
+            if (spd.containsKey("kick")) target.speeds[i].startupKick = spd["kick"];
+            if (spd.containsKey("kDur")) target.speeds[i].startupKickDuration = spd["kDur"];
+            if (spd.containsKey("kRmp")) target.speeds[i].startupKickRampDuration = spd["kRmp"];
+            
+            if (spd.containsKey("fTyp")) target.speeds[i].filterType = spd["fTyp"];
+            if (spd.containsKey("iir")) target.speeds[i].iirAlpha = spd["iir"];
+            if (spd.containsKey("fir")) target.speeds[i].firProfile = spd["fir"];
+        }
+    }
+    
+    // Save to slot file, don't change RAM actively
+    saveToSlot(slot, target);
+    return true;
 }
 
 void Settings::updateRuntime() {

@@ -107,6 +107,7 @@ private:
     void handleInput();
     void draw();
     void drawDashboard(); // Replaces drawStatus
+    void drawSweepScreen(); // New sweep diagnostic visualization
     void drawMenu();
     void drawScreensaver();
     void drawConfirm();

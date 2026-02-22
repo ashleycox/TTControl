@@ -32,6 +32,8 @@ extern Adafruit_SSD1306 display;
 extern volatile MotorState currentMotorState;
 extern volatile float currentFrequency;
 extern volatile float currentPitchPercent;
+// Safe Mode Boot Flag
+extern bool safeModeActive;
 extern volatile bool systemInitialized;
 
 #endif // GLOBALS_H

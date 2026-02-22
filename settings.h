@@ -47,6 +47,10 @@ public:
     void duplicatePreset(uint8_t src, uint8_t dest);
     const char* getPresetName(uint8_t slot);
     
+    // --- Serialization ---
+    bool exportPresetToJSON(uint8_t slot, String& outStr);
+    bool importPresetFromJSON(uint8_t slot, const String& jsonStr);
+    
     // --- Runtime Tracking ---
     void updateRuntime();
     uint32_t getSessionRuntime();
