@@ -253,7 +253,29 @@ void UserInterface::handleInput() {
     // Pitch Encoder Logic (Dedicated)
     #if PITCH_CONTROL_ENABLE
     int pitchDelta = _input.getPitchDelta();
-    if (pitchDelta != 0 && motor.isRunning()) {
+    
+    // --- Dual Encoder Menu UX ---
+    // If we're in the menu, hijacking pitch encoder as a secondary navigational/editing tool
+    if (pitchDelta != 0 && _inMenu && _currentPage) {
+        MenuItem* item = _currentPage->getItem(_currentPage->getSelection());
+        // Block input if transitioning
+        if (_transitionDirection == 0 && item && item->isEditable()) {
+            if (item->isEditing()) {
+                // Paradigm 2: Coarse / Fine
+                // Primary Encoder = Fine (1x), Secondary Encoder = Coarse (10x)
+                item->onInput(pitchDelta * 10);
+            } else {
+                // Paradigm 1: Scroll & Adjust
+                // Auto-enter edit mode, apply 1x delta, auto-exit and save
+                MenuPage* dummy = nullptr;
+                item->onSelect(dummy);       // Set _editing = true, load _temp
+                item->onInput(pitchDelta);   // Apply 1x delta to _temp
+                item->onSelect(dummy);       // Set _editing = false, save _temp to _target
+            }
+        }
+    } 
+    // --- Standard Pitch Logic (Only outside Menu) ---
+    else if (pitchDelta != 0 && motor.isRunning() && !_inMenu) {
         float currentP = motor.getPitchPercent();
         float step = settings.get().pitchStepSize;
         float newP = currentP + (pitchDelta * step); 

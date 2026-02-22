@@ -175,7 +175,10 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Menu System:** Comprehensive, logically organised hierarchical menu system to adjust all possible configuration settings via the user interface.
 - **Full Configurability:** Every possible configurable option available as a menu setting.
 - **Real-Time Updates:** All settings update in real time when adjustments are being made, to observe their effect on the motor. Settings are only saved to flash on selecting the 'save' option from the menu.
-- **Single Encoder Control:** Control possible by single rotary encoder with pushbutton.
+- **Single Encoder Control:** If only the main encoder is installed, click to enter a value, turn to adjust, and click to save.
+- **Dual Encoder System (Optional):** If the secondary (pitch) encoder is installed and the system is in the menu, a premium dual-encoder workflow is seamlessly enabled:
+  - **Scroll and Adjust:** Use the primary encoder to freely scroll the menu list. Turn the secondary encoder to instantly "adjust" the currently highlighted value without needing to click into it.
+  - **Coarse/Fine Editing:** Click the primary encoder to explicitly enter "Edit Mode." The primary encoder now acts as a fine adjustment knob (1X steps), while the secondary encoder acts as a coarse adjustment knob (10X steps), allowing extremely rapid traversal of large values.
 - **Primary Encoder Interaction:**
   - **Short Press:** Start/Stop Motor (or Wake from Standby).
   - **Double Press:** Enter Main Menu.
