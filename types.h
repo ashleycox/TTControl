@@ -49,7 +49,8 @@ enum FirProfile {
 enum BrakeMode : int {
     BRAKE_OFF,
     BRAKE_PULSE, // Pulsed reverse torque
-    BRAKE_RAMP   // Linear frequency ramp down
+    BRAKE_RAMP,   // Linear frequency ramp down
+    BRAKE_SOFT_STOP // Active coasting down to a cutoff frequency
 };
 
 enum RampType {
@@ -102,11 +103,12 @@ struct GlobalSettings {
     uint8_t switchRampDuration; // Seconds
     
     // Braking
-    uint8_t brakeMode; // 0=Off, 1=Pulse, 2=Ramp
+    uint8_t brakeMode; // 0=Off, 1=Pulse, 2=Ramp, 3=SoftStop
     float brakeDuration;
     float brakePulseGap;
     float brakeStartFreq;
     float brakeStopFreq;
+    float softStopCutoff; // Hz limit for active coasting
     
     // Relays
     bool relayActiveHigh;
@@ -143,7 +145,14 @@ struct GlobalSettings {
     uint8_t screensaverMode; // 0=Bounce, 1=Matrix, 2=Lissajous
     
     bool enable78rpm;
-    uint8_t freqDependentAmplitude; // 0-100% (FDA)
+    uint8_t freqDependentAmplitude; // 0-100% (FDA master toggle/multiplier)
+    
+    // 3-Point V/f Curve Definitions
+    float vfLowFreq; // Hz
+    uint8_t vfLowBoost; // 0-100%
+    float vfMidFreq; // Hz
+    uint8_t vfMidBoost; // 0-100%
+    
     uint8_t bootSpeed; // 0=33, 1=45, 2=78, 3=Last Used
     
     // Current State Persistence

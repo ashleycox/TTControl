@@ -216,16 +216,21 @@ void buildMenuSystem() {
     pageMotor->addItem(new MenuInt("Kick Dur", (int*)&menuShadowSettings.startupKickDuration, 0, 15));
     pageMotor->addItem(new MenuFloat("Kick Ramp", &menuShadowSettings.startupKickRampDuration, 0.1, 0.0, 15.0));
     // Global
-    pageMotor->addItem(new MenuInt("FDA % (0=Off)", (int*)&settings.get().freqDependentAmplitude, 0, 100));
+    pageMotor->addItem(new MenuInt("V/f Blend%", (int*)&settings.get().freqDependentAmplitude, 0, 100));
+    pageMotor->addItem(new MenuFloat("V/f LowHz", &settings.get().vfLowFreq, 1.0, 0.0, 50.0));
+    pageMotor->addItem(new MenuInt("V/f Low%", (int*)&settings.get().vfLowBoost, 0, 100));
+    pageMotor->addItem(new MenuFloat("V/f MidHz", &settings.get().vfMidFreq, 1.0, 0.0, 100.0));
+    pageMotor->addItem(new MenuInt("V/f Mid%", (int*)&settings.get().vfMidBoost, 0, 100));
     pageMotor->addItem(new MenuInt("Max Amp %", (int*)&settings.get().maxAmplitude, 0, 100));
     pageMotor->addItem(new MenuInt("SS Curve", (int*)&settings.get().softStartCurve, 0, 2));
     pageMotor->addItem(new MenuBool("Smooth Sw", &settings.get().smoothSwitching));
     pageMotor->addItem(new MenuInt("Sw Ramp", (int*)&settings.get().switchRampDuration, 1, 5));
-    pageMotor->addItem(new MenuInt("Brake Mode", (int*)&settings.get().brakeMode, 0, 2));
+    pageMotor->addItem(new MenuInt("Brake Mode", (int*)&settings.get().brakeMode, 0, 3));
     pageMotor->addItem(new MenuFloat("Brake Dur", &settings.get().brakeDuration, 0.1, 0.0, 10.0));
     pageMotor->addItem(new MenuFloat("Brk Pulse", &settings.get().brakePulseGap, 0.1, 0.1, 2.0));
     pageMotor->addItem(new MenuFloat("Brk StartF", &settings.get().brakeStartFreq, 1.0, 10.0, 200.0));
     pageMotor->addItem(new MenuFloat("Brk StopF", &settings.get().brakeStopFreq, 1.0, 0.0, 50.0));
+    pageMotor->addItem(new MenuFloat("Brk Cutoff", &settings.get().softStopCutoff, 1.0, 0.0, 50.0));
     pageMotor->addItem(new MenuInt("Ramp Type", (int*)&settings.get().rampType, 0, 1));
     pageMotor->addItem(new MenuBool("Auto Start", &settings.get().autoStart));
     pageMotor->addItem(new MenuAction("Back", [](){ ui.back(); }));

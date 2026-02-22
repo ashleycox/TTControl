@@ -106,17 +106,23 @@ Default angles depend on phase mode and can be adjusted.
 ### 2.3. Motor Control Features
 - **Max Amplitude Limit:** Configurable maximum amplitude to limit the output voltage to safe margins (global).
 - **Soft Start:** Configurable soft start with continuous duration from 0.0s to 10.0s (per speed).
+- **Soft Start:** Configurable soft start with continuous duration from 0.0s to 10.0s (per speed). Choose between Linear, S-Curve, Logarithmic, or Exponential ramping profiles.
 - **Frequency Dependent Amplitude (FDA):**
   - Global setting that scales the output amplitude based on the current frequency.
   - Maintains a constant V/f ratio (or similar) to equalize torque across speeds and during frequency ramps (e.g., startup).
   - Useful for Permanent Magnet Synchronous (PMSM) or BLDC motors.
   - Configurable as a percentage of maximum amplitude at zero frequency (0-100%).
   - Set to **0** to disable (default).
+- **Voltage/Frequency (V/f) Curves:** an advanced 3-point interpolation curve. Define a voltage boost percentage at a specific low frequency and a mid frequency to eliminate low-speed cogging without overdriving the motor mechanically. A master V/f blend% parameter controls the mix intensity linearly against the fully calculated target amplitude.
 - **Soft Start Curves:** Configurable three soft start acceleration curves (linear, logarithmic, exponential) (global).
 - **Reduced Amplitude Mode:** Configurable reduced amplitude mode (50-100% in 1% steps) to compromise between torque and noise (per speed).
 - **Reduced Amplitude Delay:** Configurable delay before amplitude reduction (0s to 60s) allows the motor to get up to speed before the torque is reduced (per speed).
 - **Startup Kick:** Configurable accelerated startup (1x, 2x, 3x, 4x frequency). Starts the motor at a higher speed to overcome drag in the drive system, reduces gradually to desired nominal frequency after configured duration. (Per speed).
 - **Kick Ramp Duration:** Configurable accelerated startup ramp duration (0.0s to 15.0s) (per speed).
+- **Active Brake Coasting:** Configurable motor braking mode to bring heavy platters to a halt precisely. Choose between:
+  - **Pulse Braking:** Pulses reverse torque to quickly stop rotation.
+  - **Ramp Braking:** Linearly ramps frequency down to `0Hz` while maintaining braking voltage.
+  - **Soft-Stop Coasting:** Gently reduces the frequency to a user-defined cutoff. During the reduction, the motor maintains full driving amplitude, ensuring the drive belt remains under tension. Once the cutoff is reached, power is instantly cut, allowing the remainder of the platter's momentum to dissipate.
 - **Smooth Speed Switching:** Smooth speed switching with optional ramping and configurable ramp duration, gently increases or decreases the speed when the speed is toggled and the motor is running.
 - **Switch Ramp Duration:** Configurable switch ramp duration (1S, 2S, 3S, 4S, 5S).
 - **S-Curve (Sigmoidal) Soft Start:**
@@ -199,6 +205,11 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
   - **Standby Toggle:** If this button is enabled, pressing it toggles standby. Works globally.
   - **Change Speed:** When this button is enabled, pressing it cycles the speeds in sequence. Works globally (updates menu if open).
   - **Start / Stop Motor:** If this button is enabled, it toggles motor start / stop from anywhere in the system (apart from in standby), including within the menu.
+- **Dashboard Mode:** When not in the menu, the display shows the current status. Press and rotate the primary encoder to cycle between:
+  1. **Standard:** Large Target Speed, Output Frequency, Output Amplitude (V), and elapsed Time.
+  2. **Stats:** Tracking counters for total hardware run time and current session time.
+  3. **Dim:** Auto-lowers contrast and shows only the speed target.
+  4. **Oscilloscope (Scope):** real-time Lissajous diagnostic dashboard drawing X/Y (Phase A / Phase B) waveforms sampled directly from the Pico's DMA bus to visually verify sine tracking integrity and structural Phase Offset health.
 - **Runtime Tracking:** Optional Runtime tracking to track session and total runtime. Useful for monitoring stylus usage or turntable maintenance schedules.
 - **Status Cycling:** Status display cycling (speed, frequency, phase mode, phase angles, runtime) with user settings to toggle the available statuses.
 - **Scrolling Messages:**

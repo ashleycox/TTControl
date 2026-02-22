@@ -151,28 +151,44 @@ void MotorController::update() {
                 // Linearly interpolate between FDA% (at 0Hz) and Target Amp (at Target Freq)
                 if (settings.get().freqDependentAmplitude > 0) {
                     float fdaRatio = (float)settings.get().freqDependentAmplitude / 100.0;
+                    // 3-Point V/f Curve Interpolation
+                    float currentF = waveform.getFrequency();
                     
-                    // Current ratio of frequency to target frequency
-                    float freqRatio = 0.0;
-                    if (_targetFreq > 0.1) {
-                         freqRatio = waveform.getFrequency() / _targetFreq;
-                         if (freqRatio > 1.0) freqRatio = 1.0;
-                         if (freqRatio < 0.0) freqRatio = 0.0;
+                    // User coordinates
+                    float fLow = settings.get().vfLowFreq;
+                    float vLow = (float)settings.get().vfLowBoost / 100.0;
+                    float fMid = settings.get().vfMidFreq;
+                    float vMid = (float)settings.get().vfMidBoost / 100.0;
+                    float fHigh = _targetFreq;
+                    float vHigh = 1.0; // Target freq implies 100% of calculated soft-start target
+                    
+                    float scaleFactor = 1.0;
+                    
+                    // Prevent divide-by-zero or malformed curves
+                    if (fLow >= fMid) fMid = fLow + 0.1;
+                    if (fMid >= fHigh) fHigh = fMid + 0.1;
+                    
+                    if (currentF <= fLow) {
+                        // Point 1 - Flat line up to fLow (or linear ramp from 0 to vLow)
+                        // Most motors need instant boost at 0Hz to break friction
+                        scaleFactor = vLow; 
+                    } else if (currentF > fLow && currentF <= fMid) {
+                        // Segment 1: Low to Mid
+                        float segmentProgress = (currentF - fLow) / (fMid - fLow);
+                        scaleFactor = vLow + ((vMid - vLow) * segmentProgress);
+                    } else {
+                        // Segment 2: Mid to High
+                        float segmentProgress = (currentF - fMid) / (fHigh - fMid);
+                        if (segmentProgress > 1.0) segmentProgress = 1.0;
+                        scaleFactor = vMid + ((vHigh - vMid) * segmentProgress);
                     }
                     
-                    // Scale amplitude: Start at FDA, ramp to 100% of calculated amp
-                    // Actually, FDA usually implies V/f constant or similar.
-                    // Here we want: Amp = FDA_Amp + (Target_Amp - FDA_Amp) * (Freq / TargetFreq)
-                    // But we must also respect the Soft Start ramp which is currently dictating _currentAmp.
-                    // The user requirement says: "scales the output amplitude with the frequency during all modes of operation"
-                    // So we should probably apply this scaling to the FINAL output amplitude, based on current frequency.
-                    
-                    // The Frequency Scale Factor defines the V/f scaling multiplier
-                    // Factor = FDA_Percent + (1.0 - FDA_Percent) * (CurrentFreq / TargetFreq)
-                    float scaleFactor = fdaRatio + ((1.0 - fdaRatio) * freqRatio);
+                    // The FDA master percentage can act as an overall multiplier/mix for the curve
+                    // If FDA = 100%, we use the full calculated curve. If FDA = 50%, we blend it halfway towards 1.0.
+                    float blendFDA = fdaRatio * scaleFactor + (1.0 - fdaRatio);
                     
                     // Apply this factor to the current amplitude state
-                    _currentAmp = _currentAmp * scaleFactor;
+                    _currentAmp = _currentAmp * blendFDA;
                 }
 
                 waveform.setAmplitude(_currentAmp);
@@ -390,9 +406,30 @@ void MotorController::handleBraking(uint32_t now) {
             }
         }
     }
+    else if (settings.get().brakeMode == BRAKE_SOFT_STOP) {
+        // Active Coasting: Gently bring frequency down to the configured cutoff point while maintaining driving torque
+        float startF = abs(_targetFreq);
+        float stopF = settings.get().softStopCutoff;
+        
+        // If we're already below the cutoff, or duration is 0, just stop instantly like BRAKE_OFF
+        if (startF <= stopF || duration <= 0) {
+            _currentAmp = 0.0;
+            waveform.setAmplitude(0.0);
+        } else {
+            // Ramp frequency down
+            float currentF = startF - ((startF - stopF) * (elapsed / duration));
+            waveform.setFrequency(currentF);
+            // Maintain full intended amplitude throughout the coast to ensure load tracks frequency
+            waveform.setAmplitude(_targetAmp);
+        }
+    }
     else {
-        // Default: Simple amplitude ramp down
-        _currentAmp = _targetAmp * (1.0 - (elapsed / duration));
+        // Default (BRAKE_OFF): Simple amplitude ramp down (or instant cut if duration is 0)
+        if (duration <= 0) {
+            _currentAmp = 0.0;
+        } else {
+            _currentAmp = _targetAmp * (1.0 - (elapsed / duration));
+        }
         waveform.setAmplitude(_currentAmp);
     }
 }

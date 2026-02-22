@@ -57,6 +57,9 @@ public:
 
     // --- Interrupt Handler ---
     static void dmaInterruptHandler();
+    
+    // --- Dashboard Diagnostics ---
+    int16_t getSample(int channel);
 
 private:
     // Double Buffering State
@@ -112,7 +115,6 @@ private:
     volatile int _currentBufferIndex; // 0 or 1
     
     void generateLUT();
-    int16_t getSample(int channel);
     void fillBuffer(int bufferIndex);
     void setupPWM();
     void setupDMA();

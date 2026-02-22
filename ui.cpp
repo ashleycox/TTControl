@@ -11,6 +11,7 @@
 #include "motor.h"
 #include "bitmaps.h"
 #include "hal.h" // Added HAL
+#include "waveform.h" // Added for Scope View
 #include <Fonts/FreeSans12pt7b.h>
 
 extern MenuPage* pageMain;
@@ -373,20 +374,33 @@ void UserInterface::handleInput() {
             }
         }
         
-        // 4. Rotate: Change Speed OR Cycle Status (if pressed)
+        // 4. Rotate: Change Speed
         if (delta != 0) {
-            if (_input.isButtonDown()) {
-                // 6. Press and Rotate: Cycle Status Displays
-                // Cycle _statusMode (0=Standard, 1=Stats, 2=Dim)
-                if (delta > 0) _statusMode = (_statusMode + 1) % 3;
-                else _statusMode = (_statusMode + 2) % 3; // Wrap backwards
-            } else {
-                // 5. Rotate: Change Speed
-                // Only if not in standby?
-                if (!motor.isStandby()) {
-                    motor.adjustSpeed(delta); 
-                }
-            }
+            // If Pitch button is held while turning, maybe we shouldn't change speed?
+            // Handled by InputManager (should send Pitch event)
+            // if (delta > 0) motor.setSpeed(SPEED_78); // Temporary simplification, proper cycle next
+            // if (delta < 0) motor.setSpeed(SPEED_33);
+            
+            // Real cycle logic:
+            SpeedMode s = motor.getSpeed();
+            int currentIdx = (int)s;
+            currentIdx += delta;
+            if (currentIdx > 2) currentIdx = 2; // Assuming 0,1,2 for 33,45,78
+            if (currentIdx < 0) currentIdx = 0;
+            if (currentIdx == 2 && !settings.get().enable78rpm) currentIdx = 1; // Block 78 if disabled
+            
+            motor.setSpeed((SpeedMode)currentIdx);
+        }
+        
+        // 5. Press + Rotate (or just Press depending on UI design): Cycle Status Views
+        // TTControl "Press + Rotate" -> EVT_NAV_UP/DOWN
+        if (evt == EVT_NAV_UP || evt == EVT_NAV_DOWN) {
+            // Cycle Status Views (0=Standard, 1=Stats, 2=Dim, 3=Scope)
+            _statusMode++;
+            if (_statusMode > 3) _statusMode = 0;
+            // Don't go to Dim mode manually usually, maybe just 0,1,3?
+            // We'll let them cycle through all 4. 
+            // If they land on Dim, the screen dims immediately.
         }
     }
 }
@@ -623,6 +637,49 @@ void UserInterface::drawDashboard() {
         int hours = totalSec / 3600;
         int tMin = (totalSec % 3600) / 60;
         display.print(hours); display.print("h "); display.print(tMin); display.print("m");
+        
+        return;
+    }
+    
+    // Mode 3: Oscilloscope
+    // Visualizing real-time DMA outputs. Top/Center for speed, right side for plotting.
+    if (_statusMode == 3) {
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 20);
+        display.print("SCOPE");
+        
+        display.setCursor(0, 40);
+        display.print(motor.getCurrentFrequency(), 1);
+        display.print("Hz");
+        
+        // Draw the Scope box (60x60 on the right side: X=64 to 124, Y=2 to 62)
+        display.drawRect(64, 2, 60, 60, SSD1306_WHITE);
+        
+        if (motor.isRunning()) {
+            // Get samples: Phase A (0) and Phase B (1)
+            extern class WaveformGenerator waveform; // Reference global
+            
+            // X-Axis = Phase A (0). Y-Axis = Phase B (1)
+            // Raw DMA samples are typically -32768 to 32767 for a full 16-bit sine wave.
+            int16_t sampleA = waveform.getSample(0);
+            int16_t sampleB = waveform.getSample(1);
+            
+            // Normalize: Divide by 1100 approx to fit in a +/- 29 pixel space
+            // Assuming max amplitude hits +/- 32767
+            int px = 64 + 30 + (sampleA / 1129);
+            int py = 2 + 30 - (sampleB / 1129); // Invert Y so positive is up
+            
+            // Bounds check
+            if (px < 65) px = 65; if (px > 123) px = 123;
+            if (py < 3) py = 3; if (py > 61) py = 61;
+            
+            // Draw a slightly thick dot for visibility
+            display.fillRect(px-1, py-1, 3, 3, SSD1306_WHITE);
+        } else {
+            // Stopped: Draw a dot perfectly in the center
+            display.fillRect(64+29, 2+29, 3, 3, SSD1306_WHITE);
+        }
         
         return;
     }
