@@ -403,13 +403,20 @@ float MotorController::calculateSoftStartAmp(float elapsed, float duration) {
     
     if (settings.get().rampType == RAMP_SCURVE) {
         // Sine S-Curve: 0.5 * (1 - cos(PI * t))
-        // Maps 0.0-1.0 to 0.0-1.0 with ease-in/ease-out
         return _targetAmp * (0.5 * (1.0 - cos(PI * t)));
     } else {
-        // Linear
-        return _targetAmp * t;
+        uint8_t curve = settings.get().softStartCurve;
+        if (curve == 1) {
+            // Logarithmic (Base 10 mapping 0-1 to 0-1)
+            return _targetAmp * log10(1.0 + 9.0 * t);
+        } else if (curve == 2) {
+            // Exponential (Base 10 mapping 0-1 to 0-1)
+            return _targetAmp * (pow(10.0, t) - 1.0) / 9.0;
+        } else {
+            // Linear
+            return _targetAmp * t;
+        }
     }
-    return _targetAmp * t; // Should be unreachable but satisfies compiler
 }
 
 void MotorController::toggleStartStop() {

@@ -105,7 +105,7 @@ Default angles depend on phase mode and can be adjusted.
 
 ### 2.3. Motor Control Features
 - **Max Amplitude Limit:** Configurable maximum amplitude to limit the output voltage to safe margins (global).
-- **Soft Start:** Configurable soft start with 3 duration options (0.5s, 1s, 1.5s) (per speed).
+- **Soft Start:** Configurable soft start with continuous duration from 0.0s to 10.0s (per speed).
 - **Frequency Dependent Amplitude (FDA):**
   - Global setting that scales the output amplitude based on the current frequency.
   - Maintains a constant V/f ratio (or similar) to equalize torque across speeds and during frequency ramps (e.g., startup).
@@ -114,9 +114,9 @@ Default angles depend on phase mode and can be adjusted.
   - Set to **0** to disable (default).
 - **Soft Start Curves:** Configurable three soft start acceleration curves (linear, logarithmic, exponential) (global).
 - **Reduced Amplitude Mode:** Configurable reduced amplitude mode (50-100% in 1% steps) to compromise between torque and noise (per speed).
-- **Reduced Amplitude Delay:** Configurable delay before amplitude reduction (1S, 2S, 3S, 5S, 10S, 15S, 20S) allows the motor to get up to speed before the torque is reduced (per speed).
+- **Reduced Amplitude Delay:** Configurable delay before amplitude reduction (0s to 60s) allows the motor to get up to speed before the torque is reduced (per speed).
 - **Startup Kick:** Configurable accelerated startup (1x, 2x, 3x, 4x frequency). Starts the motor at a higher speed to overcome drag in the drive system, reduces gradually to desired nominal frequency after configured duration. (Per speed).
-- **Kick Ramp Duration:** Configurable accelerated startup ramp duration (1S, 2S, 3S, 4S, 5S, 10S, 15S) (per speed).
+- **Kick Ramp Duration:** Configurable accelerated startup ramp duration (0.0s to 15.0s) (per speed).
 - **Smooth Speed Switching:** Smooth speed switching with optional ramping and configurable ramp duration, gently increases or decreases the speed when the speed is toggled and the motor is running.
 - **Switch Ramp Duration:** Configurable switch ramp duration (1S, 2S, 3S, 4S, 5S).
 - **S-Curve (Sigmoidal) Soft Start:**
@@ -361,9 +361,10 @@ The menu structure is designed for a data-driven implementation.
 - **Ph 2-4 Offs:** Phase offsets for multi-phase motors (Per-Speed).
 
 ### Motor Control
-- **Soft Start**: Adjustable duration (0-10s) to ramp up amplitude gently.
+- **Soft Start**: Adjustable duration (0.0s to 10.0s) to ramp up amplitude gently.
 - **FDA (Frequency Dependent Amplitude)**: Scales output amplitude based on frequency to maintain constant torque across speeds and during ramps. Useful for PM/BLDC motors. Set to **0** to disable (default).
 - **Reduced Amplitude**: Automatically lower voltage after spin-up to reduce motor noise and heat (50-100%).
+- **Amp Delay**: Configurable delay before amplitude reduction (0s to 60s).
 - **Startup Kick**: Momentary frequency boost (up to 4x) to overcome static friction.
 - **Kick Mult:** Startup kick multiplier (Per-Speed).
 - **Kick Dur:** Startup kick duration (s) (Per-Speed).

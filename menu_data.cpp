@@ -226,6 +226,7 @@ void buildMenuSystem() {
     pageMotor->addItem(new MenuFloat("Brk Pulse", &settings.get().brakePulseGap, 0.1, 0.1, 2.0));
     pageMotor->addItem(new MenuFloat("Brk StartF", &settings.get().brakeStartFreq, 1.0, 10.0, 200.0));
     pageMotor->addItem(new MenuFloat("Brk StopF", &settings.get().brakeStopFreq, 1.0, 0.0, 50.0));
+    pageMotor->addItem(new MenuInt("Ramp Type", (int*)&settings.get().rampType, 0, 1));
     pageMotor->addItem(new MenuBool("Auto Start", &settings.get().autoStart));
     pageMotor->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
