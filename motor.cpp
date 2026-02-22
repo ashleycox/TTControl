@@ -151,7 +151,6 @@ void MotorController::update() {
                 // Linearly interpolate between FDA% (at 0Hz) and Target Amp (at Target Freq)
                 if (settings.get().freqDependentAmplitude > 0) {
                     float fdaRatio = (float)settings.get().freqDependentAmplitude / 100.0;
-                    float fdaAmp = _targetAmp * fdaRatio;
                     
                     // Current ratio of frequency to target frequency
                     float freqRatio = 0.0;
@@ -168,39 +167,8 @@ void MotorController::update() {
                     // The user requirement says: "scales the output amplitude with the frequency during all modes of operation"
                     // So we should probably apply this scaling to the FINAL output amplitude, based on current frequency.
                     
-                    // Let's recalculate based on strict V/f from FDA baseline
-                    float baseAmp = fdaAmp + ((_targetAmp - fdaAmp) * freqRatio);
-                    
-                    // However, we also have Soft Start and Reduced Amplitude modes.
-                    // Soft Start is a time-based ramp of amplitude.
-                    // FDA is a frequency-based ramp of amplitude.
-                    // If we are Soft Starting, we are ramping Amp from 0 to Target.
-                    // If we are Frequency Ramping (Startup Kick), we are ramping Freq.
-                    
-                    // If we simply apply FDA scaling to the _targetAmp, then Soft Start might conflict.
-                    // Let's apply FDA as a ceiling or modifier?
-                    // "allow the current and hence torque to be equalised between speeds, and during start-up when a frequency ramp is used"
-                    
-                    // Interpretation: The amplitude should be a function of frequency.
-                    // Amp(f) = FDA_Amp + (Max_Amp - FDA_Amp) * (f / f_max)
-                    // But "Max_Amp" here is the target amplitude for the current speed.
-                    
-                    // So, if we are at 50% frequency, we should be at roughly 50% amplitude (if FDA=0).
-                    // If FDA=10 (10% boost at 0Hz), then at 50% freq we are at 10 + (90 * 0.5) = 55%.
-                    
-                    // We should apply this scaling to the _currentAmp derived from other states?
-                    // No, FDA usually overrides other amplitude logic when frequency is the dominant variable.
-                    // But Soft Start is time-based.
-                    
-                    // If we are in STATE_STARTING with a Kick Ramp (Frequency Ramp), FDA is crucial.
-                    // If we are in STATE_STARTING with Soft Start (Fixed Freq, Amp Ramp), FDA is constant (since Freq is constant).
-                    
-                    // Let's apply FDA scaling as a factor on the *intended* amplitude, or just replace it?
-                    // "scales the output amplitude with the frequency"
-                    
-                    // Let's define the "Frequency Scale Factor":
+                    // The Frequency Scale Factor defines the V/f scaling multiplier
                     // Factor = FDA_Percent + (1.0 - FDA_Percent) * (CurrentFreq / TargetFreq)
-                    
                     float scaleFactor = fdaRatio + ((1.0 - fdaRatio) * freqRatio);
                     
                     // Apply this factor to the current amplitude state

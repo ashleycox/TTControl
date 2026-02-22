@@ -38,7 +38,7 @@ void MenuPage::next() {
     
     // Cycle selection forward
     _selection++;
-    if (_selection >= _items.size()) _selection = 0;
+    if (_selection >= (int)_items.size()) _selection = 0;
     
     // Scroll logic: Keep selection within the visible window (assuming 5 lines)
     if (_selection >= _offset + 5) _offset = _selection - 4;
@@ -50,7 +50,7 @@ void MenuPage::prev() {
     
     // Cycle selection backward
     _selection--;
-    if (_selection < 0) _selection = _items.size() - 1;
+    if (_selection < 0) _selection = (int)_items.size() - 1;
     
     // Scroll logic
     if (_selection >= _offset + 5) _offset = _selection - 4;

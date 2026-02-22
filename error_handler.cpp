@@ -96,7 +96,7 @@ void ErrorHandler::getLogLines(std::vector<String>& lines, int maxLines) {
     
     // Read lines from the beginning of the file
     // TODO: For large logs, implementing a tail reader would be more efficient
-    while (f.available() && lines.size() < maxLines) {
+    while (f.available() && (int)lines.size() < maxLines) {
         String line = f.readStringUntil('\n');
         line.trim();
         if (line.length() > 0) {

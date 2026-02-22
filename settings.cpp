@@ -207,58 +207,56 @@ struct GlobalSettingsV3 {
 };
 
 bool Settings::migrate(uint32_t oldVersion, File& f) {
-    // Initialize current defaults first to ensure new fields have safe values
     GlobalSettings newSettings;
-    // We can't use setDefaults() directly on a local var easily without refactoring, 
-    // but we can use the main _data and then copy back.
-    // Better: Load legacy into temp, then copy fields to _data (which is already defaulted if we call setDefaults first)
+    GlobalSettings backup = _data;
     
-    setDefaults(); // Initialize _data with defaults (including new fields)
+    // Temporarily use _data to populate defaults including new fields,
+    // then move them into newSettings.
+    setDefaults(); 
+    newSettings = _data;
+    _data = backup; // Restore live state
     
     if (oldVersion == 2) {
         GlobalSettingsV2 v2;
         if (f.read((uint8_t*)&v2, sizeof(GlobalSettingsV2)) != sizeof(GlobalSettingsV2)) return false;
         
         // Copy common fields
-        _data.phaseMode = v2.phaseMode;
-        _data.maxAmplitude = v2.maxAmplitude;
-        _data.softStartCurve = v2.softStartCurve;
-        _data.smoothSwitching = v2.smoothSwitching;
-        _data.switchRampDuration = v2.switchRampDuration;
-        _data.brakeMode = v2.brakeMode;
-        _data.brakeDuration = v2.brakeDuration;
-        _data.brakePulseGap = v2.brakePulseGap;
-        _data.brakeStartFreq = v2.brakeStartFreq;
-        _data.brakeStopFreq = v2.brakeStopFreq;
-        _data.relayActiveHigh = v2.relayActiveHigh;
-        _data.muteRelayLinkStandby = v2.muteRelayLinkStandby;
-        _data.muteRelayLinkStartStop = v2.muteRelayLinkStartStop;
-        _data.powerOnRelayDelay = v2.powerOnRelayDelay;
-        _data.displayBrightness = v2.displayBrightness;
-        _data.displaySleepDelay = v2.displaySleepDelay;
-        _data.screensaverEnabled = v2.screensaverEnabled;
-        _data.autoDimDelay = v2.autoDimDelay;
-        _data.showRuntime = v2.showRuntime;
-        _data.errorDisplayEnabled = v2.errorDisplayEnabled;
-        _data.errorDisplayDuration = v2.errorDisplayDuration;
-        _data.autoStandbyDelay = v2.autoStandbyDelay;
-        _data.autoStart = v2.autoStart;
-        _data.autoBoot = v2.autoBoot;
-        _data.pitchResetOnStop = v2.pitchResetOnStop;
-        memcpy(_data.speeds, v2.speeds, sizeof(v2.speeds));
-        memcpy(_data.presetNames, v2.presetNames, sizeof(v2.presetNames));
-        _data.totalRuntime = v2.totalRuntime;
-        _data.reverseEncoder = v2.reverseEncoder;
-        _data.pitchStepSize = v2.pitchStepSize;
-        _data.rampType = v2.rampType;
-        _data.screensaverMode = v2.screensaverMode;
-        _data.enable78rpm = v2.enable78rpm;
-        _data.currentSpeed = v2.currentSpeed;
+        newSettings.phaseMode = v2.phaseMode;
+        newSettings.maxAmplitude = v2.maxAmplitude;
+        newSettings.softStartCurve = v2.softStartCurve;
+        newSettings.smoothSwitching = v2.smoothSwitching;
+        newSettings.switchRampDuration = v2.switchRampDuration;
+        newSettings.brakeMode = v2.brakeMode;
+        newSettings.brakeDuration = v2.brakeDuration;
+        newSettings.brakePulseGap = v2.brakePulseGap;
+        newSettings.brakeStartFreq = v2.brakeStartFreq;
+        newSettings.brakeStopFreq = v2.brakeStopFreq;
+        newSettings.relayActiveHigh = v2.relayActiveHigh;
+        newSettings.muteRelayLinkStandby = v2.muteRelayLinkStandby;
+        newSettings.muteRelayLinkStartStop = v2.muteRelayLinkStartStop;
+        newSettings.powerOnRelayDelay = v2.powerOnRelayDelay;
+        newSettings.displayBrightness = v2.displayBrightness;
+        newSettings.displaySleepDelay = v2.displaySleepDelay;
+        newSettings.screensaverEnabled = v2.screensaverEnabled;
+        newSettings.autoDimDelay = v2.autoDimDelay;
+        newSettings.showRuntime = v2.showRuntime;
+        newSettings.errorDisplayEnabled = v2.errorDisplayEnabled;
+        newSettings.errorDisplayDuration = v2.errorDisplayDuration;
+        newSettings.autoStandbyDelay = v2.autoStandbyDelay;
+        newSettings.autoStart = v2.autoStart;
+        newSettings.autoBoot = v2.autoBoot;
+        newSettings.pitchResetOnStop = v2.pitchResetOnStop;
+        memcpy(newSettings.speeds, v2.speeds, sizeof(v2.speeds));
+        memcpy(newSettings.presetNames, v2.presetNames, sizeof(v2.presetNames));
+        newSettings.totalRuntime = v2.totalRuntime;
+        newSettings.reverseEncoder = v2.reverseEncoder;
+        newSettings.pitchStepSize = v2.pitchStepSize;
+        newSettings.rampType = v2.rampType;
+        newSettings.screensaverMode = v2.screensaverMode;
+        newSettings.enable78rpm = v2.enable78rpm;
+        newSettings.currentSpeed = v2.currentSpeed;
         
-        // New fields for V3/V4 are already set by setDefaults()
-        // freqDependentAmplitude = 0
-        // bootSpeed = 3
-        
+        _data = newSettings;
         save();
         return true;
     }
@@ -267,45 +265,43 @@ bool Settings::migrate(uint32_t oldVersion, File& f) {
         if (f.read((uint8_t*)&v3, sizeof(GlobalSettingsV3)) != sizeof(GlobalSettingsV3)) return false;
         
         // Copy common fields (V3 is V2 + FDA)
-        _data.phaseMode = v3.phaseMode;
-        _data.maxAmplitude = v3.maxAmplitude;
-        _data.softStartCurve = v3.softStartCurve;
-        _data.smoothSwitching = v3.smoothSwitching;
-        _data.switchRampDuration = v3.switchRampDuration;
-        _data.brakeMode = v3.brakeMode;
-        _data.brakeDuration = v3.brakeDuration;
-        _data.brakePulseGap = v3.brakePulseGap;
-        _data.brakeStartFreq = v3.brakeStartFreq;
-        _data.brakeStopFreq = v3.brakeStopFreq;
-        _data.relayActiveHigh = v3.relayActiveHigh;
-        _data.muteRelayLinkStandby = v3.muteRelayLinkStandby;
-        _data.muteRelayLinkStartStop = v3.muteRelayLinkStartStop;
-        _data.powerOnRelayDelay = v3.powerOnRelayDelay;
-        _data.displayBrightness = v3.displayBrightness;
-        _data.displaySleepDelay = v3.displaySleepDelay;
-        _data.screensaverEnabled = v3.screensaverEnabled;
-        _data.autoDimDelay = v3.autoDimDelay;
-        _data.showRuntime = v3.showRuntime;
-        _data.errorDisplayEnabled = v3.errorDisplayEnabled;
-        _data.errorDisplayDuration = v3.errorDisplayDuration;
-        _data.autoStandbyDelay = v3.autoStandbyDelay;
-        _data.autoStart = v3.autoStart;
-        _data.autoBoot = v3.autoBoot;
-        _data.pitchResetOnStop = v3.pitchResetOnStop;
-        memcpy(_data.speeds, v3.speeds, sizeof(v3.speeds));
-        memcpy(_data.presetNames, v3.presetNames, sizeof(v3.presetNames));
-        _data.totalRuntime = v3.totalRuntime;
-        _data.reverseEncoder = v3.reverseEncoder;
-        _data.pitchStepSize = v3.pitchStepSize;
-        _data.rampType = v3.rampType;
-        _data.screensaverMode = v3.screensaverMode;
-        _data.enable78rpm = v3.enable78rpm;
-        _data.freqDependentAmplitude = v3.freqDependentAmplitude;
-        _data.currentSpeed = v3.currentSpeed;
+        newSettings.phaseMode = v3.phaseMode;
+        newSettings.maxAmplitude = v3.maxAmplitude;
+        newSettings.softStartCurve = v3.softStartCurve;
+        newSettings.smoothSwitching = v3.smoothSwitching;
+        newSettings.switchRampDuration = v3.switchRampDuration;
+        newSettings.brakeMode = v3.brakeMode;
+        newSettings.brakeDuration = v3.brakeDuration;
+        newSettings.brakePulseGap = v3.brakePulseGap;
+        newSettings.brakeStartFreq = v3.brakeStartFreq;
+        newSettings.brakeStopFreq = v3.brakeStopFreq;
+        newSettings.relayActiveHigh = v3.relayActiveHigh;
+        newSettings.muteRelayLinkStandby = v3.muteRelayLinkStandby;
+        newSettings.muteRelayLinkStartStop = v3.muteRelayLinkStartStop;
+        newSettings.powerOnRelayDelay = v3.powerOnRelayDelay;
+        newSettings.displayBrightness = v3.displayBrightness;
+        newSettings.displaySleepDelay = v3.displaySleepDelay;
+        newSettings.screensaverEnabled = v3.screensaverEnabled;
+        newSettings.autoDimDelay = v3.autoDimDelay;
+        newSettings.showRuntime = v3.showRuntime;
+        newSettings.errorDisplayEnabled = v3.errorDisplayEnabled;
+        newSettings.errorDisplayDuration = v3.errorDisplayDuration;
+        newSettings.autoStandbyDelay = v3.autoStandbyDelay;
+        newSettings.autoStart = v3.autoStart;
+        newSettings.autoBoot = v3.autoBoot;
+        newSettings.pitchResetOnStop = v3.pitchResetOnStop;
+        memcpy(newSettings.speeds, v3.speeds, sizeof(v3.speeds));
+        memcpy(newSettings.presetNames, v3.presetNames, sizeof(v3.presetNames));
+        newSettings.totalRuntime = v3.totalRuntime;
+        newSettings.reverseEncoder = v3.reverseEncoder;
+        newSettings.pitchStepSize = v3.pitchStepSize;
+        newSettings.rampType = v3.rampType;
+        newSettings.screensaverMode = v3.screensaverMode;
+        newSettings.enable78rpm = v3.enable78rpm;
+        newSettings.freqDependentAmplitude = v3.freqDependentAmplitude;
+        newSettings.currentSpeed = v3.currentSpeed;
         
-        // New fields for V4 are already set by setDefaults()
-        // bootSpeed = 3
-        
+        _data = newSettings;
         save();
         return true;
     }

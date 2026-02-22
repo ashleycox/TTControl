@@ -462,35 +462,14 @@ void UserInterface::drawGoodbye() {
 void UserInterface::drawMenu() {
     // Handle Transitions
     int xOffset = 0;
-    MenuPage* pageToDraw = _currentPage;
     
     if (_transitionDirection != 0) {
-        // Ease In/Out
         float t = _transitionProgress;
-        // Simple linear for now
-        int offsetPixels = (int)(128.0 * (1.0 - t));
         
         if (_transitionDirection == 1) { // Forward (Slide Left)
-            // Current page moves left (-offset), Next page moves in from right
-            // Wait, we need to draw BOTH?
-            // Drawing both might be slow on I2C.
-            // Let's just draw the incoming page sliding in?
-            // Or just draw the current page sliding out?
-            // For simplicity on 128x64, let's just slide the content of the *new* page in.
-            // But we don't have _nextPage set in the state properly for "Forward" logic in update().
-            // Actually update() swaps them at end.
-            // Let's simplify: No complex dual-draw. Just slide the current page content.
-            // If we are transitioning, we assume _currentPage is the target.
-            // But wait, update() handles the swap at end of transition.
-            // So during transition, _currentPage is the OLD page?
-            // Let's fix the logic:
-            // When navigating, set _nextPage and start transition.
-            // During transition, draw _currentPage sliding OUT, and _nextPage sliding IN.
-            // This requires `drawPage(MenuPage* p, int x)` helper.
-            // For now, let's just implement Smooth Scrolling and static page switch to avoid complexity.
-            // User asked for "Menu Slide Transitions".
-            // Let's try a simple slide:
-            // If transition active, draw _currentPage at offset.
+            xOffset = (int)(128.0 * (1.0 - t));
+        } else if (_transitionDirection == -1) { // Back (Slide Right)
+            xOffset = (int)(-128.0 * (1.0 - t));
         }
     }
     
@@ -498,9 +477,9 @@ void UserInterface::drawMenu() {
     display.setTextColor(SSD1306_WHITE);
     
     // Title
-    display.setCursor(0, 0);
+    display.setCursor(0 + xOffset, 0);
     display.print(_currentPage->getTitle());
-    display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
+    display.drawLine(0 + xOffset, 10, 128 + xOffset, 10, SSD1306_WHITE);
     
     // Smooth Scrolling Logic
     int selection = _currentPage->getSelection();
@@ -508,10 +487,6 @@ void UserInterface::drawMenu() {
     
     // Interpolate
     _smoothScrollY += (targetY - _smoothScrollY) * 0.3;
-    
-    // Viewport
-    int visibleHeight = 50;
-    int startY = 15;
     
     // Calculate offset based on smooth scroll
     // We want the selected item to be roughly centered or kept in view
@@ -532,26 +507,26 @@ void UserInterface::drawMenu() {
         
         // Highlight Box
         if (idx == selection) {
-            display.fillRect(0, y - 1, 128, 11, SSD1306_WHITE);
+            display.fillRect(0 + xOffset, y - 1, 128, 11, SSD1306_WHITE);
             display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); // Invert text
         } else {
             display.setTextColor(SSD1306_WHITE);
         }
         
-        display.setCursor(2, y);
+        display.setCursor(2 + xOffset, y);
         display.print(item->getLabel());
         
         // Value
         char valBuf[16];
         item->getValueString(valBuf, sizeof(valBuf));
         if (valBuf[0] != 0) {
-            display.setCursor(80, y); // Right align-ish
+            display.setCursor(80 + xOffset, y); // Right align-ish
             display.print(valBuf);
         }
         
         // Dirty Indicator
         if (item->isDirty()) {
-            display.setCursor(120, y);
+            display.setCursor(120 + xOffset, y);
             display.print(F("*"));
         }
     }
@@ -561,7 +536,7 @@ void UserInterface::drawMenu() {
         int sbHeight = (visible * 50) / total;
         if (sbHeight < 2) sbHeight = 2;
         int sbY = 15 + (offset * 50) / total;
-        display.fillRect(126, sbY, 2, sbHeight, SSD1306_WHITE);
+        display.fillRect(126 + xOffset, sbY, 2, sbHeight, SSD1306_WHITE);
     }
 }
 
