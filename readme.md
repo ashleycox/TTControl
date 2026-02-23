@@ -362,89 +362,96 @@ Use these keys with `set` and `get`. Speed-specific settings apply to the **curr
 The menu structure is designed for a data-driven implementation.
 
 ### Main Menu
+- **Exit Safe Mode** (Only visible if currently in Safe Mode: forces watchdog reboot targetting normal flash load)
 - **Edit Speed: [33/45/78]** (Toggle speed context for submenus)
 - **Speed Tuning:** Frequency, Limits, Filters (Per-Speed).
-- **Phase:** Phase Mode (Global), Offsets (Per-Speed).
-- **Motor:** Amps/Kick (Per-Speed), Braking (Global).
-- **Power:** Relays, Auto Standby/Boot (Global).
+- **Phase Control:** Phase Mode (Global), Offsets (Per-Speed).
+- **Motor Control:** Amps/Kick (Per-Speed), Braking (Global).
+- **Power Control:** Relays, Auto Standby/Boot (Global).
 - **Display:** Sleep, Dim, Saver, Errors (Global).
 - **System:** Pitch Reset, 78RPM, Logs (Global).
 - **Presets:** Load, Save, Rename, and Clear presets.
 - **Save & Exit:** Saves all changes to flash and returns to dashboard.
 - **Cancel:** Discards changes and reloads from flash.
 
-### Speed Tuning (Per-Speed)
+### Speed Tuning
 - **Frequency:** Nominal frequency (Hz).
-- **Min/Max Freq:** Limits for pitch control.
-- **Filt Type:** Digital Filter Type (None, IIR, FIR).
+- **Min Freq:** Limit for pitch control.
+- **Max Freq:** Limit for pitch control.
+- **Filt Type:** Digital Filter Type (0=None, 1=IIR, 2=FIR).
 - **IIR Alpha:** IIR Filter smoothing factor.
-- **FIR Prof:** FIR Filter Profile (Gentle, Medium, Aggressive).
+- **FIR Prof:** FIR Filter Profile (0=Gentle, 1=Medium, 2=Aggressive).
 
 ### Phase Control
 - **Mode (Glb):** 1, 2, 3, or 4 phase operation.
-- **Ph 2-4 Offs:** Phase offsets for multi-phase motors (Per-Speed).
+- **Ph 2 Offs:** Phase 2 offset for multi-phase motors.
+- **Ph 3 Offs:** Phase 3 offset for multi-phase motors.
+- **Ph 4 Offs:** Phase 4 offset for multi-phase motors.
+- **Sweep Diag.:** Symmetric Resonance Sweep mode.
 
 ### Motor Control
 - **Soft Start**: Adjustable duration (0.0s to 10.0s) to ramp up amplitude gently.
-- **FDA (Frequency Dependent Amplitude)**: Scales output amplitude based on frequency to maintain constant torque across speeds and during ramps. Useful for PM/BLDC motors. Set to **0** to disable (default).
-- **Reduced Amplitude**: Automatically lower voltage after spin-up to reduce motor noise and heat (50-100%).
+- **Red. Amp %**: Automatically lower voltage after spin-up to reduce motor noise and heat (50-100%).
 - **Amp Delay**: Configurable delay before amplitude reduction (0s to 60s).
-- **Startup Kick**: Momentary frequency boost (up to 4x) to overcome static friction.
-- **Kick Mult:** Startup kick multiplier (Per-Speed).
-- **Kick Dur:** Startup kick duration (s) (Per-Speed).
-- **Kick Ramp:** Ramp down duration from kick (s) (Per-Speed).
-- **Max Amp %:** Global maximum amplitude limit.
-- **SS Curve:** Soft Start Curve (Linear, Log, Exp).
-- **Smooth Sw:** Enable smooth frequency ramping between speeds.
-- **Sw Ramp:** Duration (s) for speed switch ramp.
-- **Brake Mode:** Off, Pulse, or Ramp.
-- **Brake Dur:** Braking duration (s).
-- **Brk Pulse:** Gap between pulses in Pulse mode (s).
-- **Brk Start/Stop F:** Frequency ramp range for Ramp mode.
-- **Ramp Type:** Soft Start Profile (0=Linear, 1=S-Curve).
-- **Auto Start:** Start motor immediately after boot/wake.
+- **Kick Mult**: Startup kick multiplier.
+- **Kick Dur**: Startup kick duration.
+- **Kick Ramp**: Ramp down duration from kick.
+- **V/f Blend%**: Voltage/Frequency intensity mix against the base amplitude.
+- **V/f LowHz**: Frequency defining the low-speed V/f boost point.
+- **V/f Low%**: Voltage boost % at LowHz.
+- **V/f MidHz**: Frequency defining the mid-speed V/f boost point.
+- **V/f Mid%**: Voltage boost % at MidHz.
+- **Max Amp %**: Global maximum amplitude limit.
+- **SS Curve**: Soft Start Profile (0=Linear, 1=Log, 2=Exp).
+- **Smooth Sw**: Enable smooth frequency ramping between speeds.
+- **Sw Ramp**: Duration (s) for speed switch ramp.
+- **Brake Mode**: Braking mechanism (0=Off, 1=Pulse, 2=Ramp, 3=SoftStop).
+- **Brake Dur**: Braking duration (s).
+- **Brk Pulse**: Gap between pulses in Pulse mode (s).
+- **Brk StartF**: Frequency ramp range start for Ramp mode.
+- **Brk StopF**: Frequency ramp range stop for Ramp mode.
+- **Brk Cutoff**: Frequency when power drops in SoftStop coasting.
+- **Ramp Type**: Frequency soft start style (0=Linear, 1=S-Curve).
+- **Auto Start**: Start motor immediately after boot/wake.
 
 ### Power Control
-- **Rly: ActHi:** Toggle relay logic (Active High/Low).
-- **Rly: Stby:** Mute relays when entering Standby.
+- **Rly: ActHi:** Toggle relay logic (Active High/Low). (If `ENABLE_MUTE_RELAYS`)
+- **Rly: Stby:** Mute relays when entering Standby. (If `ENABLE_STANDBY`)
 - **Rly: S/S:** Unmute relays on Start, Mute on Stop.
 - **Rly: Delay:** Power-on delay for relays (s).
-- **Auto Stby:** Auto-standby delay (min).
+- **Auto Stby:** Auto-standby delay (min). (If `ENABLE_STANDBY`)
 - **Auto Boot:** Boot directly to operation (bypass standby).
 
 ### Display
 - **Brightness:** OLED Brightness/Contrast (0-255).
-- **Sleep Dly:** Display sleep delay (off/10s/etc).
+- **Sleep Dly:** Display sleep delay (s).
 - **Scrn Saver:** Enable screensaver in standby.
-- **Saver Mode:** Select screensaver animation:
-    - **Bounce:** Bouncing text (Default).
-    - **Matrix:** Digital rain effect.
-    - **Lissajous:** Rotating 3D curves.
+- **Saver Mode:** Select screensaver animation (0=Bounce, 1=Matrix, 2=Lissajous).
 - **Auto Dim:** Auto-dim delay (min).
 - **Show Runtime:** Toggle runtime display on dashboard.
 - **Err Display:** Toggle on-screen error messages.
 - **Err Dur:** Duration of error messages (s).
 
 ### System
-- **Ver:** Firmware Version.
+- **Ver:** Firmware Version info.
 - **Rev Encoder:** Reverse the direction of the main encoder.
 - **Pitch Step:** Step size for pitch control (0.01% - 1.0%).
 - **Pitch Reset:** Reset pitch to 0% on motor stop.
 - **Enable 78:** Toggle availability of 78 RPM mode.
-- **Error Log:** View and clear system error logs.
-- **Boot Speed:** Select default speed on boot (0=33, 1=45, 2=78, 3=Last Used).
-- **Reset Runtime:** Reset the total runtime counter (with confirmation).
-- **Fact Reset:** Factory Reset.
+- **Boot Speed:** Select default speed on boot (0=33, 1=45, 2=Last Used).
 - **Welcome Msg:** Configurable welcome message on boot.
 - **Goodbye Msg:** Configurable goodbye message on shutdown.
+- **Error Log:** View and clear system error logs.
+- **Reset Runtime:** Reset the total runtime counter (with confirmation).
+- **Fact Reset:** Factory Reset.
 
-### Presets & Renaming
-- **Load:** Load settings from a slot.
-- **Save:** Save current settings to a slot.
-- **Rename:** Enter text editor to rename slot.
-  - **Rotate:** Cycle characters (A-Z, 0-9, Space).
-  - **Click:** Move cursor / Select character.
-  - **Apply Name:** Save the new name.
+### Presets
+
+Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveals:
+
+- **Load:** Load settings from this slot.
+- **Save:** Save current settings to this slot.
+- **Apply Name:** Submits naming buffer to rename slot.
 - **Clear:** Reset slot to defaults.
 
 ---
