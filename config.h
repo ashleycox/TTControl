@@ -32,22 +32,40 @@
 #define MAX_PRESET_SLOTS 5
 
 // --- Serial Debugging ---
-#define SERIAL_MONITOR_ENABLE true
-#define DUPLICATE_DISPLAY_TO_SERIAL false
+#ifndef SERIAL_MONITOR_ENABLE
+#define SERIAL_MONITOR_ENABLE 1
+#endif
+#ifndef DUPLICATE_DISPLAY_TO_SERIAL
+#define DUPLICATE_DISPLAY_TO_SERIAL 0
+#endif
 
 // --- Optional Features (Compile-time flags) ---
-// Set to true to enable specific hardware features
-#define PITCH_CONTROL_ENABLE false
-#define STANDBY_BUTTON_ENABLE false
-#define SPEED_BUTTON_ENABLE false
-#define START_STOP_BUTTON_ENABLE false
+// Set to 1 to enable specific hardware features
+#ifndef PITCH_CONTROL_ENABLE
+#define PITCH_CONTROL_ENABLE 0
+#endif
+#ifndef STANDBY_BUTTON_ENABLE
+#define STANDBY_BUTTON_ENABLE 0
+#endif
+#ifndef SPEED_BUTTON_ENABLE
+#define SPEED_BUTTON_ENABLE 0
+#endif
+#ifndef START_STOP_BUTTON_ENABLE
+#define START_STOP_BUTTON_ENABLE 0
+#endif
 
 // --- Feature Flags ---
-#define ENABLE_STANDBY true         // Set to false to disable all standby functionality
-#define ENABLE_MUTE_RELAYS true     // Set to false to disable muting relays entirely
-#define ENABLE_DPDT_RELAYS false    // Set to true to use 2x DPDT relays instead of 4x SPST
+#ifndef ENABLE_STANDBY
+#define ENABLE_STANDBY 1         // Set to 0 to disable all standby functionality
+#endif
+#ifndef ENABLE_MUTE_RELAYS
+#define ENABLE_MUTE_RELAYS 1     // Set to 0 to disable muting relays entirely
+#endif
+#ifndef ENABLE_DPDT_RELAYS
+#define ENABLE_DPDT_RELAYS 0     // Set to 1 to use 2x DPDT relays instead of 4x SPST
+#endif
 
-// --- Pin Assignments (RP2040 / RP2053) ---
+// --- Pin Assignments (RP2350 / Arduino-Pico) ---
 
 // PWM Outputs (Waveform Generation)
 #define PIN_PWM_PHASE_A 0
@@ -75,7 +93,7 @@
 #define PIN_MUTE_PHASE_C 19
 #define PIN_MUTE_PHASE_D 20
 
-// DPDT Relay Pins (only used if ENABLE_DPDT_RELAYS is true)
+// DPDT Relay Pins (only used if ENABLE_DPDT_RELAYS is 1)
 // Defaults to reusing Phase A and Phase B mute pins
 #define PIN_RELAY_DPDT_1 PIN_MUTE_PHASE_A
 #define PIN_RELAY_DPDT_2 PIN_MUTE_PHASE_B

@@ -53,12 +53,21 @@ public:
     bool isRunning() { return _state == STATE_RUNNING || _state == STATE_STARTING; }
     bool isStandby() { return _state == STATE_STANDBY; }
     bool isSweepingMode() { return _isSweepingMode; }
+    bool isSpeedRamping() { return _isSpeedRamping; }
+    bool isRelayTestMode() { return _relayTestMode; }
+    MotorState getState() { return _state; }
     SpeedMode getSpeed() { return _currentSpeedMode; }
     float getCurrentFrequency() { return _currentFreq; }
     float getPitchPercent() { return currentPitchPercent; }
+    float getMotionProgress();
     
     // --- Relay Control ---
     void setRelays(bool active);
+    bool beginRelayTest();
+    void setRelayTestStage(uint8_t stage);
+    void endRelayTest();
+    uint8_t getRelayTestStage() { return _relayTestStage; }
+    uint8_t getRelayTestStageCount();
     
     // Apply current settings to waveform generator
     void applySettings();
@@ -98,8 +107,11 @@ private:
     
     // Relay Control
     bool _relaysActive;
+    bool _relayActivationPending;
     uint32_t _relayStageTime;
     int _relayStage; // 0=All Off, 1=A On, 2=B On...
+    bool _relayTestMode;
+    uint8_t _relayTestStage;
     
     // Power On Delay
     bool _powerOnDelayActive;
@@ -121,6 +133,8 @@ private:
     void updateState();
     float calculateSoftStartAmp(float elapsed, float duration);
     void handleBraking(uint32_t now);
+    void setStandbyRelay(bool active);
+    void writeRelayOutput(int pin, bool active);
     
     // Diagnostic Sweep State
     bool _isSweepingMode;

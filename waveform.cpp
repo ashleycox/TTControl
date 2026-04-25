@@ -45,6 +45,7 @@ WaveformGenerator::WaveformGenerator() {
     for(int i=0; i<4; i++) {
         _phaseAcc[i] = 0; // Only _phaseAcc[0] is used as master, others are derived
         _iirPrev[i] = 0.0;
+        _lastSamples[i] = 0;
         for(int j=0; j<8; j++) _firBuffer[i][j] = 0;
     }
     _firIndex = 0;
@@ -257,7 +258,8 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
         // Calculate samples for all 4 phases
         int16_t samples[4];
         for (int ch = 0; ch < 4; ch++) {
-            samples[ch] = getSample(ch);
+            samples[ch] = generateSample(ch);
+            _lastSamples[ch] = samples[ch];
         }
         
         // Advance Master Phase
@@ -350,7 +352,12 @@ void WaveformGenerator::setEnabled(bool e) {
     }
 }
 
-int16_t __not_in_flash_func(WaveformGenerator::getSample)(int channel) {
+int16_t WaveformGenerator::getSample(int channel) {
+    if (channel < 0 || channel >= 4) return 0;
+    return _lastSamples[channel];
+}
+
+int16_t __not_in_flash_func(WaveformGenerator::generateSample)(int channel) {
     const volatile WaveformState* state = _activeState;
     
     uint32_t phase = _phaseAcc[0] + state->phaseOffsets[channel];

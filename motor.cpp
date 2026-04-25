@@ -12,35 +12,44 @@
 #include "hal.h"
 
 MotorController::MotorController() {
-    if (ENABLE_STANDBY) {
-        _state = STATE_STANDBY;
-    } else {
-        _state = STATE_STOPPED;
-    }
-    
-    // Check if we should auto-boot into a specific state
-    if (settings.get().autoBoot) {
-        _state = STATE_STOPPED;
-        // Check if we should automatically start the motor
-        if (settings.get().autoStart) {
-            start();
-        }
-    }
-    
-    // Initialize default values
+    _state = ENABLE_STANDBY ? STATE_STANDBY : STATE_STOPPED;
     _currentSpeedMode = SPEED_33;
     _currentFreq = 50.0;
     _targetFreq = 50.0;
     _currentAmp = 0.0;
     _targetAmp = 0.0;
     _pitchRange = 10;
+    _stateStartTime = 0;
+    _lastUpdate = 0;
+    _startDuration = 0.0;
+    _isKicking = false;
+    _kickEndTime = 0;
+    _ampReductionStartTime = 0;
+    _isReducedAmp = false;
+    _brakePulseLastToggle = 0;
+    _brakePulseState = false;
+    _relaysActive = false;
+    _relayActivationPending = false;
+    _relayStageTime = 0;
+    _relayStage = 0;
+    _relayTestMode = false;
+    _relayTestStage = 0;
     _isSpeedRamping = false;
+    _rampStartFreq = 0.0;
+    _rampTargetFreq = 0.0;
+    _rampStartTime = 0;
+    _rampDuration = 0.0;
     _isKickRamping = false;
+    _kickRampStartFreq = 0.0;
+    _kickRampStartTime = 0;
+    _kickRampDuration = 0.0;
     _powerOnDelayActive = true;
-    _isKickRamping = false;
-    _powerOnDelayActive = true;
-    _powerOnTime = hal.getMillis();
-    
+    _powerOnTime = 0;
+    _isSweepingMode = false;
+    _wasRunningBeforeSweep = false;
+    _sweepMinSeparation = 0.0;
+    _sweepMaxSeparation = 0.0;
+    _sweepSpeed = 0.0;
     _settingsDirty = false;
     _lastSettingsChange = 0;
 }
@@ -48,8 +57,7 @@ MotorController::MotorController() {
 void MotorController::begin() {
     // Configure hardware pins via HAL
     hal.setPinMode(PIN_RELAY_STANDBY, OUTPUT);
-    hal.setPinMode(PIN_RELAY_STANDBY, OUTPUT);
-    
+
     if (ENABLE_MUTE_RELAYS) {
         if (ENABLE_DPDT_RELAYS) {
             hal.setPinMode(PIN_RELAY_DPDT_1, OUTPUT);
@@ -61,34 +69,44 @@ void MotorController::begin() {
             hal.setPinMode(PIN_MUTE_PHASE_D, OUTPUT);
         }
     }
-    
+
     // Initialize relays to OFF state
     _relaysActive = false;
     _relayStage = 0;
+    _powerOnTime = hal.getMillis();
     setRelays(false);
-    
+
+    _state = (ENABLE_STANDBY && !settings.get().autoBoot) ? STATE_STANDBY : STATE_STOPPED;
+
     // Load initial speed settings
     if (settings.get().bootSpeed <= 2) {
         _currentSpeedMode = (SpeedMode)settings.get().bootSpeed;
     } else {
         _currentSpeedMode = settings.get().currentSpeed;
     }
+    if (_currentSpeedMode == SPEED_78 && !settings.get().enable78rpm) {
+        _currentSpeedMode = SPEED_33;
+    }
+    settings.get().currentSpeed = _currentSpeedMode;
     applySettings();
-    
-    // Handle auto-start if configured
-    if (settings.get().autoStart) {
+    setStandbyRelay(_state != STATE_STANDBY);
+    currentMotorState = _state;
+
+    // Handle auto-start only when boot is allowed to bypass standby.
+    if (_state == STATE_STOPPED && settings.get().autoStart) {
         start();
     }
 }
 
 void MotorController::startSymmetricSweep(float minSep, float maxSep, float speed) {
+    if (_relayTestMode) return;
     if (settings.get().phaseMode == 4) return; // Invalid for 4-phase twin motors
-    
+
     _wasRunningBeforeSweep = isRunning();
     if (!isRunning()) {
         start();
     }
-    
+
     _isSweepingMode = true;
     _sweepMinSeparation = minSep;
     _sweepMaxSeparation = maxSep;
@@ -97,7 +115,7 @@ void MotorController::startSymmetricSweep(float minSep, float maxSep, float spee
 
 void MotorController::stopSymmetricSweep() {
     _isSweepingMode = false;
-    
+
     if (!_wasRunningBeforeSweep) {
         stop();
     }
@@ -105,30 +123,30 @@ void MotorController::stopSymmetricSweep() {
 
 void MotorController::update() {
     uint32_t now = hal.getMillis();
-    
+
     // --- Main State Machine ---
     switch (_state) {
         case STATE_STANDBY:
             // System is in low-power/standby mode. Waiting for user input.
             break;
-            
+
         case STATE_STOPPED:
             // Motor is powered but not rotating. Waiting for start command.
             break;
-            
+
         case STATE_STARTING:
             // Motor is accelerating. Handles Startup Kick and Soft Start.
-            
+
             // 1. Startup Kick Logic (High torque start)
             if (_isKicking) {
                 if (now >= _kickEndTime) {
                     _isKicking = false;
-                    
+
                     // Transition from Kick frequency to Target frequency
                     SpeedSettings& s = settings.getCurrentSpeedSettings();
                     if (s.startupKickRampDuration > 0) {
                         // Ramp down frequency smoothly
-                        _kickRampDuration = s.startupKickRampDuration * 1000.0; 
+                        _kickRampDuration = s.startupKickRampDuration * 1000.0;
                         _kickRampStartTime = now;
                         _kickRampStartFreq = waveform.getFrequency();
                         _isKickRamping = true;
@@ -138,7 +156,7 @@ void MotorController::update() {
                     }
                 }
             }
-            
+
             // 2. Kick Ramp Logic
             if (_isKickRamping) {
                 float elapsed = now - _kickRampStartTime;
@@ -154,12 +172,12 @@ void MotorController::update() {
                 // Ensure we are exactly at target frequency if not kicking/ramping
                 if (waveform.getFrequency() != _targetFreq) waveform.setFrequency(_targetFreq);
             }
-            
+
             // 3. Amplitude Soft Start Logic
             {
                 float duration = settings.getCurrentSpeedSettings().softStartDuration * 1000.0;
                 float elapsed = now - _stateStartTime;
-                
+
                 if (elapsed >= duration) {
                     // Soft start complete, transition to RUNNING
                     _state = STATE_RUNNING;
@@ -168,14 +186,14 @@ void MotorController::update() {
                 } else {
                     _currentAmp = calculateSoftStartAmp(elapsed, duration);
                 }
-                
+
                 // Apply Frequency Dependent Amplitude (FDA) Scaling
                 // Linearly interpolate between FDA% (at 0Hz) and Target Amp (at Target Freq)
                 if (settings.get().freqDependentAmplitude > 0) {
                     float fdaRatio = (float)settings.get().freqDependentAmplitude / 100.0;
                     // 3-Point V/f Curve Interpolation
                     float currentF = waveform.getFrequency();
-                    
+
                     // User coordinates
                     float fLow = settings.get().vfLowFreq;
                     float vLow = (float)settings.get().vfLowBoost / 100.0;
@@ -183,17 +201,17 @@ void MotorController::update() {
                     float vMid = (float)settings.get().vfMidBoost / 100.0;
                     float fHigh = _targetFreq;
                     float vHigh = 1.0; // Target freq implies 100% of calculated soft-start target
-                    
+
                     float scaleFactor = 1.0;
-                    
+
                     // Prevent divide-by-zero or malformed curves
                     if (fLow >= fMid) fMid = fLow + 0.1;
                     if (fMid >= fHigh) fHigh = fMid + 0.1;
-                    
+
                     if (currentF <= fLow) {
                         // Point 1 - Flat line up to fLow (or linear ramp from 0 to vLow)
                         // Most motors need instant boost at 0Hz to break friction
-                        scaleFactor = vLow; 
+                        scaleFactor = vLow;
                     } else if (currentF > fLow && currentF <= fMid) {
                         // Segment 1: Low to Mid
                         float segmentProgress = (currentF - fLow) / (fMid - fLow);
@@ -204,11 +222,11 @@ void MotorController::update() {
                         if (segmentProgress > 1.0) segmentProgress = 1.0;
                         scaleFactor = vMid + ((vHigh - vMid) * segmentProgress);
                     }
-                    
+
                     // The FDA master percentage can act as an overall multiplier/mix for the curve
                     // If FDA = 100%, we use the full calculated curve. If FDA = 50%, we blend it halfway towards 1.0.
                     float blendFDA = fdaRatio * scaleFactor + (1.0 - fdaRatio);
-                    
+
                     // Apply this factor to the current amplitude state
                     _currentAmp = _currentAmp * blendFDA;
                 }
@@ -216,27 +234,27 @@ void MotorController::update() {
                 waveform.setAmplitude(_currentAmp);
             }
             break;
-            
+
         case STATE_RUNNING:
             // Motor is running at target speed. Handles Pitch and Reduced Amplitude.
-            
+
             // 1. Pitch Control / Frequency Update
             {
                 float baseFreq = settings.getCurrentSpeedSettings().frequency;
                 float pitchMod = baseFreq * (currentPitchPercent / 100.0);
                 _targetFreq = baseFreq + pitchMod;
-                
+
                 if (_currentFreq != _targetFreq) {
                     _currentFreq = _targetFreq;
                     waveform.setFrequency(_currentFreq);
                     currentFrequency = _currentFreq; // Update global for UI
                 }
-                
+
                 // 2. Reduced Amplitude (Power Saving / Noise Reduction)
                 if (!_isReducedAmp) {
-                    uint32_t delaySec = settings.getCurrentSpeedSettings().amplitudeDelay; 
+                    uint32_t delaySec = settings.getCurrentSpeedSettings().amplitudeDelay;
                     uint32_t delayMs = delaySec * 1000;
-                    
+
                     if (now - _ampReductionStartTime >= delayMs) {
                         _isReducedAmp = true;
                         float reducePercent = (float)settings.getCurrentSpeedSettings().reducedAmplitude / 100.0;
@@ -244,7 +262,7 @@ void MotorController::update() {
                         waveform.setAmplitude(_currentAmp);
                     }
                 }
-                
+
                 // 3. Speed Switching Ramp (Smooth transition between speeds)
                 if (_isSpeedRamping) {
                     float elapsed = now - _rampStartTime;
@@ -252,17 +270,19 @@ void MotorController::update() {
                         _isSpeedRamping = false;
                         _currentFreq = _rampTargetFreq;
                         waveform.setFrequency(_currentFreq);
+                        currentFrequency = _currentFreq;
                     } else {
                         float t = elapsed / _rampDuration;
                         float currentF = _rampStartFreq + ((_rampTargetFreq - _rampStartFreq) * t);
                         waveform.setFrequency(currentF);
                         _currentFreq = currentF;
+                        currentFrequency = _currentFreq;
                     }
                 }
-                
+
                 // 4. Update Runtime Counter
                 settings.updateRuntime();
-                
+
                 // 5. Diagnostic Resonance Sweep
                 if (_isSweepingMode) {
                     float timeSec = now / 1000.0;
@@ -271,7 +291,7 @@ void MotorController::update() {
                         float period = (range * 2.0) / _sweepSpeed;
                         float modTime = fmod(timeSec, period);
                         float currentSep = 0;
-                        
+
                         if (modTime < period / 2.0) {
                             // Rising
                             currentSep = _sweepMinSeparation + (modTime * _sweepSpeed);
@@ -279,7 +299,7 @@ void MotorController::update() {
                             // Falling
                             currentSep = _sweepMaxSeparation - ((modTime - period / 2.0) * _sweepSpeed);
                         }
-                        
+
                         SpeedSettings& s = settings.getCurrentSpeedSettings();
                         if (settings.get().phaseMode == 2) {
                             s.phaseOffset[1] = currentSep;
@@ -287,37 +307,46 @@ void MotorController::update() {
                             s.phaseOffset[1] = currentSep;
                             s.phaseOffset[2] = currentSep * 2.0;
                         }
-                        
+
                         waveform.updateSettings(_targetFreq, s);
                     }
                 }
             }
             break;
-            
+
         case STATE_STOPPING:
             // Motor is decelerating. Handles Braking logic.
             handleBraking(now);
             break;
     }
-    
+
     // Update global state for UI access
     currentMotorState = _state;
-    
+
+    if (!_relayTestMode && _relayActivationPending) {
+        uint32_t delayMs = settings.get().powerOnRelayDelay * 1000;
+        if (now - _powerOnTime >= delayMs) {
+            _powerOnDelayActive = false;
+            _relayActivationPending = false;
+            setRelays(true);
+        }
+    }
+
     // --- Relay Staggering Logic ---
     // Prevents current spikes by turning on relays sequentially
-    if (ENABLE_MUTE_RELAYS && _relaysActive) {
+    if (!_relayTestMode && ENABLE_MUTE_RELAYS && _relaysActive) {
         bool activeHigh = settings.get().relayActiveHigh;
-        
+
         if (ENABLE_DPDT_RELAYS) {
             // DPDT Logic: 2 stages
             if (_relayStage < 2) {
                 if (now - _relayStageTime > 100) {
                     _relayStageTime = now;
                     _relayStage++;
-                    
+
                     int pin = -1;
                     int phaseMode = settings.get().phaseMode;
-                    
+
                     if (_relayStage == 1) {
                         // DPDT 1: Always used (Phase A/B or 1/2)
                         pin = PIN_RELAY_DPDT_1;
@@ -327,7 +356,7 @@ void MotorController::update() {
                             pin = PIN_RELAY_DPDT_2;
                         }
                     }
-                    
+
                     if (pin != -1) hal.digitalWrite(pin, activeHigh ? HIGH : LOW);
                 }
             }
@@ -337,22 +366,22 @@ void MotorController::update() {
                 if (now - _relayStageTime > 100) { // 100ms stagger delay
                     _relayStageTime = now;
                     _relayStage++;
-                    
+
                     int pin = -1;
                     int phaseMode = settings.get().phaseMode;
-                    
+
                     // Only switch relays required for current phase mode
                     if (_relayStage == 1) pin = PIN_MUTE_PHASE_A;
                     else if (_relayStage == 2 && phaseMode >= 2) pin = PIN_MUTE_PHASE_B;
                     else if (_relayStage == 3 && phaseMode >= 3) pin = PIN_MUTE_PHASE_C;
                     else if (_relayStage == 4 && phaseMode >= 4) pin = PIN_MUTE_PHASE_D;
-                    
+
                     if (pin != -1) hal.digitalWrite(pin, activeHigh ? HIGH : LOW);
                 }
             }
         }
     }
-    
+
     // --- Deferred Settings Save ---
     if (_settingsDirty && (now - _lastSettingsChange > 2000)) {
         settings.save();
@@ -361,16 +390,18 @@ void MotorController::update() {
 }
 
 void MotorController::start() {
+    if (_relayTestMode) return;
     if (_state == STATE_RUNNING || _state == STATE_STARTING) return;
-    
+
     _state = STATE_STARTING;
     _stateStartTime = hal.getMillis();
-    
+    settings.syncRuntimeClock();
+
     applySettings();
     _targetAmp = (float)settings.get().maxAmplitude / 100.0;
     _currentAmp = 0.0;
     _isReducedAmp = false;
-    
+
     // Initialize Startup Kick if configured
     SpeedSettings& s = settings.getCurrentSpeedSettings();
     if (s.startupKick > 1) {
@@ -381,33 +412,34 @@ void MotorController::start() {
         _isKicking = false;
         waveform.setFrequency(_targetFreq);
     }
-    
+
     // Unmute relays if linked to start/stop
     if (settings.get().muteRelayLinkStartStop) {
-        setRelays(true); 
+        setRelays(true);
     }
-    
+
     waveform.setEnabled(true);
     waveform.setAmplitude(0.0);
 }
 
 void MotorController::stop() {
+    if (_relayTestMode) return;
     if (_state == STATE_STOPPED || _state == STATE_STANDBY) return;
-    
+
     _state = STATE_STOPPING;
     _stateStartTime = hal.getMillis();
-    
+
     // Configure Braking Mode
     if (settings.get().brakeMode == BRAKE_PULSE) {
-        _brakePulseState = true; 
+        _brakePulseState = true;
         _brakePulseLastToggle = hal.getMillis();
         // Reverse frequency for braking torque
         waveform.setFrequency(-_targetFreq);
-        waveform.setAmplitude(_targetAmp); 
+        waveform.setAmplitude(_targetAmp);
     } else if (settings.get().brakeMode == BRAKE_RAMP) {
         waveform.setFrequency(settings.get().brakeStartFreq);
     }
-    
+
     if (settings.get().pitchResetOnStop) {
         resetPitch();
     }
@@ -416,22 +448,22 @@ void MotorController::stop() {
 void MotorController::handleBraking(uint32_t now) {
     float duration = settings.get().brakeDuration * 1000.0;
     float elapsed = now - _stateStartTime;
-    
+
     // Check if braking is complete
     if (elapsed >= duration) {
         _state = STATE_STOPPED;
         _currentAmp = 0.0;
         waveform.setEnabled(false);
-        
+
         if (settings.get().muteRelayLinkStartStop) {
             setRelays(false); // Mute
         }
-        
+
         // Reset frequency to positive
         waveform.setFrequency(abs(_targetFreq));
         return;
     }
-    
+
     // Handle specific braking modes
     if (settings.get().brakeMode == BRAKE_RAMP) {
         // Linearly ramp frequency down
@@ -439,7 +471,7 @@ void MotorController::handleBraking(uint32_t now) {
         float stopF = settings.get().brakeStopFreq;
         float currentF = startF - ((startF - stopF) * (elapsed / duration));
         waveform.setFrequency(currentF);
-        
+
         // Ramp amplitude down
         _currentAmp = _targetAmp * (1.0 - (elapsed / duration));
         waveform.setAmplitude(_currentAmp);
@@ -461,7 +493,7 @@ void MotorController::handleBraking(uint32_t now) {
         // Active Coasting: Gently bring frequency down to the configured cutoff point while maintaining driving torque
         float startF = abs(_targetFreq);
         float stopF = settings.get().softStopCutoff;
-        
+
         // If we're already below the cutoff, or duration is 0, just stop instantly like BRAKE_OFF
         if (startF <= stopF || duration <= 0) {
             _currentAmp = 0.0;
@@ -488,7 +520,7 @@ void MotorController::handleBraking(uint32_t now) {
 float MotorController::calculateSoftStartAmp(float elapsed, float duration) {
     float t = elapsed / duration;
     if (t > 1.0) t = 1.0;
-    
+
     if (settings.get().rampType == RAMP_SCURVE) {
         // Sine S-Curve: 0.5 * (1 - cos(PI * t))
         return _targetAmp * (0.5 * (1.0 - cos(PI * t)));
@@ -513,32 +545,44 @@ void MotorController::toggleStartStop() {
 }
 
 void MotorController::toggleStandby() {
+    if (_relayTestMode) return;
     if (!ENABLE_STANDBY) return;
 
     if (_state == STATE_STANDBY) {
         // Waking up
         _state = STATE_STOPPED;
-        
-        // If linked to standby, unmute. 
+        setStandbyRelay(true);
+
+        // If linked to standby, unmute.
         // BUT if also linked to Start/Stop, we should stay muted until Start.
         if (settings.get().muteRelayLinkStandby && !settings.get().muteRelayLinkStartStop) {
-             setRelays(true); 
+             setRelays(true);
         } else {
              setRelays(false);
         }
+
+        if (settings.get().autoStart) {
+            start();
+        }
     } else {
         // Going to sleep
-        stop();
+        _isKicking = false;
+        _isKickRamping = false;
+        _isSpeedRamping = false;
+        _isSweepingMode = false;
+        _currentAmp = 0.0;
+        resetPitch();
+        waveform.setAmplitude(0.0);
+        waveform.setEnabled(false);
         _state = STATE_STANDBY;
-        
+        setStandbyRelay(false);
+
         // If linked to standby, mute.
-        if (settings.get().muteRelayLinkStandby) {
-            setRelays(false);
-        }
-        
+        setRelays(false);
+
         // Reset Session Runtime
         settings.resetSessionRuntime();
-        
+
         // Save Total Runtime (Silent)
         settings.save(false);
     }
@@ -548,41 +592,44 @@ void MotorController::toggleStandby() {
 void MotorController::cycleSpeed() {
     int s = (int)_currentSpeedMode + 1;
     if (s > SPEED_78) s = SPEED_33;
-    
+
     // Skip 78 RPM if disabled in settings
     if (s == SPEED_78 && !settings.get().enable78rpm) {
         s = SPEED_33;
     }
-    
+
     setSpeed((SpeedMode)s);
 }
 
 void MotorController::adjustSpeed(int delta) {
     int s = (int)_currentSpeedMode + delta;
-    
+
     // Clamp to valid range
     if (s < SPEED_33) s = SPEED_33;
     if (s > SPEED_78) s = SPEED_78;
-    
+
     // Check 78 RPM limit
     if (s == SPEED_78 && !settings.get().enable78rpm) {
         s = SPEED_45;
     }
-    
+
     setSpeed((SpeedMode)s);
 }
 
 void MotorController::setSpeed(SpeedMode mode) {
+    if (mode < SPEED_33 || mode > SPEED_78) mode = SPEED_33;
+    if (mode == SPEED_78 && !settings.get().enable78rpm) mode = SPEED_45;
     if (_currentSpeedMode == mode) return;
-    
+
     _currentSpeedMode = mode;
-    applySettings();
-    
+    settings.get().currentSpeed = mode;
+    SpeedSettings& s = settings.getCurrentSpeedSettings();
+
     // Calculate new target frequency including pitch
-    float baseFreq = settings.getCurrentSpeedSettings().frequency;
+    float baseFreq = s.frequency;
     float pitchMod = baseFreq * (currentPitchPercent / 100.0);
     float newTarget = baseFreq + pitchMod;
-    
+
     if (_state == STATE_RUNNING) {
         if (settings.get().smoothSwitching) {
             // Initiate smooth frequency ramp
@@ -591,24 +638,31 @@ void MotorController::setSpeed(SpeedMode mode) {
             _rampTargetFreq = newTarget;
             _rampStartTime = hal.getMillis();
             _rampDuration = settings.get().switchRampDuration * 1000.0;
+            _targetFreq = newTarget;
+            waveform.updateSettings(_rampStartFreq, s);
         } else {
             // Instant switch
+            _isSpeedRamping = false;
             _targetFreq = newTarget;
             _currentFreq = _targetFreq;
-            waveform.setFrequency(_currentFreq);
+            currentFrequency = _currentFreq;
+            waveform.updateSettings(_currentFreq, s);
         }
     } else {
         _targetFreq = newTarget;
+        _currentFreq = _targetFreq;
+        currentFrequency = _currentFreq;
+        waveform.updateSettings(_currentFreq, s);
     }
-    
-    // Persist new speed selection
-    settings.get().currentSpeed = mode;
+
     // Defer save to avoid blocking
     _settingsDirty = true;
     _lastSettingsChange = hal.getMillis();
 }
 
 void MotorController::setPitch(float percent) {
+    if (percent > _pitchRange) percent = _pitchRange;
+    if (percent < -_pitchRange) percent = -_pitchRange;
     currentPitchPercent = percent;
 }
 
@@ -626,43 +680,50 @@ void MotorController::adjustPitchFreq(float deltaHz) {
     float baseFreq = settings.getCurrentSpeedSettings().frequency;
     float currentPitchHz = baseFreq * (currentPitchPercent / 100.0);
     float newPitchHz = currentPitchHz + deltaHz;
-    
+
     // Limit pitch to configured range
     float maxPitchHz = baseFreq * (_pitchRange / 100.0);
     if (newPitchHz > maxPitchHz) newPitchHz = maxPitchHz;
     if (newPitchHz < -maxPitchHz) newPitchHz = -maxPitchHz;
-    
+
     // Convert back to percentage
     currentPitchPercent = (newPitchHz / baseFreq) * 100.0;
 }
 
 void MotorController::applySettings() {
     SpeedSettings& s = settings.getCurrentSpeedSettings();
-    
+
     _targetFreq = s.frequency;
     _currentFreq = _targetFreq;
     currentFrequency = _currentFreq;
-    
+
     waveform.updateSettings(_currentFreq, s);
 }
 
 void MotorController::setRelays(bool active) {
     if (!ENABLE_MUTE_RELAYS) return;
+    if (_relayTestMode) return;
 
     bool activeHigh = settings.get().relayActiveHigh;
-    
+    bool requestedActive = active;
+
     // Safety: Enforce Power On Delay
-    if (_powerOnDelayActive) {
+    if (active && _powerOnDelayActive) {
         uint32_t delayMs = settings.get().powerOnRelayDelay * 1000;
-        if (hal.getMillis() - _powerOnTime < delayMs) { 
+        if (hal.getMillis() - _powerOnTime < delayMs) {
+            _relayActivationPending = true;
             active = false; // Force mute
         } else {
             _powerOnDelayActive = false;
         }
     }
-    
+    if (!requestedActive) {
+        _relayActivationPending = false;
+    }
+
     if (active) {
         // Start Staggered Unmute Sequence
+        _relayActivationPending = false;
         _relaysActive = true;
         _relayStage = 0;
         _relayStageTime = hal.getMillis();
@@ -671,7 +732,7 @@ void MotorController::setRelays(bool active) {
         // Immediate Mute (All Off)
         _relaysActive = false;
         _relayStage = 0;
-        
+
         if (ENABLE_DPDT_RELAYS) {
              hal.digitalWrite(PIN_RELAY_DPDT_1, activeHigh ? LOW : HIGH);
              hal.digitalWrite(PIN_RELAY_DPDT_2, activeHigh ? LOW : HIGH);
@@ -682,9 +743,136 @@ void MotorController::setRelays(bool active) {
             hal.digitalWrite(PIN_MUTE_PHASE_D, activeHigh ? LOW : HIGH);
         }
     }
-    
-    // Handle Standby Relay Linking
-    if (settings.get().muteRelayLinkStandby) {
-        if (active) hal.digitalWrite(PIN_RELAY_STANDBY, activeHigh ? HIGH : LOW);
+}
+
+void MotorController::setStandbyRelay(bool active) {
+    if (!ENABLE_STANDBY) {
+        active = true;
     }
+
+    bool activeHigh = settings.get().relayActiveHigh;
+    hal.digitalWrite(PIN_RELAY_STANDBY, active ? (activeHigh ? HIGH : LOW) : (activeHigh ? LOW : HIGH));
+}
+
+void MotorController::writeRelayOutput(int pin, bool active) {
+    bool activeHigh = settings.get().relayActiveHigh;
+    hal.digitalWrite(pin, active ? (activeHigh ? HIGH : LOW) : (activeHigh ? LOW : HIGH));
+}
+
+uint8_t MotorController::getRelayTestStageCount() {
+    uint8_t count = 1; // All off
+    if (ENABLE_STANDBY) count++;
+    if (ENABLE_MUTE_RELAYS) {
+        count += ENABLE_DPDT_RELAYS ? 2 : 4;
+    }
+    return count;
+}
+
+bool MotorController::beginRelayTest() {
+    if (_state == STATE_STARTING || _state == STATE_RUNNING || _state == STATE_STOPPING) {
+        return false;
+    }
+
+    _relayTestMode = true;
+    _relayActivationPending = false;
+    _relaysActive = false;
+    _relayStage = 0;
+    _state = STATE_STOPPED;
+    currentMotorState = _state;
+
+    waveform.setAmplitude(0.0);
+    waveform.setEnabled(false);
+    setRelayTestStage(0);
+    return true;
+}
+
+void MotorController::setRelayTestStage(uint8_t stage) {
+    uint8_t count = getRelayTestStageCount();
+    if (count == 0) return;
+    if (stage >= count) stage = count - 1;
+    _relayTestStage = stage;
+
+    writeRelayOutput(PIN_RELAY_STANDBY, false);
+
+    if (ENABLE_MUTE_RELAYS) {
+        if (ENABLE_DPDT_RELAYS) {
+            writeRelayOutput(PIN_RELAY_DPDT_1, false);
+            writeRelayOutput(PIN_RELAY_DPDT_2, false);
+        } else {
+            writeRelayOutput(PIN_MUTE_PHASE_A, false);
+            writeRelayOutput(PIN_MUTE_PHASE_B, false);
+            writeRelayOutput(PIN_MUTE_PHASE_C, false);
+            writeRelayOutput(PIN_MUTE_PHASE_D, false);
+        }
+    }
+
+    if (stage == 0) return;
+
+    uint8_t relayStage = stage;
+    if (ENABLE_STANDBY) {
+        if (relayStage == 1) {
+            writeRelayOutput(PIN_RELAY_STANDBY, true);
+            return;
+        }
+        relayStage--;
+    }
+
+    if (!ENABLE_MUTE_RELAYS) return;
+
+    if (ENABLE_DPDT_RELAYS) {
+        if (relayStage == 1) writeRelayOutput(PIN_RELAY_DPDT_1, true);
+        else if (relayStage == 2) writeRelayOutput(PIN_RELAY_DPDT_2, true);
+    } else {
+        if (relayStage == 1) writeRelayOutput(PIN_MUTE_PHASE_A, true);
+        else if (relayStage == 2) writeRelayOutput(PIN_MUTE_PHASE_B, true);
+        else if (relayStage == 3) writeRelayOutput(PIN_MUTE_PHASE_C, true);
+        else if (relayStage == 4) writeRelayOutput(PIN_MUTE_PHASE_D, true);
+    }
+}
+
+void MotorController::endRelayTest() {
+    if (!_relayTestMode) return;
+
+    setRelayTestStage(0);
+    _relayTestMode = false;
+    _relayTestStage = 0;
+
+    setStandbyRelay(_state != STATE_STANDBY);
+    if (_state == STATE_STOPPED && settings.get().muteRelayLinkStandby && !settings.get().muteRelayLinkStartStop) {
+        setRelays(true);
+    } else {
+        setRelays(false);
+    }
+}
+
+float MotorController::getMotionProgress() {
+    uint32_t now = hal.getMillis();
+
+    if (_state == STATE_STARTING) {
+        float duration = settings.getCurrentSpeedSettings().softStartDuration * 1000.0;
+        if (duration <= 0.0) return 1.0;
+        float progress = (float)(now - _stateStartTime) / duration;
+        if (progress < 0.0) progress = 0.0;
+        if (progress > 1.0) progress = 1.0;
+        return progress;
+    }
+
+    if (_state == STATE_STOPPING) {
+        float duration = settings.get().brakeDuration * 1000.0;
+        if (duration <= 0.0) return 1.0;
+        float progress = (float)(now - _stateStartTime) / duration;
+        if (progress < 0.0) progress = 0.0;
+        if (progress > 1.0) progress = 1.0;
+        return progress;
+    }
+
+    if (_isSpeedRamping) {
+        if (_rampDuration <= 0.0) return 1.0;
+        float progress = (float)(now - _rampStartTime) / _rampDuration;
+        if (progress < 0.0) progress = 0.0;
+        if (progress > 1.0) progress = 1.0;
+        return progress;
+    }
+
+    return 0.0;
 }

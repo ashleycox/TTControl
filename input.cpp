@@ -7,10 +7,9 @@
  */
 
 #include "input.h"
-#include "input.h"
 #include "hal.h"
 #include "globals.h"
-#include "settings.h" // Need definition of Settings class too
+#include "settings.h"
 
 InputManager* _inputInstance = nullptr;
 
@@ -18,50 +17,49 @@ InputManager::InputManager() {
     _encDelta = 0;
     _lastEncTime = 0;
     _encAccel = 0;
-    
+
     _pitchLastClk = HIGH;
     _pitchDelta = 0;
     _lastPitchTime = 0;
     _pitchAccel = 0;
-    
+
     _btnPressed = false;
     _btnPressTime = 0;
     _waitingForDoubleClick = false;
     _doubleClickTimer = 0;
     _clickCount = 0;
-    
+
     _encoderPosition = 0;
     _lastEncoderPosition = 0;
     _inputInstance = this;
-    
+
     _speedBtnState = HIGH;
     _speedBtnTime = 0;
     _startStopBtnState = HIGH;
     _startStopBtnTime = 0;
     _standbyBtnState = HIGH;
     _standbyBtnTime = 0;
-    
+
     _pendingEvent = EVT_NONE;
     
     _injectedDelta = 0;
-    _injectedBtn = false;
 }
 
 void InputManager::begin() {
     hal.setPinMode(PIN_ENC_MAIN_CLK, INPUT_PULLUP);
     hal.setPinMode(PIN_ENC_MAIN_DT, INPUT_PULLUP);
     hal.setPinMode(PIN_ENC_MAIN_SW, INPUT_PULLUP);
-    
+
     // Attach Interrupt
     attachInterrupt(digitalPinToInterrupt(PIN_ENC_MAIN_CLK), isrEncoder, CHANGE);
-    
+
     if (SPEED_BUTTON_ENABLE) hal.setPinMode(PIN_BTN_SPEED, INPUT_PULLUP);
     if (START_STOP_BUTTON_ENABLE) hal.setPinMode(PIN_BTN_START_STOP, INPUT_PULLUP);
     if (STANDBY_BUTTON_ENABLE) hal.setPinMode(PIN_BTN_STANDBY, INPUT_PULLUP);
-    
+
     // Read initial state (only for pitch encoder now, main encoder handled by ISR)
     // _encLastClk = hal.digitalRead(PIN_ENC_MAIN_CLK); // No longer needed for main encoder
-    
+
     #if PITCH_CONTROL_ENABLE
     hal.setPinMode(PIN_ENC_PITCH_CLK, INPUT_PULLUP);
     hal.setPinMode(PIN_ENC_PITCH_DT, INPUT_PULLUP);
@@ -72,15 +70,15 @@ void InputManager::begin() {
 
 void InputManager::isrEncoder() {
     if (!_inputInstance) return;
-    
+
     // Simple Quadrature Decode
     // Read CLK and DT
     // We interrupt on CLK change
     // If DT != CLK, it's one direction, else other
-    
+
     int clk = digitalRead(PIN_ENC_MAIN_CLK);
     int dt = digitalRead(PIN_ENC_MAIN_DT);
-    
+
     if (clk != dt) {
         _inputInstance->_encoderPosition++;
     } else {
@@ -90,22 +88,26 @@ void InputManager::isrEncoder() {
 
 void InputManager::update() {
     uint32_t now = hal.getMillis();
-    
+
     // --- Encoder Reading from ISR ---
     // Atomic read not strictly necessary for long on 32-bit, but good practice
     noInterrupts();
     long pos = _encoderPosition;
     interrupts();
-    
+
     long delta = pos - _lastEncoderPosition;
     _lastEncoderPosition = pos;
-    
+
     // Handle Input Injection (for testing/serial control)
     if (_injectedDelta != 0) {
         delta += _injectedDelta;
         _injectedDelta = 0;
     }
-    
+
+    if (settings.get().reverseEncoder) {
+        delta = -delta;
+    }
+
     // --- Acceleration Logic ---
     // If rotation is fast, increase the delta multiplier
     if (delta != 0) {
@@ -117,15 +119,15 @@ void InputManager::update() {
             _encAccel = 0;
         }
         _lastEncTime = now;
-        
+
         _encDelta += delta; // Accumulate for value editing
-        
+
         // Map to Navigation Events
         // We generate events for navigation but keep raw delta for smooth value editing
         if (delta > 0) _pendingEvent = EVT_NAV_UP;
         else if (delta < 0) _pendingEvent = EVT_NAV_DOWN;
     }
-    
+
     // --- Pitch Encoder Reading ---
     #if PITCH_CONTROL_ENABLE
     int pDelta = readPitchEncoder();
@@ -142,11 +144,10 @@ void InputManager::update() {
         _pitchDelta += pDelta;
     }
     #endif
-    
+
     // --- Button Handling ---
-    bool btnState = (hal.digitalRead(PIN_ENC_MAIN_SW) == LOW) || _injectedBtn;
-    if (_injectedBtn) _injectedBtn = false;
-    
+    bool btnState = (hal.digitalRead(PIN_ENC_MAIN_SW) == LOW);
+
     // Debounce Logic
     static uint32_t lastBtnChange = 0;
     static bool lastBtnState = false;
@@ -154,7 +155,7 @@ void InputManager::update() {
         lastBtnChange = now;
         lastBtnState = btnState;
     }
-    
+
     if (now - lastBtnChange > 20) { // Stable state
         if (btnState && !_btnPressed) {
             // Press Start
@@ -164,10 +165,10 @@ void InputManager::update() {
             // Press Release
             _btnPressed = false;
             uint32_t duration = now - _btnPressTime;
-            
+
             if (duration > 5000) {
                 _pendingEvent = EVT_EXIT; // Very Long Press (>5s)
-            } else if (duration > 3000) { 
+            } else if (duration > 3000) {
                 _pendingEvent = EVT_BACK; // Long Press (>3s)
             } else {
                 // Short Press - Check for double click
@@ -181,7 +182,7 @@ void InputManager::update() {
             }
         }
     }
-    
+
     // Double Click Timeout
     if (_waitingForDoubleClick && (now - _doubleClickTimer > 400)) {
         _waitingForDoubleClick = false;
@@ -216,7 +217,7 @@ void InputManager::injectDelta(int delta) {
 }
 
 void InputManager::injectButton(bool pressed) {
-    if (pressed) _injectedBtn = true;
+    if (pressed) _pendingEvent = EVT_SELECT;
 }
 
 
@@ -268,7 +269,7 @@ int InputManager::readPitchEncoder() {
     #if PITCH_CONTROL_ENABLE
     int clk = hal.digitalRead(PIN_ENC_PITCH_CLK);
     int delta = 0;
-    
+
     if (clk != _pitchLastClk) {
         if (hal.digitalRead(PIN_ENC_PITCH_DT) != clk) {
             delta = 1;

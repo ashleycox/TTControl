@@ -10,7 +10,7 @@
 #include "ui.h"
 #include "motor.h"
 #include "error_handler.h"
-#include "settings.h" // Added missing include
+#include "settings.h"
 #include <vector>
 
 extern UserInterface ui;
@@ -19,6 +19,7 @@ extern MotorController motor;
 // Shadow State
 // We use a shadow copy of settings for editing, allowing the user to "Save" or "Cancel" changes.
 char speedLabelBuffer[32];
+MenuItem* menuSpeedSelector = nullptr;
 
 // --- Sweep Diagnostic ---
 float sweepMinSep = 80.0;
@@ -26,10 +27,40 @@ float sweepMaxSep = 100.0;
 float sweepSpeed = 1.0;
 MenuPage* pageSweep = nullptr;
 
+static const char* const phaseModeLabels[] = {"-", "1P", "2P", "3P", "4P"};
+static const char* const filterLabels[] = {"None", "IIR", "FIR"};
+static const char* const firLabels[] = {"Gentle", "Medium", "Agg"};
+static const char* const softStartCurveLabels[] = {"Linear", "Log", "Exp"};
+static const char* const rampTypeLabels[] = {"Linear", "S-Curve"};
+static const char* const brakeModeLabels[] = {"Off", "Pulse", "Ramp", "Soft"};
+static const char* const saverModeLabels[] = {"Bounce", "Matrix", "Liss"};
+static const char* const sleepDelayLabels[] = {"Off", "10s", "20s", "30s", "1m", "5m", "10m"};
+static const char* const bootSpeedLabels[] = {"33", "45", "78", "Last"};
+
+#if ENABLE_STANDBY && ENABLE_MUTE_RELAYS && ENABLE_DPDT_RELAYS
+static const char* const relayTestLabels[] = {"All Off", "Standby", "DPDT 1", "DPDT 2"};
+#elif ENABLE_STANDBY && ENABLE_MUTE_RELAYS
+static const char* const relayTestLabels[] = {"All Off", "Standby", "Mute A", "Mute B", "Mute C", "Mute D"};
+#elif ENABLE_MUTE_RELAYS && ENABLE_DPDT_RELAYS
+static const char* const relayTestLabels[] = {"All Off", "DPDT 1", "DPDT 2"};
+#elif ENABLE_MUTE_RELAYS
+static const char* const relayTestLabels[] = {"All Off", "Mute A", "Mute B", "Mute C", "Mute D"};
+#elif ENABLE_STANDBY
+static const char* const relayTestLabels[] = {"All Off", "Standby"};
+#else
+static const char* const relayTestLabels[] = {"All Off"};
+#endif
+static const size_t relayTestLabelCount = sizeof(relayTestLabels) / sizeof(relayTestLabels[0]);
+static uint8_t relayTestStage = 0;
+
 void updateSpeedLabel() {
     if (menuShadowSpeedIndex == 0) snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 33");
     else if (menuShadowSpeedIndex == 1) snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 45");
     else snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 78");
+
+    if (menuSpeedSelector) {
+        menuSpeedSelector->setLabel(speedLabelBuffer);
+    }
 }
 
 void initMenuState() {
@@ -40,39 +71,58 @@ void initMenuState() {
 
 void actionNextSpeed() {
     // Save current shadow state back to the temporary array
-    settings.get().speeds[menuShadowSpeedIndex] = menuShadowSettings;
-    
+    commitMenuShadowSettings();
+
     // Cycle to next speed index
     menuShadowSpeedIndex++;
     if (menuShadowSpeedIndex > 2) menuShadowSpeedIndex = 0;
-    
+
     // Skip 78 RPM if disabled
     if (menuShadowSpeedIndex == 2 && !settings.get().enable78rpm) {
         menuShadowSpeedIndex = 0;
     }
-    
+
     // Load new speed settings into shadow
     menuShadowSettings = settings.get().speeds[menuShadowSpeedIndex];
     updateSpeedLabel();
 }
 
 
-void actionSaveExit() {
-    // Commit all changes to persistent storage
+void commitMenuShadowSettings() {
+    if (menuShadowSpeedIndex >= 0 && menuShadowSpeedIndex < 3) {
+        settings.get().speeds[menuShadowSpeedIndex] = menuShadowSettings;
+    }
+}
+
+void saveMenuChangesAndExit() {
+    commitMenuShadowSettings();
+    motor.endRelayTest();
+    motor.applySettings();
     settings.save();
     ui.exitMenu();
 }
 
-void actionCancelExit() {
-    // Discard changes by reloading from persistent storage
+void cancelMenuChangesAndExit() {
     settings.load();
+    motor.endRelayTest();
+    motor.applySettings();
     ui.exitMenu();
+}
+
+void actionSaveExit() {
+    saveMenuChangesAndExit();
+}
+
+void actionCancelExit() {
+    cancelMenuChangesAndExit();
 }
 
 void actionFactoryReset() {
     ui.showConfirm("Factory Reset?", [](){
         settings.factoryReset();
         settings.load();
+        motor.endRelayTest();
+        motor.applySettings();
         ui.exitMenu();
     });
 }
@@ -88,17 +138,17 @@ void actionClearLog() {
 void actionEnterErrorLog() {
     // Create page on demand if needed (or reuse global)
     if (!pageErrorLog) pageErrorLog = new MenuPage("Error Log");
-    
+
     // Clear previous items (important for dynamic content)
     pageErrorLog->clear();
-    
+
     // Add Clear Action
     pageErrorLog->addItem(new MenuAction("Clear Log", actionClearLog));
-    
+
     // Fetch and add log lines
     std::vector<String> lines;
     errorHandler.getLogLines(lines);
-    
+
     if (lines.empty()) {
         pageErrorLog->addItem(new MenuInfo("No Errors"));
     } else {
@@ -107,7 +157,7 @@ void actionEnterErrorLog() {
             pageErrorLog->addItem(new MenuDynamicInfo(line));
         }
     }
-    
+
     pageErrorLog->addItem(new MenuAction("Back", [](){ ui.back(); }));
     ui.navigateTo(pageErrorLog);
 }
@@ -119,23 +169,25 @@ void buildPresetSlotMenu(int slot) {
     static int currentSlot = 0;
     currentSlot = slot;
     static MenuPage* pageSlot = nullptr;
-    
+
     char title[32];
     snprintf(title, sizeof(title), "Slot %d: %s", slot + 1, settings.getPresetName(slot));
-    
+
     if (pageSlot) delete pageSlot; // Rebuild
     pageSlot = new MenuPage(title);
-    
+
     // Load Action
     pageSlot->addItem(new MenuAction("Load", [](){
         if (settings.loadPreset(currentSlot)) {
+            motor.applySettings();
+            settings.save();
             ui.showMessage("Loaded!", 2000);
             ui.exitMenu(); // Exit to apply
         } else {
             ui.showError("Empty Slot", 2000);
         }
     }));
-    
+
     // Save Action
     pageSlot->addItem(new MenuAction("Save", [](){
         ui.showConfirm("Overwrite?", [](){
@@ -144,22 +196,22 @@ void buildPresetSlotMenu(int slot) {
             ui.back();
         });
     }));
-    
+
     // Rename Action
     // We need a persistent buffer for the name editing
     static char nameBuffer[17];
     strncpy(nameBuffer, settings.getPresetName(slot), 16);
     nameBuffer[16] = 0;
-    
+
     pageSlot->addItem(new MenuText("Rename", nameBuffer, 16));
-    
+
     // Save Name Action (Explicit or auto-save on back?)
     // MenuText saves to buffer on exit. We need to commit it to settings.
     pageSlot->addItem(new MenuAction("Apply Name", [](){
         settings.renamePreset(currentSlot, nameBuffer);
         ui.showMessage("Renamed!", 1000);
     }));
-    
+
     // Reset Action
     pageSlot->addItem(new MenuAction("Clear", [](){
         ui.showConfirm("Clear Slot?", [](){
@@ -168,7 +220,7 @@ void buildPresetSlotMenu(int slot) {
             ui.back();
         });
     }));
-    
+
     pageSlot->addItem(new MenuAction("Back", [](){ ui.back(); }));
     ui.navigateTo(pageSlot);
 }
@@ -176,16 +228,16 @@ void buildPresetSlotMenu(int slot) {
 void actionEnterPresets() {
     // Populate the Presets page dynamically
     pagePresets->clear();
-    
+
     for (int i = 0; i < MAX_PRESET_SLOTS; i++) {
         // Create a dynamic label for the slot
         char label[32];
         snprintf(label, sizeof(label), "%d: %s", i + 1, settings.getPresetName(i));
-        
+
         // Use lambda capture to bind the slot index
         pagePresets->addItem(new MenuAction(label, [i](){ buildPresetSlotMenu(i); }));
     }
-    
+
     pagePresets->addItem(new MenuAction("Back", [](){ ui.back(); }));
     ui.navigateTo(pagePresets);
 }
@@ -195,7 +247,7 @@ void actionEnterSweep() {
         ui.showError("N/A 4-Phase", 2000);
         return;
     }
-    
+
     if (!pageSweep) pageSweep = new MenuPage("Symmetric Sweep");
     pageSweep->clear();
     pageSweep->addItem(new MenuFloat("Min Sep", &sweepMinSep, 1.0, 0.0, 180.0));
@@ -209,6 +261,87 @@ void actionEnterSweep() {
     ui.navigateTo(pageSweep);
 }
 
+void actionEnterBrakeTune() {
+    if (!pageBrakeTune) pageBrakeTune = new MenuPage("Brake Tune");
+    pageBrakeTune->clear();
+
+    pageBrakeTune->addItem(new MenuInfo("Tune, Test, Save"));
+    pageBrakeTune->addItem(new MenuByte("Mode", &settings.get().brakeMode, 0, 3, brakeModeLabels, 4));
+
+    MenuItem* brakeDuration = new MenuFloat("Duration", &settings.get().brakeDuration, 0.1, 0.0, 10.0);
+    brakeDuration->setVisibleWhen([](){ return settings.get().brakeMode != BRAKE_OFF; });
+    pageBrakeTune->addItem(brakeDuration);
+
+    MenuItem* brakePulse = new MenuFloat("Pulse Gap", &settings.get().brakePulseGap, 0.1, 0.1, 2.0);
+    brakePulse->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_PULSE; });
+    pageBrakeTune->addItem(brakePulse);
+
+    MenuItem* brakeStart = new MenuFloat("Start Hz", &settings.get().brakeStartFreq, 1.0, 10.0, 200.0);
+    brakeStart->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_RAMP; });
+    pageBrakeTune->addItem(brakeStart);
+
+    MenuItem* brakeStop = new MenuFloat("Stop Hz", &settings.get().brakeStopFreq, 1.0, 0.0, 50.0);
+    brakeStop->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_RAMP; });
+    pageBrakeTune->addItem(brakeStop);
+
+    MenuItem* brakeCutoff = new MenuFloat("Cutoff Hz", &settings.get().softStopCutoff, 1.0, 0.0, 50.0);
+    brakeCutoff->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_SOFT_STOP; });
+    pageBrakeTune->addItem(brakeCutoff);
+
+    pageBrakeTune->addItem(new MenuAction("Start Motor", [](){
+        if (motor.isStandby()) motor.toggleStandby();
+        motor.start();
+        ui.showMessage("Motor Starting", 1000);
+    }));
+
+    pageBrakeTune->addItem(new MenuAction("Brake Stop", [](){
+        if (motor.isRunning()) {
+            motor.stop();
+            ui.showMessage("Brake Test", 1000);
+        } else {
+            ui.showError("Not Running", 1000);
+        }
+    }));
+
+    pageBrakeTune->addItem(new MenuAction("Save Brake", [](){
+        settings.save();
+        ui.showMessage("Brake Saved", 1000);
+    }));
+
+    pageBrakeTune->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    ui.navigateTo(pageBrakeTune);
+}
+
+void actionEnterRelayTest() {
+    if (!motor.beginRelayTest()) {
+        ui.showError("Stop Motor First", 2000);
+        return;
+    }
+
+    relayTestStage = 0;
+    if (!pageRelayTest) pageRelayTest = new MenuPage("Relay Test");
+    pageRelayTest->clear();
+
+    pageRelayTest->addItem(new MenuInfo("Waveform Off"));
+    uint8_t maxStage = motor.getRelayTestStageCount();
+    if (maxStage > 0) maxStage--;
+    pageRelayTest->addItem(new MenuByte("Output", &relayTestStage, 0, maxStage,
+        relayTestLabels, relayTestLabelCount,
+        [](uint8_t stage) { motor.setRelayTestStage(stage); }));
+
+    pageRelayTest->addItem(new MenuAction("All Off", [](){
+        relayTestStage = 0;
+        motor.setRelayTestStage(0);
+    }));
+
+    pageRelayTest->addItem(new MenuAction("Exit Test", [](){
+        motor.endRelayTest();
+        ui.back();
+    }));
+
+    ui.navigateTo(pageRelayTest);
+}
+
 // --- Menu Builder ---
 
 
@@ -218,78 +351,124 @@ void buildMenuSystem() {
     pageSpeedTuning->addItem(new MenuFloat("Frequency", &menuShadowSettings.frequency, 0.1, 10.0, 3000.0));
     pageSpeedTuning->addItem(new MenuFloat("Min Freq", &menuShadowSettings.minFrequency, 0.1, 10.0, 3000.0));
     pageSpeedTuning->addItem(new MenuFloat("Max Freq", &menuShadowSettings.maxFrequency, 0.1, 10.0, 3000.0));
-    pageSpeedTuning->addItem(new MenuInt("Filt Type", (int*)&menuShadowSettings.filterType, 0, 2));
-    pageSpeedTuning->addItem(new MenuFloat("IIR Alpha", &menuShadowSettings.iirAlpha, 0.01, 0.01, 0.99));
-    pageSpeedTuning->addItem(new MenuInt("FIR Prof", (int*)&menuShadowSettings.firProfile, 0, 2));
+    pageSpeedTuning->addItem(new MenuByte("Filt Type", &menuShadowSettings.filterType, 0, 2, filterLabels, 3));
+    MenuItem* iirAlpha = new MenuFloat("IIR Alpha", &menuShadowSettings.iirAlpha, 0.01, 0.01, 0.99);
+    iirAlpha->setVisibleWhen([](){ return menuShadowSettings.filterType == FILTER_IIR; });
+    pageSpeedTuning->addItem(iirAlpha);
+    MenuItem* firProfile = new MenuByte("FIR Prof", &menuShadowSettings.firProfile, 0, 2, firLabels, 3);
+    firProfile->setVisibleWhen([](){ return menuShadowSettings.filterType == FILTER_FIR; });
+    pageSpeedTuning->addItem(firProfile);
     pageSpeedTuning->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- Phase Page (Mixed) ---
     pagePhase = new MenuPage("Phase Control");
-    pagePhase->addItem(new MenuInt("Mode (Glb)", (int*)&settings.get().phaseMode, 1, 4));
-    pagePhase->addItem(new MenuFloat("Ph 2 Offs", &menuShadowSettings.phaseOffset[1], 0.1, -360.0, 360.0));
-    pagePhase->addItem(new MenuFloat("Ph 3 Offs", &menuShadowSettings.phaseOffset[2], 0.1, -360.0, 360.0));
-    pagePhase->addItem(new MenuFloat("Ph 4 Offs", &menuShadowSettings.phaseOffset[3], 0.1, -360.0, 360.0));
-    pagePhase->addItem(new MenuAction("Sweep Diag.", actionEnterSweep));
+    pagePhase->addItem(new MenuByte("Mode (Glb)", &settings.get().phaseMode, 1, 4, phaseModeLabels, 5));
+    MenuItem* phase2 = new MenuFloat("Ph 2 Offs", &menuShadowSettings.phaseOffset[1], 0.1, -360.0, 360.0);
+    phase2->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_2; });
+    pagePhase->addItem(phase2);
+    MenuItem* phase3 = new MenuFloat("Ph 3 Offs", &menuShadowSettings.phaseOffset[2], 0.1, -360.0, 360.0);
+    phase3->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_3; });
+    pagePhase->addItem(phase3);
+    MenuItem* phase4 = new MenuFloat("Ph 4 Offs", &menuShadowSettings.phaseOffset[3], 0.1, -360.0, 360.0);
+    phase4->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_4; });
+    pagePhase->addItem(phase4);
+    MenuItem* sweepDiag = new MenuAction("Sweep Diag.", actionEnterSweep);
+    sweepDiag->setVisibleWhen([](){ return settings.get().phaseMode == PHASE_2 || settings.get().phaseMode == PHASE_3; });
+    pagePhase->addItem(sweepDiag);
     pagePhase->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- Motor Page (Mixed) ---
     pageMotor = new MenuPage("Motor Control");
     // Per-Speed
     pageMotor->addItem(new MenuFloat("Soft Start", &menuShadowSettings.softStartDuration, 0.1, 0.0, 10.0));
-    pageMotor->addItem(new MenuInt("Red. Amp %", (int*)&menuShadowSettings.reducedAmplitude, 50, 100));
-    pageMotor->addItem(new MenuInt("Amp Delay", (int*)&menuShadowSettings.amplitudeDelay, 0, 60));
-    pageMotor->addItem(new MenuInt("Kick Mult", (int*)&menuShadowSettings.startupKick, 1, 4));
-    pageMotor->addItem(new MenuInt("Kick Dur", (int*)&menuShadowSettings.startupKickDuration, 0, 15));
-    pageMotor->addItem(new MenuFloat("Kick Ramp", &menuShadowSettings.startupKickRampDuration, 0.1, 0.0, 15.0));
+    pageMotor->addItem(new MenuByte("Red. Amp %", &menuShadowSettings.reducedAmplitude, 50, 100));
+    pageMotor->addItem(new MenuByte("Amp Delay", &menuShadowSettings.amplitudeDelay, 0, 60));
+    pageMotor->addItem(new MenuByte("Kick Mult", &menuShadowSettings.startupKick, 1, 4));
+    MenuItem* kickDuration = new MenuByte("Kick Dur", &menuShadowSettings.startupKickDuration, 0, 15);
+    kickDuration->setVisibleWhen([](){ return menuShadowSettings.startupKick > 1; });
+    pageMotor->addItem(kickDuration);
+    MenuItem* kickRamp = new MenuFloat("Kick Ramp", &menuShadowSettings.startupKickRampDuration, 0.1, 0.0, 15.0);
+    kickRamp->setVisibleWhen([](){ return menuShadowSettings.startupKick > 1; });
+    pageMotor->addItem(kickRamp);
     // Global
-    pageMotor->addItem(new MenuInt("V/f Blend%", (int*)&settings.get().freqDependentAmplitude, 0, 100));
-    pageMotor->addItem(new MenuFloat("V/f LowHz", &settings.get().vfLowFreq, 1.0, 0.0, 50.0));
-    pageMotor->addItem(new MenuInt("V/f Low%", (int*)&settings.get().vfLowBoost, 0, 100));
-    pageMotor->addItem(new MenuFloat("V/f MidHz", &settings.get().vfMidFreq, 1.0, 0.0, 100.0));
-    pageMotor->addItem(new MenuInt("V/f Mid%", (int*)&settings.get().vfMidBoost, 0, 100));
-    pageMotor->addItem(new MenuInt("Max Amp %", (int*)&settings.get().maxAmplitude, 0, 100));
-    pageMotor->addItem(new MenuInt("SS Curve", (int*)&settings.get().softStartCurve, 0, 2));
+    pageMotor->addItem(new MenuByte("V/f Blend%", &settings.get().freqDependentAmplitude, 0, 100));
+    MenuItem* vfLowHz = new MenuFloat("V/f LowHz", &settings.get().vfLowFreq, 1.0, 0.0, 50.0);
+    vfLowHz->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
+    pageMotor->addItem(vfLowHz);
+    MenuItem* vfLowBoost = new MenuByte("V/f Low%", &settings.get().vfLowBoost, 0, 100);
+    vfLowBoost->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
+    pageMotor->addItem(vfLowBoost);
+    MenuItem* vfMidHz = new MenuFloat("V/f MidHz", &settings.get().vfMidFreq, 1.0, 0.0, 100.0);
+    vfMidHz->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
+    pageMotor->addItem(vfMidHz);
+    MenuItem* vfMidBoost = new MenuByte("V/f Mid%", &settings.get().vfMidBoost, 0, 100);
+    vfMidBoost->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
+    pageMotor->addItem(vfMidBoost);
+    pageMotor->addItem(new MenuByte("Max Amp %", &settings.get().maxAmplitude, 0, 100));
+    pageMotor->addItem(new MenuByte("Ramp Type", &settings.get().rampType, 0, 1, rampTypeLabels, 2));
+    MenuItem* softStartCurve = new MenuByte("SS Curve", &settings.get().softStartCurve, 0, 2, softStartCurveLabels, 3);
+    softStartCurve->setVisibleWhen([](){ return settings.get().rampType == RAMP_LINEAR; });
+    pageMotor->addItem(softStartCurve);
     pageMotor->addItem(new MenuBool("Smooth Sw", &settings.get().smoothSwitching));
-    pageMotor->addItem(new MenuInt("Sw Ramp", (int*)&settings.get().switchRampDuration, 1, 5));
-    pageMotor->addItem(new MenuInt("Brake Mode", (int*)&settings.get().brakeMode, 0, 3));
-    pageMotor->addItem(new MenuFloat("Brake Dur", &settings.get().brakeDuration, 0.1, 0.0, 10.0));
-    pageMotor->addItem(new MenuFloat("Brk Pulse", &settings.get().brakePulseGap, 0.1, 0.1, 2.0));
-    pageMotor->addItem(new MenuFloat("Brk StartF", &settings.get().brakeStartFreq, 1.0, 10.0, 200.0));
-    pageMotor->addItem(new MenuFloat("Brk StopF", &settings.get().brakeStopFreq, 1.0, 0.0, 50.0));
-    pageMotor->addItem(new MenuFloat("Brk Cutoff", &settings.get().softStopCutoff, 1.0, 0.0, 50.0));
-    pageMotor->addItem(new MenuInt("Ramp Type", (int*)&settings.get().rampType, 0, 1));
+    MenuItem* switchRamp = new MenuByte("Sw Ramp", &settings.get().switchRampDuration, 1, 5);
+    switchRamp->setVisibleWhen([](){ return settings.get().smoothSwitching; });
+    pageMotor->addItem(switchRamp);
+    pageMotor->addItem(new MenuByte("Brake Mode", &settings.get().brakeMode, 0, 3, brakeModeLabels, 4));
+    MenuItem* brakeDuration = new MenuFloat("Brake Dur", &settings.get().brakeDuration, 0.1, 0.0, 10.0);
+    brakeDuration->setVisibleWhen([](){ return settings.get().brakeMode != BRAKE_OFF; });
+    pageMotor->addItem(brakeDuration);
+    MenuItem* brakePulse = new MenuFloat("Brk Pulse", &settings.get().brakePulseGap, 0.1, 0.1, 2.0);
+    brakePulse->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_PULSE; });
+    pageMotor->addItem(brakePulse);
+    MenuItem* brakeStart = new MenuFloat("Brk StartF", &settings.get().brakeStartFreq, 1.0, 10.0, 200.0);
+    brakeStart->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_RAMP; });
+    pageMotor->addItem(brakeStart);
+    MenuItem* brakeStop = new MenuFloat("Brk StopF", &settings.get().brakeStopFreq, 1.0, 0.0, 50.0);
+    brakeStop->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_RAMP; });
+    pageMotor->addItem(brakeStop);
+    MenuItem* brakeCutoff = new MenuFloat("Brk Cutoff", &settings.get().softStopCutoff, 1.0, 0.0, 50.0);
+    brakeCutoff->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_SOFT_STOP; });
+    pageMotor->addItem(brakeCutoff);
     pageMotor->addItem(new MenuBool("Auto Start", &settings.get().autoStart));
+    pageMotor->addItem(new MenuAction("Brake Tune", actionEnterBrakeTune));
     pageMotor->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- Power Page (Global) ---
     pagePower = new MenuPage("Power Control");
-    
+
     if (ENABLE_MUTE_RELAYS) {
         pagePower->addItem(new MenuBool("Rly: ActHi", &settings.get().relayActiveHigh));
         if (ENABLE_STANDBY) {
             pagePower->addItem(new MenuBool("Rly: Stby", &settings.get().muteRelayLinkStandby));
         }
         pagePower->addItem(new MenuBool("Rly: S/S", &settings.get().muteRelayLinkStartStop));
-        pagePower->addItem(new MenuInt("Rly: Delay", (int*)&settings.get().powerOnRelayDelay, 0, 10));
+        pagePower->addItem(new MenuByte("Rly: Delay", &settings.get().powerOnRelayDelay, 0, 10));
     }
-    
+
     if (ENABLE_STANDBY) {
-        pagePower->addItem(new MenuInt("Auto Stby", (int*)&settings.get().autoStandbyDelay, 0, 60));
+        pagePower->addItem(new MenuByte("Auto Stby", &settings.get().autoStandbyDelay, 0, 60));
     }
-    
+
     pagePower->addItem(new MenuBool("Auto Boot", &settings.get().autoBoot));
+    if (ENABLE_STANDBY || ENABLE_MUTE_RELAYS) {
+        pagePower->addItem(new MenuAction("Relay Test", actionEnterRelayTest));
+    }
     pagePower->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- Display Page (Global) ---
     pageDisplay = new MenuPage("Display");
-    pageDisplay->addItem(new MenuInt("Brightness", (int*)&settings.get().displayBrightness, 0, 255));
-    pageDisplay->addItem(new MenuInt("Sleep Dly", (int*)&settings.get().displaySleepDelay, 0, 6));
+    pageDisplay->addItem(new MenuByte("Brightness", &settings.get().displayBrightness, 0, 255));
+    pageDisplay->addItem(new MenuByte("Sleep Dly", &settings.get().displaySleepDelay, 0, 6, sleepDelayLabels, 7));
     pageDisplay->addItem(new MenuBool("Scrn Saver", &settings.get().screensaverEnabled));
-    pageDisplay->addItem(new MenuInt("Saver Mode", (int*)&settings.get().screensaverMode, 0, 2)); // 0=Bounce, 1=Matrix, 2=Lissajous
-    pageDisplay->addItem(new MenuInt("Auto Dim", (int*)&settings.get().autoDimDelay, 0, 60));
+    MenuItem* saverMode = new MenuByte("Saver Mode", &settings.get().screensaverMode, 0, 2, saverModeLabels, 3);
+    saverMode->setVisibleWhen([](){ return settings.get().screensaverEnabled; });
+    pageDisplay->addItem(saverMode);
+    pageDisplay->addItem(new MenuByte("Auto Dim", &settings.get().autoDimDelay, 0, 60));
     pageDisplay->addItem(new MenuBool("Show Runtime", &settings.get().showRuntime));
     pageDisplay->addItem(new MenuBool("Err Display", &settings.get().errorDisplayEnabled));
-    pageDisplay->addItem(new MenuInt("Err Dur", (int*)&settings.get().errorDisplayDuration, 1, 60));
+    MenuItem* errorDuration = new MenuByte("Err Dur", &settings.get().errorDisplayDuration, 1, 60);
+    errorDuration->setVisibleWhen([](){ return settings.get().errorDisplayEnabled; });
+    pageDisplay->addItem(errorDuration);
     pageDisplay->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- System Page (Global) ---
@@ -307,36 +486,37 @@ void buildMenuSystem() {
             ui.back();
         });
     }));
-    pageSystem->addItem(new MenuInt("Boot Speed", (int*)&settings.get().bootSpeed, 0, 3)); // 0=33, 1=45, 2=78, 3=Last
+    pageSystem->addItem(new MenuByte("Boot Speed", &settings.get().bootSpeed, 0, 3, bootSpeedLabels, 4));
     pageSystem->addItem(new MenuAction("Fact Reset", actionFactoryReset));
     pageSystem->addItem(new MenuAction("Back", [](){ ui.back(); }));
-    
+
     // --- Presets Page ---
     pagePresets = new MenuPage("Presets");
     // Items are populated dynamically in actionEnterPresets
     pagePresets->addItem(new MenuAction("Back", [](){ ui.back(); }));
-    
+
     // --- Main Menu ---
     pageMain = new MenuPage("Main Menu");
-    
+
     extern bool safeModeActive;
     if (safeModeActive) {
         pageMain->addItem(new MenuAction("Exit Safe Mode", [](){
             hal.watchdogReboot();
         }));
     }
-    
+
     // The first item toggles which speed we are editing in the submenus
-    pageMain->addItem(new MenuAction(speedLabelBuffer, actionNextSpeed));  
-    
+    menuSpeedSelector = new MenuAction(speedLabelBuffer, actionNextSpeed);
+    pageMain->addItem(menuSpeedSelector);
+
     pageMain->addItem(new MenuNav("Speed Tuning", pageSpeedTuning));
     pageMain->addItem(new MenuNav("Phase", pagePhase));
     pageMain->addItem(new MenuNav("Motor", pageMotor));
     pageMain->addItem(new MenuNav("Power", pagePower));
     pageMain->addItem(new MenuNav("Display", pageDisplay));
     pageMain->addItem(new MenuNav("System", pageSystem));
-    pageMain->addItem(new MenuAction("Presets", actionEnterPresets)); 
-    
+    pageMain->addItem(new MenuAction("Presets", actionEnterPresets));
+
     pageMain->addItem(new MenuAction("Save & Exit", actionSaveExit));
     pageMain->addItem(new MenuAction("Cancel", actionCancelExit));
 }

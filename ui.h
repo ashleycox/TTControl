@@ -62,18 +62,21 @@ private:
     // Message Dialog State
     bool _showingMessage;
     const char* _messageText;
+    char _messageBuffer[64];
     uint32_t _messageStartTime;
     uint32_t _messageDuration;
     
     // Confirmation Dialog State
     bool _showingConfirm;
     const char* _confirmMsg;
+    char _confirmBuffer[64];
     void (*_confirmAction)();
     bool _confirmResult;
     
     // Error Dialog State
     bool _showingError;
     const char* _errorMsg;
+    char _errorBuffer[64];
     uint32_t _errorStartTime;
     uint32_t _errorDuration;
     

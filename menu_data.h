@@ -24,6 +24,8 @@ extern MenuPage* pagePower;
 extern MenuPage* pageMotor;
 extern MenuPage* pageDisplay;
 extern MenuPage* pageSystem;
+extern MenuPage* pageBrakeTune;
+extern MenuPage* pageRelayTest;
 
 // Shadow State for Speed Settings
 // Used to edit settings temporarily before saving
@@ -33,5 +35,8 @@ extern int menuShadowSpeedIndex;
 // Builder Function
 void buildMenuSystem();
 void initMenuState();
+void commitMenuShadowSettings();
+void saveMenuChangesAndExit();
+void cancelMenuChangesAndExit();
 
 #endif // MENU_DATA_H

@@ -96,7 +96,6 @@ private:
     
     // Injection State
     int _injectedDelta;
-    bool _injectedBtn;
     
     int readPitchEncoder();
 };

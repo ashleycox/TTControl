@@ -34,6 +34,7 @@ UserInterface ui;
 volatile MotorState currentMotorState = STATE_STANDBY;
 volatile float currentFrequency = 50.0;
 volatile float currentPitchPercent = 0.0;
+volatile uint32_t core1HeartbeatMs = 0;
 
 // --- Core 0: UI & Control Logic ---
 // Handles user interaction, display, motor state machine, and serial comms.
@@ -97,8 +98,12 @@ void loop() {
         handleSerialCommands();
     }
     
-    // 4. Feed Watchdog
-    hal.watchdogFeed();
+    // 4. Feed Watchdog only while Core 1 is actively servicing waveform work.
+    uint32_t now = hal.getMillis();
+    uint32_t core1Age = now - core1HeartbeatMs;
+    if (core1HeartbeatMs != 0 && core1Age < 1000) {
+        hal.watchdogFeed();
+    }
 }
 
 // --- Core 1: Waveform Generation ---
@@ -111,6 +116,7 @@ void setup1() {
     
     // Initialize Waveform Generator (PWM, LUTs)
     waveform.begin();
+    core1HeartbeatMs = hal.getMillis();
     
     Serial.println("Core 1 Setup Complete");
 }
@@ -119,4 +125,5 @@ void loop1() {
     // High priority waveform generation loop
     // Generates samples at 20kHz (50us interval)
     waveform.update();
+    core1HeartbeatMs = hal.getMillis();
 }

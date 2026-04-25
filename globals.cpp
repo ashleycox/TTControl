@@ -17,9 +17,12 @@ MenuPage* pagePresets = nullptr;
 MenuPage* pageErrorLog = nullptr;
 MenuPage* pageSpeedTuning = nullptr;
 MenuPage* pagePhase = nullptr;
+MenuPage* pagePower = nullptr;
 MenuPage* pageMotor = nullptr;
 MenuPage* pageDisplay = nullptr;
 MenuPage* pageSystem = nullptr;
+MenuPage* pageBrakeTune = nullptr;
+MenuPage* pageRelayTest = nullptr;
 
 // --- Shadow Settings State ---
 // Used for temporary storage during menu editing operations

@@ -1,6 +1,6 @@
 # TT Control
 
-TT Control is an advanced turntable motor controller designed to provide precise, multi-phase sine wave generation for controlling synchronous AC and BLDC motors. Built on the Raspberry Pi Pico RP2053, using the Arduino-Pico core, it leverages the Pico's dual-core architecture for efficient operation, separating UI and control logic from high-precision waveform generation.
+TT Control is an advanced turntable motor controller designed to provide precise, multi-phase sine wave generation for controlling synchronous AC and BLDC motors. Built on the Raspberry Pi Pico RP2350, using the Arduino-Pico core, it leverages the Pico's dual-core architecture for efficient operation, separating UI and control logic from high-precision waveform generation.
 
 It features extensive configurability via a hierarchical menu system, hardware configurability via compile-time flags, multi-speed support, configurable settings presets, advanced amplitude and phase control, configurable hardware controls, support for a pitch control, digital filtering and sine wave interpolation, non-volatile settings storage and so much more.
 
@@ -9,7 +9,7 @@ It features extensive configurability via a hierarchical menu system, hardware c
 
 | Component | Specification | Default Value / Assignment | Notes |
 | :--- | :--- | :--- | :--- |
-| **Microcontroller** | Raspberry Pi Pico (RP2040) | | Dual Core architecture is mandatory. |
+| **Microcontroller** | RP2350 | | Dual Core architecture is mandatory. |
 | **Board** | Pimoroni Pico+2 | | 16MB Flash split: **8MB Sketch / 8MB LittleFS** for settings. |
 | **Development** | Arduino IDE / `earlephilhower/arduino-pico` | | Use `arduino-cli` best practices. |
 | **OLED Display** | SSD1306 (128x64 I2C) | **I2C0 @ 0x3C** | |
@@ -54,10 +54,10 @@ All code is extensively commented. The menu system is data-driven and arranged a
 | 14 | Secondary (Pitch) Encoder DT | **Optional, controlled by compile flag.** |
 | 15 | Secondary (Pitch) Encoder SW | **Optional, controlled by compile flag.** |
 | 16 | Standby Relay Control | Active High Default (Configurable). |
-| 17 | Phase A Muting Control | Active High Default (Configurable). Acts as DPDT Relay 1 if `ENABLE_DPDT_RELAYS` is true. |
-| 18 | Phase B Muting Control | Active High Default (Configurable). Acts as DPDT Relay 2 if `ENABLE_DPDT_RELAYS` is true. |
-| 19 | Phase C Muting Control | Active High Default (Configurable). Unused if `ENABLE_DPDT_RELAYS` is true. |
-| 20 | Phase D Muting Control | Active High Default (Configurable). Unused if `ENABLE_DPDT_RELAYS` is true. |
+| 17 | Phase A Muting Control | Active High Default (Configurable). Acts as DPDT Relay 1 if `ENABLE_DPDT_RELAYS` is `1`. |
+| 18 | Phase B Muting Control | Active High Default (Configurable). Acts as DPDT Relay 2 if `ENABLE_DPDT_RELAYS` is `1`. |
+| 19 | Phase C Muting Control | Active High Default (Configurable). Unused if `ENABLE_DPDT_RELAYS` is `1`. |
+| 20 | Phase D Muting Control | Active High Default (Configurable). Unused if `ENABLE_DPDT_RELAYS` is `1`. |
 | 21 | Standby Button | **Optional, controlled by compile flag.** |
 | 22 | Speed Button | **Optional, controlled by compile flag.** |
 | 23 | Start / Stop Button | **Optional, controlled by compile flag.** |
@@ -80,7 +80,7 @@ Default angles depend on phase mode and can be adjusted.
 ## 2. Features in detail
 
 ### 2.1. Sine Wave Generation
-- **High-Precision DMA-based Generation:** Uses the RP2040's Direct Memory Access (DMA) and hardware PWM slices for jitter-free, CPU-independent waveform generation.
+- **High-Precision DMA-based Generation:** Uses the RP2350's Direct Memory Access (DMA) and hardware PWM slices for jitter-free, CPU-independent waveform generation.
 - **Waveform Lookup Table:** Pre-computed, configurable sample lookup table with configurable lookup table size (1024, 2048, 4096, 8192, 16384).
 - **Interpolation:** Linear interpolation to smooth output with smaller sample tables.
 - **Frequency Range:** 10-3000 Hz in 0.1 Hz steps.
@@ -182,6 +182,8 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ### 2.5. User Interface
 - **Display Support:** Support for 128x64 OLED display.
 - **Menu System:** Comprehensive, logically organised hierarchical menu system to adjust all possible configuration settings via the user interface.
+- **Context-Aware Menus:** Dependent settings are hidden until relevant, such as IIR/FIR filter options, phase offsets, V/f curve points, brake parameters, and screensaver/error durations.
+- **Named Value Labels:** Mode settings show readable labels on the OLED instead of raw numeric values where practical.
 - **Full Configurability:** Every possible configurable option available as a menu setting.
 - **Real-Time Updates:** All settings update in real time when adjustments are being made, to observe their effect on the motor. Settings are only saved to flash on selecting the 'save' option from the menu.
 - **Single Encoder Control:** If only the main encoder is installed, click to enter a value, turn to adjust, and click to save.
@@ -196,7 +198,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
   - **Rotate:** Change Speed (33/45/78).
   - **Press + Rotate:** Cycle Status Views (Standard -> Stats -> Dim).
 - **Status Modes:**
-  - **Standard:** Large RPM display + Pitch Bar.
+  - **Standard:** Large RPM display, state label, frequency readout, pitch/ramp bar, and start/brake/ramp progress when active.
   - **Stats:** Session Runtime + Total Runtime.
   - **Dim:** Minimal display with low brightness (auto-dim supported).
 - **Auto Features:**
@@ -224,7 +226,8 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ### 2.6. Serial Monitor Support
 - **Optional Enable:** Optional, enabled or disabled by compile-time configuration flags.
 - **Interactive CLI:** Full command-line interface for control and configuration.
-- **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, and more.
+- **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, and diagnostics.
+- **Diagnostics:** Serial commands include `brake test start`, `brake test stop`, and `relay test <stage|off>` for bench checks.
 - **JSON Preset Export/Import:** Advanced configuration sharing.
   - `export preset <1-5>`: Dumps the entire layout of the requested preset, along with all global constraints and brake configurations, into a single minified JSON string.
   - `import preset <1-5> <json>`: Instantly parses and injects a shared JSON configuration string directly into the specified preset slot.
@@ -255,11 +258,11 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 
 ### 2.8. Power Management
 - Standby mode to enter low power state
-  - **Compile-time Flag**: `ENABLE_STANDBY` (default `true`). If disabled, the system boots directly to STOPPED state and all standby features are hidden.
+  - **Compile-time Flag**: `ENABLE_STANDBY` (default `1`). If disabled, the system boots directly to STOPPED state and all standby features are hidden.
 - Relay control for secondary power to drive load driving circuitry
 - Output muting pins assigned for each channel to control relays or drive the mute lines of amplifiers
-  - **Compile-time Flag**: `ENABLE_MUTE_RELAYS` (default `true`). If disabled, relay logic is skipped.
-  - **DPDT Support**: `ENABLE_DPDT_RELAYS` (default `false`) allows using 2 DPDT relays instead of 4 SPST relays.
+  - **Compile-time Flag**: `ENABLE_MUTE_RELAYS` (default `1`). If disabled, relay logic is skipped.
+  - **DPDT Support**: `ENABLE_DPDT_RELAYS` (default `0`) allows using 2 DPDT relays instead of 4 SPST relays.
 - Staggered switching of muting pins with configurable switching delays
 - Setting to switch muting relays with standby, or on motor start / stop
 - Configurable Power-On Relay Delay (0-10s) to prevent audible pop or transient during initialisation.
@@ -277,7 +280,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ### 2.9. Multi-Core & DMA Architecture
 - **Core 0:** Handles UI, menu system, encoder input, and high-level motor control logic.
 - **Core 1:** Dedicated to waveform buffer management.
-- **DMA & Hardware PWM:** The actual waveform generation is offloaded to the RP2040's DMA controller and PWM hardware. This ensures:
+- **DMA & Hardware PWM:** The actual waveform generation is offloaded to the RP2350's DMA controller and PWM hardware. This ensures:
   - Zero CPU jitter in the output signal.
   - Extremely low CPU usage (Core 1 only wakes to refill buffers).
   - Robust operation even during heavy UI activity.
@@ -331,6 +334,16 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `list` | **List all available settings and values** |
 | `set <key> <val>` | Set a parameter value |
 | `get <key>` | Get a parameter value |
+| `save` | Save current RAM settings to flash |
+| `reboot` | Reboot via watchdog |
+| `dump settings` | Print a readable settings summary |
+| `preset list` | List preset slots |
+| `preset load <1-5>` | Load a preset into RAM and apply it |
+| `preset save <1-5>` | Save current RAM settings to a preset slot |
+| `brake test start` | Start motor for brake tuning |
+| `brake test stop` | Stop motor using the configured brake mode |
+| `relay test <0-N>` | Enter relay test and activate a relay output stage |
+| `relay test off` | Exit relay test and restore normal relay handling |
 | `error dump` | Dump error log |
 | `error clear` | Clear error log |
 | `f` | Factory Reset |
@@ -347,12 +360,27 @@ Use these keys with `set` and `get`. Speed-specific settings apply to the **curr
 | `ramp` | Soft Start Ramp Type (0=Linear, 1=S-Curve) | Int |
 | `pitch_step` | Pitch Step Size (e.g. 0.1) | Float |
 | `rev_enc` | Reverse Encoder (0/1) | Bool |
+| `phase_mode` | Phase mode (1-4) | Int |
+| `max_amp` | Global maximum amplitude (0-100) | Int |
+| `smooth_switch` | Smooth speed switching (0/1) | Bool |
+| `switch_ramp` | Speed switch ramp duration (s) | Int |
+| `brake_mode` | Brake mode (0=Off, 1=Pulse, 2=Ramp, 3=SoftStop) | Int |
+| `brake_duration` | Brake duration (s) | Float |
+| `brake_pulse_gap` | Pulse brake gap (s) | Float |
+| `brake_start_freq` | Ramp brake start frequency (Hz) | Float |
+| `brake_stop_freq` | Ramp brake stop frequency (Hz) | Float |
+| `brake_cutoff` | Soft-stop cutoff frequency (Hz) | Float |
+| `relay_active_high` | Relay active polarity (0/1) | Bool |
+| `relay_delay` | Relay power-on delay (s) | Int |
 | **Current Speed** | | |
 | `freq` | Frequency (Hz) | Float |
 | `phase1`..`phase4` | Phase Offsets (Degrees) | Float |
 | `soft_start` | Soft Start Duration (s) | Float |
 | `kick` | Startup Kick Multiplier (e.g. 2) | Int |
 | `kick_dur` | Startup Kick Duration (s) | Int |
+| `filter` | Current speed filter (0=None, 1=IIR, 2=FIR) | Int |
+| `reduced_amp` | Current speed reduced amplitude (%) | Int |
+| `amp_delay` | Current speed amplitude delay (s) | Int |
 | **Live** | | |
 | `pitch` | Current Pitch (%) | Float |
 
@@ -413,6 +441,7 @@ The menu structure is designed for a data-driven implementation.
 - **Brk Cutoff**: Frequency when power drops in SoftStop coasting.
 - **Ramp Type**: Frequency soft start style (0=Linear, 1=S-Curve).
 - **Auto Start**: Start motor immediately after boot/wake.
+- **Brake Tune:** Guided brake tuning page with mode-specific settings, explicit Start Motor and Brake Stop actions, and Save Brake.
 
 ### Power Control
 - **Rly: ActHi:** Toggle relay logic (Active High/Low). (If `ENABLE_MUTE_RELAYS`)
@@ -421,6 +450,7 @@ The menu structure is designed for a data-driven implementation.
 - **Rly: Delay:** Power-on delay for relays (s).
 - **Auto Stby:** Auto-standby delay (min). (If `ENABLE_STANDBY`)
 - **Auto Boot:** Boot directly to operation (bypass standby).
+- **Relay Test:** Bench diagnostic that turns waveform output off and activates one relay output stage at a time. It refuses to run while the motor is moving.
 
 ### Display
 - **Brightness:** OLED Brightness/Contrast (0-255).
@@ -468,21 +498,21 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Core Hardware**| `OLED_HEIGHT` | Defines the height of the OLED display. | `64` | |
 | **Waveform** | `LUT_MAX_SIZE` | Sets the maximum size of the sine wave Look-Up Table (LUT). | `16384` | Affects memory usage and processing load. |
 | **Presets** | `MAX_PRESET_SLOTS` | Defines the maximum number of user-configurable presets. | `5` | Used to size the data structure for presets. |
-| **Serial/Debug** | `SERIAL_MONITOR_ENABLE` | Enables/Disables all Serial Monitor functionality and setup. | `true` or `false` | Global toggle for serial output. |
-| **Serial/Debug** | `DUPLICATE_DISPLAY_TO_SERIAL` | Duplicates all display output to the serial monitor. | `true` or `false` | Requires `SERIAL_MONITOR_ENABLE` to be true. |
-| **Features** | `ENABLE_STANDBY` | Enable/Disable Standby Mode | `true` | Controls standby functionality. |
-| **Features** | `ENABLE_MUTE_RELAYS` | Enable/Disable Mute Relays | `true` | Controls relay logic. |
-| **Features** | `ENABLE_DPDT_RELAYS` | Use 2x DPDT instead of 4x SPST | `false` | Changes relay switching logic. |
-| **Optional Pins**| `PITCH_CONTROL_ENABLE` | Enables the secondary (Pitch) encoder functionality and logic. | `false` (Disabled) | **Required** flag for the optional pitch feature (3.3). |
-| **Optional Pins**| `PIN_ENC_PITCH_CLK` | Assigns the pin for the Pitch Encoder Clock. | `13` | Only compiled if `PITCH_CONTROL_ENABLE` is true. |
-| **Optional Pins**| `PIN_ENC_PITCH_DT` | Assigns the pin for the Pitch Encoder Data. | `14` | Only compiled if `PITCH_CONTROL_ENABLE` is true. |
-| **Optional Pins**| `PIN_ENC_PITCH_SW` | Assigns the pin for the Pitch Encoder Switch. | `15` | Only compiled if `PITCH_CONTROL_ENABLE` is true. |
-| **Optional Pins**| `STANDBY_BUTTON_ENABLE` | Enables the external Standby button. | `false` (Disabled) | **Required** flag for the optional button (3.5). |
-| **Optional Pins**| `PIN_BTN_STANDBY` | Assigns the pin for the Standby Button. | `21` | Only compiled if `STANDBY_BUTTON_ENABLE` is true. |
-| **Optional Pins**| `SPEED_BUTTON_ENABLE` | Enables the external Speed change button. | `false` (Disabled) | **Required** flag for the optional button (3.5). |
-| **Optional Pins**| `PIN_BTN_SPEED` | Assigns the pin for the Speed Button. | `22` | Only compiled if `SPEED_BUTTON_ENABLE` is true. |
-| **Optional Pins**| `START_STOP_BUTTON_ENABLE` | Enables the external Start/Stop motor button. | `false` (Disabled) | **Required** flag for the optional button (3.5). |
-| **Optional Pins**| `PIN_BTN_START_STOP` | Assigns the pin for the Start/Stop Button. | `23` | Only compiled if `START_STOP_BUTTON_ENABLE` is true. |
+| **Serial/Debug** | `SERIAL_MONITOR_ENABLE` | Enables/Disables all Serial Monitor functionality and setup. | `1` or `0` | Global toggle for serial output. |
+| **Serial/Debug** | `DUPLICATE_DISPLAY_TO_SERIAL` | Duplicates all display output to the serial monitor. | `1` or `0` | Requires `SERIAL_MONITOR_ENABLE` to be `1`. |
+| **Features** | `ENABLE_STANDBY` | Enable/Disable Standby Mode | `1` | Controls standby functionality. |
+| **Features** | `ENABLE_MUTE_RELAYS` | Enable/Disable Mute Relays | `1` | Controls relay logic. |
+| **Features** | `ENABLE_DPDT_RELAYS` | Use 2x DPDT instead of 4x SPST | `0` | Changes relay switching logic. |
+| **Optional Pins**| `PITCH_CONTROL_ENABLE` | Enables the secondary (Pitch) encoder functionality and logic. | `0` (Disabled) | **Required** flag for the optional pitch feature (3.3). |
+| **Optional Pins**| `PIN_ENC_PITCH_CLK` | Assigns the pin for the Pitch Encoder Clock. | `13` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
+| **Optional Pins**| `PIN_ENC_PITCH_DT` | Assigns the pin for the Pitch Encoder Data. | `14` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
+| **Optional Pins**| `PIN_ENC_PITCH_SW` | Assigns the pin for the Pitch Encoder Switch. | `15` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
+| **Optional Pins**| `STANDBY_BUTTON_ENABLE` | Enables the external Standby button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
+| **Optional Pins**| `PIN_BTN_STANDBY` | Assigns the pin for the Standby Button. | `21` | Only compiled if `STANDBY_BUTTON_ENABLE` is `1`. |
+| **Optional Pins**| `SPEED_BUTTON_ENABLE` | Enables the external Speed change button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
+| **Optional Pins**| `PIN_BTN_SPEED` | Assigns the pin for the Speed Button. | `22` | Only compiled if `SPEED_BUTTON_ENABLE` is `1`. |
+| **Optional Pins**| `START_STOP_BUTTON_ENABLE` | Enables the external Start/Stop motor button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
+| **Optional Pins**| `PIN_BTN_START_STOP` | Assigns the pin for the Start/Stop Button. | `23` | Only compiled if `START_STOP_BUTTON_ENABLE` is `1`. |
 | **Display Msg** | `STANDBY_MESSAGE` | Sets the message displayed while the system is in standby, if enabled in the menu. | `message` | Controls message display logic. |
 | **Display Msg** | `WELCOME_MESSAGE` | Sets the message displayed on boot. | `"Welcome to TT Control"` | |
 | **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `4` | Use for compatibility checks when firmware is updated. |

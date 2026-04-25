@@ -14,8 +14,19 @@
 #include "waveform.h" // Added for Scope View
 #include <Fonts/FreeSans12pt7b.h>
 
-extern MenuPage* pageMain;
-MenuPage* pagePower = nullptr;
+static const char* dashboardStateLabel() {
+    if (motor.isRelayTestMode()) return "TEST";
+    if (motor.isSpeedRamping()) return "RAMP";
+
+    switch (motor.getState()) {
+        case STATE_STANDBY: return "STBY";
+        case STATE_STOPPED: return "STOP";
+        case STATE_STARTING: return "START";
+        case STATE_RUNNING: return "RUN";
+        case STATE_STOPPING: return "BRAKE";
+    }
+    return "----";
+}
 
 UserInterface::UserInterface() {
     _inMenu = false;
@@ -26,37 +37,43 @@ UserInterface::UserInterface() {
     _showingConfirm = false;
     _showingError = false;
     _showingGoodbye = false;
-    
+    _messageBuffer[0] = 0;
+    _confirmBuffer[0] = 0;
+    _errorBuffer[0] = 0;
+    _messageText = _messageBuffer;
+    _confirmMsg = _confirmBuffer;
+    _errorMsg = _errorBuffer;
+
     _statusMode = 0; // Standard
-    
+
     _transitionProgress = 0.0;
     _transitionDirection = 0;
     _nextPage = nullptr;
     _smoothScrollY = 0.0;
-    
+
     _lastBrightness = 0;
     _lissajousPhase = 0.0;
     for(int i=0; i<16; i++) _matrixDrops[i] = random(0, 64);
-    
+
     _lastInputTime = 0;
 }
 
 void UserInterface::begin() {
     _input.begin();
-    
+
     // Initialize the menu structure
     buildMenuSystem();
-    
+
     // Show Splash Screen (Scrolling)
     display.clearDisplay();
     display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
-    
+
     const char* msg = WELCOME_MESSAGE;
     int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-    
+
     // Scroll from right to left
     for (int x = 128; x >= -((int)w); x -= 4) {
         display.clearDisplay();
@@ -65,41 +82,41 @@ void UserInterface::begin() {
         display.display();
         // delay(10); // Blocking delay is fine in setup
     }
-    
+
     display.clearDisplay();
     display.setCursor(30, 45);
     display.setTextSize(1);
     display.println(FIRMWARE_VERSION);
     display.display();
     delay(1000);
-    
+
     // Configure Optional Buttons
     #ifdef SPEED_BUTTON_ENABLE
     if (SPEED_BUTTON_ENABLE) hal.setPinMode(PIN_BTN_SPEED, INPUT_PULLUP);
     #endif
-    
+
     #ifdef START_STOP_BUTTON_ENABLE
     if (START_STOP_BUTTON_ENABLE) hal.setPinMode(PIN_BTN_START_STOP, INPUT_PULLUP);
     #endif
-    
+
     #ifdef STANDBY_BUTTON_ENABLE
     if (STANDBY_BUTTON_ENABLE) hal.setPinMode(PIN_BTN_STANDBY, INPUT_PULLUP);
     #endif
-    
+
     _lastInputTime = millis();
 }
 
 void UserInterface::update() {
     // Poll input devices
     _input.update();
-    
+
     // Process input events
     handleInput();
-    
+
     // --- Auto Features ---
     uint32_t now = millis();
     uint32_t elapsed = (now - _lastInputTime) / 1000; // Seconds
-    
+
     // 1. Auto Standby (Only if STOPPED)
     uint8_t stbyDelay = settings.get().autoStandbyDelay;
     if (stbyDelay > 0 && !motor.isRunning() && !motor.isStandby()) {
@@ -108,7 +125,7 @@ void UserInterface::update() {
             _lastInputTime = now; // Reset to avoid immediate re-trigger
         }
     }
-    
+
     // 2. Auto Dim (Only if RUNNING and NOT already dimmed)
     uint8_t dimDelay = settings.get().autoDimDelay;
     if (dimDelay > 0 && motor.isRunning() && _statusMode != 2) {
@@ -116,7 +133,7 @@ void UserInterface::update() {
             _statusMode = 2; // Switch to Dim Mode
         }
     }
-    
+
     // 3. Display Sleep (Only if NOT running, or if running and sleep allowed?)
     // Usually sleep is for Standby or Idle.
     // "Display Sleep Mode" - 0=Off, 1=10s, 2=20s, 3=30s, 4=1m, 5=5m, 6=10m
@@ -131,7 +148,7 @@ void UserInterface::update() {
             case 5: sleepMs = 300000; break;
             case 6: sleepMs = 600000; break;
         }
-        
+
         // Only sleep if NOT running (unless we want to sleep while running? usually not for a turntable)
         // Let's assume sleep is for Standby/Stopped state to save screen.
         // If motor is running, we have Auto Dim.
@@ -140,7 +157,7 @@ void UserInterface::update() {
              display.ssd1306_command(SSD1306_DISPLAYOFF);
         }
     }
-    
+
     // 4. Screensaver Trigger
     // If in Standby:
     // - If Screensaver Enabled: Activate Screensaver
@@ -160,7 +177,7 @@ void UserInterface::update() {
         // Sleep logic turns it OFF. Wake logic turns it ON.
         // So we just ensure _screensaverActive is false here.
     }
-    
+
     // Update Animations
     if (_transitionDirection != 0) {
         _transitionProgress += 0.2; // Speed of slide
@@ -173,7 +190,7 @@ void UserInterface::update() {
             }
         }
     }
-    
+
     // Render the current view
     draw();
 }
@@ -181,14 +198,13 @@ void UserInterface::update() {
 void UserInterface::handleInput() {
     InputEvent evt = _input.getEvent();
     int delta = _input.getEncoderDelta();
-    
+
     // --- Sweep UI Trap ---
     if (motor.isSweepingMode()) {
         if (evt == EVT_SELECT || evt == EVT_DOUBLE_CLICK || evt == EVT_BACK) {
             motor.stopSymmetricSweep();
             // The phase offsets in settings.getCurrentSpeedSettings() were dynamically updated by motor.cpp.
             // We just need to save them.
-            extern class Settings settings;
             settings.save();
             showMessage("Locked & Saved!", 2000);
             exitMenu();
@@ -196,12 +212,12 @@ void UserInterface::handleInput() {
         // Block other inputs
         return;
     }
-    
+
     // Reset Inactivity Timer on any input
     if (evt != EVT_NONE || delta != 0 || _input.isButtonDown()) {
         _lastInputTime = millis();
         display.ssd1306_command(SSD1306_DISPLAYON); // Wake display
-        
+
         // Wake from Auto Dim
         if (_statusMode == 2) {
             _statusMode = 0; // Restore to Standard
@@ -209,13 +225,13 @@ void UserInterface::handleInput() {
             // Usually better to consume it so we don't accidentally change speed etc.
             // But if it's just a rotation, maybe we want it to register?
             // Let's consume it to be safe.
-            return; 
+            return;
         }
     }
-    
+
     // --- Global Button Handling ---
     // These work EVERYWHERE (Menu, Dashboard, etc.)
-    
+
     if (_input.isSpeedButtonPressed()) {
         motor.cycleSpeed();
         // If in menu editing speed, update the shadow index
@@ -226,33 +242,33 @@ void UserInterface::handleInput() {
              updateSpeedLabel();
         }
     }
-    
+
     if (_input.isStartStopPressed()) {
         if (motor.isStandby()) motor.toggleStandby(); // Wake
         else motor.toggleStartStop();
     }
-    
+
     if (_input.isStandbyPressed()) {
         motor.toggleStandby();
     }
-    
+
     // Wake from Screensaver
     if (_screensaverActive && (evt != EVT_NONE || delta != 0)) {
         _screensaverActive = false;
-        
+
         // If in Standby and Select pressed, Wake immediately
         if (motor.isStandby() && evt == EVT_SELECT) {
             motor.toggleStandby();
         }
         return;
     }
-    
+
     // Dismiss Error Dialog
     if (_showingError && (evt != EVT_NONE)) {
         _showingError = false;
         return;
     }
-    
+
     // Handle Confirmation Dialog
     if (_showingConfirm) {
         if (delta != 0) _confirmResult = !_confirmResult;
@@ -262,11 +278,11 @@ void UserInterface::handleInput() {
         }
         return;
     }
-    
+
     // Pitch Encoder Logic (Dedicated)
     #if PITCH_CONTROL_ENABLE
     int pitchDelta = _input.getPitchDelta();
-    
+
     // --- Dual Encoder Menu UX ---
     // If we're in the menu, hijacking pitch encoder as a secondary navigational/editing tool
     if (pitchDelta != 0 && _inMenu && _currentPage) {
@@ -286,26 +302,24 @@ void UserInterface::handleInput() {
                 item->onSelect(dummy);       // Set _editing = false, save _temp to _target
             }
         }
-    } 
+    }
     // --- Standard Pitch Logic (Only outside Menu) ---
     else if (pitchDelta != 0 && motor.isRunning() && !_inMenu) {
-        float currentP = motor.getPitchPercent();
         float step = settings.get().pitchStepSize;
-        float newP = currentP + (pitchDelta * step); 
-        motor.setPitch(newP);
+        motor.adjustPitchFreq(pitchDelta * step);
     }
-    
+
     // Pitch Encoder Button (Toggle Range / Reset)
     // We need to read the button state. InputManager might not handle this button yet.
     // Let's assume we need to read PIN_ENC_PITCH_SW directly for now as per previous pattern.
     static bool lastPitchBtn = HIGH;
     static uint32_t pitchBtnDownTime = 0;
     bool pitchBtn = hal.digitalRead(PIN_ENC_PITCH_SW);
-    
+
     if (pitchBtn == LOW && lastPitchBtn == HIGH) {
         pitchBtnDownTime = millis();
     }
-    
+
     if (pitchBtn == HIGH && lastPitchBtn == LOW) {
         // Released
         uint32_t duration = millis() - pitchBtnDownTime;
@@ -333,34 +347,31 @@ void UserInterface::handleInput() {
         if (delta != 0) {
             _currentPage->input(delta);
         }
-        
+
         // Navigation (Only if not currently editing a value)
         MenuItem* item = _currentPage->getItem(_currentPage->getSelection());
         bool editing = item && item->isEditing();
-        
+
         if (!editing) {
             if (evt == EVT_NAV_UP) _currentPage->next();
             if (evt == EVT_NAV_DOWN) _currentPage->prev();
         }
-        
-        if (evt == EVT_SELECT) _currentPage->select(_currentPage); // Pass ref to allow page transitions
-        if (evt == EVT_BACK) back(); // Long press goes back
-        
-        // NEW: Hold (Long Press) in Menu -> Save & Exit
-        // We need to distinguish between "Back" (Long Press) and "Exit" (Very Long Press)
-        // or just redefine EVT_BACK behavior?
-        // InputManager generates: SELECT (Short), BACK (Long > 3s), EXIT (Very Long > 5s).
-        // User asked for "Hold (in menu) save and exit".
-        // Let's map EVT_BACK to "Back" and EVT_EXIT to "Exit Menu".
-        // Or if user wants "Hold" to be the shortcut, maybe EVT_BACK should exit?
-        // Let's use EVT_BACK (3s) to Exit Menu completely.
-        if (evt == EVT_BACK) exitMenu(); 
-        
-        if (evt == EVT_EXIT) exitMenu();
-        
+
+        if (evt == EVT_SELECT) {
+            MenuPage* target = item ? item->getTargetPage() : nullptr;
+            if (target) {
+                navigateTo(target);
+            } else {
+                _currentPage->select(_currentPage);
+            }
+        }
+
+        // Hold in the menu commits the shadow speed settings and exits.
+        if (evt == EVT_BACK || evt == EVT_EXIT) saveMenuChangesAndExit();
+
     } else {
         // Main Status Screen Logic
-        
+
         // 1. Short Press: Start/Stop or Wake
         if (evt == EVT_SELECT) {
             if (motor.isStandby()) {
@@ -369,12 +380,12 @@ void UserInterface::handleInput() {
                 motor.toggleStartStop();
             }
         }
-        
+
         // 2. Double Press: Enter Menu
         if (evt == EVT_DOUBLE_CLICK) {
             enterMenu();
         }
-        
+
         // 3. Hold (Long Press): Enter Standby
         if (evt == EVT_BACK || evt == EVT_EXIT) {
             if (!motor.isStandby()) {
@@ -385,41 +396,30 @@ void UserInterface::handleInput() {
                 display.ssd1306_command(SSD1306_DISPLAYON); // Ensure on
             }
         }
-        
-        // 4. Rotate: Change Speed
+
+        // 4. Rotate: Change Speed, or press+rotate to change dashboard mode
         if (delta != 0) {
-            // If Pitch button is held while turning, maybe we shouldn't change speed?
-            // Handled by InputManager (should send Pitch event)
-            // if (delta > 0) motor.setSpeed(SPEED_78); // Temporary simplification, proper cycle next
-            // if (delta < 0) motor.setSpeed(SPEED_33);
-            
-            // Real cycle logic:
-            SpeedMode s = motor.getSpeed();
-            int currentIdx = (int)s;
-            currentIdx += delta;
-            if (currentIdx > 2) currentIdx = 2; // Assuming 0,1,2 for 33,45,78
-            if (currentIdx < 0) currentIdx = 0;
-            if (currentIdx == 2 && !settings.get().enable78rpm) currentIdx = 1; // Block 78 if disabled
-            
-            motor.setSpeed((SpeedMode)currentIdx);
-        }
-        
-        // 5. Press + Rotate (or just Press depending on UI design): Cycle Status Views
-        // TTControl "Press + Rotate" -> EVT_NAV_UP/DOWN
-        if (evt == EVT_NAV_UP || evt == EVT_NAV_DOWN) {
-            // Cycle Status Views (0=Standard, 1=Stats, 2=Dim, 3=Scope)
-            _statusMode++;
-            if (_statusMode > 3) _statusMode = 0;
-            // Don't go to Dim mode manually usually, maybe just 0,1,3?
-            // We'll let them cycle through all 4. 
-            // If they land on Dim, the screen dims immediately.
+            if (_input.isButtonDown()) {
+                _statusMode += (delta > 0) ? 1 : -1;
+                if (_statusMode > 3) _statusMode = 0;
+                if (_statusMode < 0) _statusMode = 3;
+            } else {
+                SpeedMode s = motor.getSpeed();
+                int currentIdx = (int)s;
+                currentIdx += delta;
+                if (currentIdx > 2) currentIdx = 2; // Assuming 0,1,2 for 33,45,78
+                if (currentIdx < 0) currentIdx = 0;
+                if (currentIdx == 2 && !settings.get().enable78rpm) currentIdx = 1; // Block 78 if disabled
+
+                motor.setSpeed((SpeedMode)currentIdx);
+            }
         }
     }
 }
 
 void UserInterface::draw() {
     // Update Contrast/Brightness
-    // Only update if changed? Or every frame? 
+    // Only update if changed? Or every frame?
     // Updating every frame might be spammy on I2C.
     // Better to check a dirty flag or just do it.
     // SSD1306 command is fast.
@@ -432,9 +432,9 @@ void UserInterface::draw() {
             _lastBrightness = target;
         }
     }
-    
+
     display.clearDisplay();
-    
+
     // Render based on current state priority
     if (_showingError) {
         drawError();
@@ -453,9 +453,9 @@ void UserInterface::draw() {
     } else {
         drawDashboard();
     }
-    
+
     display.display();
-    
+
     #if DUPLICATE_DISPLAY_TO_SERIAL && SERIAL_MONITOR_ENABLE
     dumpDisplayToSerial();
     #endif
@@ -467,7 +467,7 @@ void UserInterface::dumpDisplayToSerial() {
     static uint32_t lastDump = 0;
     if (millis() - lastDump < 1000) return;
     lastDump = millis();
-    
+
     Serial.println("\n--- Display Mirror ---");
     for (int y = 0; y < 64; y += 2) { // Skip every other line for aspect ratio/speed
         for (int x = 0; x < 128; x++) {
@@ -483,20 +483,20 @@ void UserInterface::drawGoodbye() {
     display.clearDisplay();
     display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
-    
+
     const char* msg = "Goodbye...";
     int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-    
+
     // Scroll or just fade? User asked for "Scrolling Goodbye".
     // Since draw() is called in a loop, we need to calculate position based on time.
     uint32_t elapsed = millis() - _goodbyeStartTime;
     int x = 128 - (elapsed / 10); // Speed
-    
+
     display.setCursor(x, 25);
     display.print(msg);
-    
+
     if (x < -((int)w)) {
         _showingGoodbye = false;
         // Now actually sleep/standby visual
@@ -511,49 +511,49 @@ void UserInterface::drawGoodbye() {
 void UserInterface::drawMenu() {
     // Handle Transitions
     int xOffset = 0;
-    
+
     if (_transitionDirection != 0) {
         float t = _transitionProgress;
-        
+
         if (_transitionDirection == 1) { // Forward (Slide Left)
             xOffset = (int)(128.0 * (1.0 - t));
         } else if (_transitionDirection == -1) { // Back (Slide Right)
             xOffset = (int)(-128.0 * (1.0 - t));
         }
     }
-    
+
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    
+
     // Title
     display.setCursor(0 + xOffset, 0);
     display.print(_currentPage->getTitle());
     display.drawLine(0 + xOffset, 10, 128 + xOffset, 10, SSD1306_WHITE);
-    
+
     // Smooth Scrolling Logic
     int selection = _currentPage->getSelection();
     int targetY = selection * 10; // 10px per item
-    
+
     // Interpolate
     _smoothScrollY += (targetY - _smoothScrollY) * 0.3;
-    
+
     // Calculate offset based on smooth scroll
     // We want the selected item to be roughly centered or kept in view
     // Let's stick to the window logic but smooth the rendering offset?
     // Actually, the `_offset` in MenuPage handles the logical window.
     // Let's just draw the items relative to `_offset` but maybe animate the highlight?
-    
+
     int total = _currentPage->getItemCount();
     int offset = _currentPage->getOffset();
     int visible = 5;
-    
+
     for (int i = 0; i < visible; i++) {
         int idx = offset + i;
         if (idx >= total) break;
-        
+
         MenuItem* item = _currentPage->getItem(idx);
         int y = 15 + (i * 10);
-        
+
         // Highlight Box
         if (idx == selection) {
             display.fillRect(0 + xOffset, y - 1, 128, 11, SSD1306_WHITE);
@@ -561,25 +561,25 @@ void UserInterface::drawMenu() {
         } else {
             display.setTextColor(SSD1306_WHITE);
         }
-        
+
         display.setCursor(2 + xOffset, y);
         display.print(item->getLabel());
-        
+
         // Value
-        char valBuf[16];
+        char valBuf[18];
         item->getValueString(valBuf, sizeof(valBuf));
         if (valBuf[0] != 0) {
             display.setCursor(80 + xOffset, y); // Right align-ish
             display.print(valBuf);
         }
-        
+
         // Dirty Indicator
         if (item->isDirty()) {
             display.setCursor(120 + xOffset, y);
             display.print(F("*"));
         }
     }
-    
+
     // Draw Scrollbar
     if (total > visible) {
         int sbHeight = (visible * 50) / total;
@@ -592,22 +592,28 @@ void UserInterface::drawMenu() {
 void UserInterface::drawDashboard() {
     // --- Graphical Dashboard ---
     extern bool safeModeActive;
-    
+
     // Mode 2: Dim / Minimal
     if (_statusMode == 2) {
         display.dim(true); // Low contrast
-        
+
+        display.setFont(NULL);
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(4, 4);
+        display.print(dashboardStateLabel());
+
         // Minimal Display: Just Speed
         display.setFont(&FreeSans12pt7b);
         display.setTextColor(SSD1306_WHITE);
         display.setTextSize(1);
-        
+
         SpeedMode s = motor.getSpeed();
         const char* speedStr;
         if (s == SPEED_33) speedStr = "33";
         else if (s == SPEED_45) speedStr = "45";
         else speedStr = "78";
-        
+
         int16_t x1, y1;
         uint16_t w, h;
         display.getTextBounds(speedStr, 0, 0, &x1, &y1, &w, &h);
@@ -616,9 +622,9 @@ void UserInterface::drawDashboard() {
         display.setFont(NULL);
         return;
     }
-    
+
     display.dim(false); // Normal contrast
-    
+
     // 1. Status Icons (Top Row)
     if (safeModeActive) {
         // Draw a completely obvious "SAFE MODE" banner instead of the standard icon set
@@ -634,18 +640,33 @@ void UserInterface::drawDashboard() {
         } else {
             display.drawBitmap(0, 0, icon_stop_bits, 16, 16, SSD1306_WHITE);
         }
-        
+
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(18, 4);
+        display.print(dashboardStateLabel());
+
+        char freqBuf[12];
+        snprintf(freqBuf, sizeof(freqBuf), "%.1fHz", motor.getCurrentFrequency());
+        int16_t fx1, fy1;
+        uint16_t fw, fh;
+        display.getTextBounds(freqBuf, 0, 0, &fx1, &fy1, &fw, &fh);
+        int freqX = 110 - (int)fw;
+        if (freqX < 48) freqX = 48;
+        display.setCursor(freqX, 4);
+        display.print(freqBuf);
+
         // Lock Icon (if speed is stable)
-        if (motor.isRunning()) {
+        if (motor.getState() == STATE_RUNNING && !motor.isSpeedRamping()) {
             display.drawBitmap(112, 0, icon_lock_bits, 16, 16, SSD1306_WHITE);
         }
     }
-    
+
     // Mode 1: Stats
     if (_statusMode == 1) {
         display.setTextSize(1);
         display.setTextColor(SSD1306_WHITE);
-        
+
         display.setCursor(0, 20);
         display.print("Session: ");
         // Calculate session time
@@ -653,7 +674,7 @@ void UserInterface::drawDashboard() {
         int min = sessionSec / 60;
         int sec = sessionSec % 60;
         display.print(min); display.print("m "); display.print(sec); display.print("s");
-        
+
         display.setCursor(0, 35);
         display.print("Total: ");
         // Total runtime from settings (in seconds)
@@ -661,10 +682,10 @@ void UserInterface::drawDashboard() {
         int hours = totalSec / 3600;
         int tMin = (totalSec % 3600) / 60;
         display.print(hours); display.print("h "); display.print(tMin); display.print("m");
-        
+
         return;
     }
-    
+
     // Mode 3: Oscilloscope
     // Visualizing real-time DMA outputs. Top/Center for speed, right side for plotting.
     if (_statusMode == 3) {
@@ -672,98 +693,109 @@ void UserInterface::drawDashboard() {
         display.setTextColor(SSD1306_WHITE);
         display.setCursor(0, 20);
         display.print("SCOPE");
-        
+
         display.setCursor(0, 40);
         display.print(motor.getCurrentFrequency(), 1);
         display.print("Hz");
-        
+
         // Draw the Scope box (60x60 on the right side: X=64 to 124, Y=2 to 62)
         display.drawRect(64, 2, 60, 60, SSD1306_WHITE);
-        
+
         if (motor.isRunning()) {
             // Get samples: Phase A (0) and Phase B (1)
-            extern class WaveformGenerator waveform; // Reference global
-            
             // X-Axis = Phase A (0). Y-Axis = Phase B (1)
-            // Raw DMA samples are typically -32768 to 32767 for a full 16-bit sine wave.
             int16_t sampleA = waveform.getSample(0);
             int16_t sampleB = waveform.getSample(1);
-            
-            // Normalize: Divide by 1100 approx to fit in a +/- 29 pixel space
-            // Assuming max amplitude hits +/- 32767
-            int px = 64 + 30 + (sampleA / 1129);
-            int py = 2 + 30 - (sampleB / 1129); // Invert Y so positive is up
-            
+
+            // Generated diagnostic samples are roughly +/-511 at full amplitude.
+            int px = 64 + 30 + (sampleA / 18);
+            int py = 2 + 30 - (sampleB / 18); // Invert Y so positive is up
+
             // Bounds check
             if (px < 65) px = 65; if (px > 123) px = 123;
             if (py < 3) py = 3; if (py > 61) py = 61;
-            
+
             // Draw a slightly thick dot for visibility
             display.fillRect(px-1, py-1, 3, 3, SSD1306_WHITE);
         } else {
             // Stopped: Draw a dot perfectly in the center
             display.fillRect(64+29, 2+29, 3, 3, SSD1306_WHITE);
         }
-        
+
         return;
     }
-    
+
     // Mode 0: Standard (RPM + Pitch Bar)
-    
+
     // 2. Main RPM Display (Center)
     display.setFont(&FreeSans12pt7b);
     display.setTextColor(SSD1306_WHITE);
     display.setTextSize(1);
-    
+
     SpeedMode s = motor.getSpeed();
     const char* speedStr;
     if (s == SPEED_33) speedStr = "33.3";
     else if (s == SPEED_45) speedStr = "45.0";
     else speedStr = "78.0";
-    
+
     int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(speedStr, 0, 0, &x1, &y1, &w, &h);
     display.setCursor((128 - w) / 2, 40);
     display.print(speedStr);
-    
+
     // Reset Font for other elements
-    display.setFont(NULL); 
-    
+    display.setFont(NULL);
+
+    float motionProgress = motor.getMotionProgress();
+    bool showProgress = motor.getState() == STATE_STARTING ||
+                        motor.getState() == STATE_STOPPING ||
+                        motor.isSpeedRamping();
+    if (showProgress) {
+        int barX = 18;
+        int barY = 45;
+        int barW = 92;
+        int fillW = (int)(motionProgress * (barW - 2));
+        if (fillW < 0) fillW = 0;
+        if (fillW > barW - 2) fillW = barW - 2;
+        display.drawRect(barX, barY, barW, 5, SSD1306_WHITE);
+        display.fillRect(barX + 1, barY + 1, fillW, 3, SSD1306_WHITE);
+    }
+
     // 3. Pitch / Ramping Bar (Bottom)
     // Draw Scale
     display.drawLine(10, 55, 118, 55, SSD1306_WHITE); // Main line
     display.drawLine(64, 52, 64, 58, SSD1306_WHITE); // Center tick
     display.drawLine(10, 52, 10, 58, SSD1306_WHITE); // Left tick
     display.drawLine(118, 52, 118, 58, SSD1306_WHITE); // Right tick
-    
+
     // Calculate Deviation for Visualization
     // We want to show the ACTUAL deviation from nominal frequency
     float nominal = settings.getCurrentSpeedSettings().frequency;
     float current = motor.getCurrentFrequency();
     float deviationPercent = 0.0;
-    
+
     if (nominal > 0) {
         deviationPercent = ((current - nominal) / nominal) * 100.0;
     }
-    
+
     // Range +/- 8% for the bar
     float range = 8.0;
-    
+
     int px = 64 + (int)((deviationPercent / range) * 54.0);
     if (px < 10) px = 10;
     if (px > 118) px = 118;
-    
+
     display.fillTriangle(px, 50, px-3, 46, px+3, 46, SSD1306_WHITE);
-    
+
     // Pitch Value Text
     // If Pitch Control is enabled, show the SETTING.
     // If disabled, maybe show nothing or "LOCKED"?
     // User said: "keep the display bar for visual effect, especially during frequency ramps"
-    
+
     display.setTextSize(1);
     display.setCursor(50, 64-8);
-    
+
     #if PITCH_CONTROL_ENABLE
         float pitchSetting = motor.getPitchPercent();
         if (pitchSetting > 0) display.print("+");
@@ -784,7 +816,7 @@ void UserInterface::drawDashboard() {
 
 void UserInterface::drawScreensaver() {
     display.clearDisplay();
-    
+
     if (settings.get().screensaverMode == SAVER_MATRIX) {
         drawMatrixRain();
     }
@@ -799,42 +831,40 @@ void UserInterface::drawScreensaver() {
             lastMove = millis();
             _saverX += _saverDX;
             _saverY += _saverDY;
-            
+
             if (_saverX <= 0 || _saverX >= (128 - 60)) _saverDX = -_saverDX; // Approx width
             if (_saverY <= 0 || _saverY >= (64 - 8)) _saverDY = -_saverDY;
         }
-        
+
         display.setCursor(_saverX, _saverY);
         display.setTextSize(1);
         display.setTextColor(SSD1306_WHITE);
         display.print(STANDBY_MESSAGE);
     }
-    
-    display.display();
 }
 
 void UserInterface::drawMatrixRain() {
     // 16 Columns (128px / 8px char width)
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    
+
     for (int i = 0; i < 16; i++) {
         // Draw the "lead" character
         char c = (char)random(33, 126);
         display.setCursor(i * 8, _matrixDrops[i]);
         display.write(c);
-        
+
         // Draw a trail (fainter/simulated by skipping pixels if we could, but here just chars)
         if (_matrixDrops[i] >= 8) {
              display.setCursor(i * 8, _matrixDrops[i] - 8);
              display.write('.');
         }
-        
+
         // Update drop position
         if (random(0, 10) > 2) { // Random speed
             _matrixDrops[i] += 4;
         }
-        
+
         // Reset if off screen
         if (_matrixDrops[i] > 64) {
             _matrixDrops[i] = 0;
@@ -845,18 +875,18 @@ void UserInterface::drawMatrixRain() {
 void UserInterface::drawLissajous() {
     // Parametric equations: x = A*sin(a*t + d), y = B*sin(b*t)
     _lissajousPhase += 0.05;
-    
+
     int cx = 64;
     int cy = 32;
     int amp = 30;
-    
+
     // Draw the curve
     for (float t = 0; t < 2 * PI; t += 0.1) {
         int x = cx + amp * sin(3.0 * t + _lissajousPhase);
         int y = cy + amp * sin(2.0 * t);
         display.drawPixel(x, y, SSD1306_WHITE);
     }
-    
+
     // Draw a second curve for complexity
     for (float t = 0; t < 2 * PI; t += 0.1) {
         int x = cx + (amp/2) * sin(2.0 * t - _lissajousPhase);
@@ -869,17 +899,17 @@ void UserInterface::drawConfirm() {
     // Modal Style
     display.fillRect(10, 10, 108, 44, SSD1306_BLACK); // Background
     display.drawRect(10, 10, 108, 44, SSD1306_WHITE); // Border
-    
+
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    
+
     // Center Message
     int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(_confirmMsg, 0, 0, &x1, &y1, &w, &h);
     display.setCursor(10 + (108 - w) / 2, 25);
     display.print(_confirmMsg);
-    
+
     // Draw Yes/No
     display.setCursor(20, 40);
     if (_confirmResult) {
@@ -893,26 +923,25 @@ void UserInterface::drawSweepScreen() {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    
+
     // Title
     display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
     display.setCursor(5, 4);
     display.print("SWEEPING RESONANCE");
     display.setTextColor(SSD1306_WHITE);
-    
-    extern class Settings settings;
+
     float ph2 = settings.getCurrentSpeedSettings().phaseOffset[1];
     float ph3 = settings.getCurrentSpeedSettings().phaseOffset[2];
-    
+
     display.setCursor(0, 25);
     display.print("Phase 2: "); display.print(ph2, 1); display.print((char)247);
-    
+
     if (settings.get().phaseMode == 3) {
         display.setCursor(0, 40);
         display.print("Phase 3: "); display.print(ph3, 1); display.print((char)247);
     }
-    
+
     display.setCursor(0, 56);
     display.print("PRESS TO LOCK & SAVE");
 }
@@ -921,12 +950,12 @@ void UserInterface::drawMessage() {
     // Modal Style
     display.fillRect(10, 15, 108, 34, SSD1306_BLACK);
     display.drawRect(10, 15, 108, 34, SSD1306_WHITE);
-    
+
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(15, 25);
     display.println(_messageText);
-    
+
     if (millis() - _messageStartTime > _messageDuration) _showingMessage = false;
 }
 
@@ -934,27 +963,27 @@ void UserInterface::drawError() {
     // Modal Style with Pattern
     display.fillRect(5, 5, 118, 54, SSD1306_BLACK);
     display.drawRect(5, 5, 118, 54, SSD1306_WHITE);
-    
+
     display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(30, 10);
     display.println(F("ERROR"));
-    
+
     display.setTextSize(1);
     display.setCursor(10, 35);
     display.println(_errorMsg);
-    
+
     if (millis() - _errorStartTime > _errorDuration) _showingError = false;
 }
 
 void UserInterface::navigateTo(MenuPage* page) {
     if (_currentPage) _menuStack.push_back(_currentPage);
-    
+
     // Trigger Transition
     _nextPage = page;
     _transitionDirection = 1; // Forward
     _transitionProgress = 0.0;
-    
+
     // For now, instant switch to support the simple drawMenu logic
     // until we implement full dual-page rendering
     _currentPage = page;
@@ -965,7 +994,7 @@ void UserInterface::back() {
     if (!_menuStack.empty()) {
         _currentPage = _menuStack.back();
         _menuStack.pop_back();
-        
+
         // Trigger Transition
         _transitionDirection = -1; // Back
         _transitionProgress = 0.0;
@@ -982,31 +1011,35 @@ void UserInterface::exitMenu() {
 
 void UserInterface::enterMenu() {
     initMenuState();
+    _menuStack.clear();
     _inMenu = true;
     _currentPage = pageMain;
 }
 
 void UserInterface::showMessage(const char* msg, uint32_t duration) {
-    _messageText = msg;
+    snprintf(_messageBuffer, sizeof(_messageBuffer), "%s", msg ? msg : "");
+    _messageText = _messageBuffer;
     _messageDuration = duration;
     _messageStartTime = millis();
     _showingMessage = true;
 }
 
 void UserInterface::showConfirm(const char* msg, void (*action)()) {
-    _confirmMsg = msg;
+    snprintf(_confirmBuffer, sizeof(_confirmBuffer), "%s", msg ? msg : "");
+    _confirmMsg = _confirmBuffer;
     _confirmAction = action;
     _confirmResult = false;
     _showingConfirm = true;
 }
 
 void UserInterface::showError(const char* msg, uint32_t duration) {
-    _errorMsg = msg;
+    snprintf(_errorBuffer, sizeof(_errorBuffer), "%s", msg ? msg : "");
+    _errorMsg = _errorBuffer;
     _errorDuration = duration;
     _errorStartTime = millis();
     _showingError = true;
     // Safety: Stop motor relays on critical error display
-    motor.setRelays(false); 
+    motor.setRelays(false);
 }
 
 void UserInterface::injectInput(int delta, bool btn) {

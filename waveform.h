@@ -90,6 +90,7 @@ private:
     float _iirPrev[4];
     float _firBuffer[4][8]; // [Channel][Tap]
     uint8_t _firIndex;
+    volatile int16_t _lastSamples[4];
     
     int16_t* _lut;
     int _lutSize;
@@ -116,6 +117,7 @@ private:
     
     void generateLUT();
     void fillBuffer(int bufferIndex);
+    int16_t generateSample(int channel);
     void setupPWM();
     void setupDMA();
 };

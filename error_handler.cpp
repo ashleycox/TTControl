@@ -7,9 +7,8 @@
  */
 
 #include "error_handler.h"
-#include "error_handler.h"
 #include "ui.h"
-#include "settings.h" // Added missing include
+#include "settings.h"
 
 extern UserInterface ui;
 

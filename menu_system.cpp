@@ -8,11 +8,41 @@
 
 #include "menu_system.h"
 
+static char* copyMenuString(const char* text) {
+    if (!text) text = "";
+    size_t length = strlen(text);
+    char* copy = new char[length + 1];
+    memcpy(copy, text, length + 1);
+    return copy;
+}
+
 // --- MenuItem Base Class ---
-MenuItem::MenuItem(const char* label) : _label(label) {}
+MenuItem::MenuItem(const char* label) : _label(copyMenuString(label)) {}
+
+MenuItem::~MenuItem() {
+    delete[] _label;
+}
+
+void MenuItem::setLabel(const char* label) {
+    delete[] _label;
+    _label = copyMenuString(label);
+}
+
+void MenuItem::setVisibleWhen(VisibilityCallback callback) {
+    _visibleWhen = callback;
+}
+
+bool MenuItem::isVisible() const {
+    return !_visibleWhen || _visibleWhen();
+}
 
 // --- MenuPage Container ---
-MenuPage::MenuPage(const char* title) : _title(title), _selection(0), _offset(0) {}
+MenuPage::MenuPage(const char* title) : _title(copyMenuString(title)), _selection(0), _offset(0) {}
+
+MenuPage::~MenuPage() {
+    clear();
+    delete[] _title;
+}
 
 void MenuPage::addItem(MenuItem* item) {
     _items.push_back(item);
@@ -29,16 +59,17 @@ void MenuPage::clear() {
 }
 
 MenuItem* MenuPage::getItem(size_t index) const {
-    if (index < _items.size()) return _items[index];
-    return nullptr;
+    return getVisibleItem(index);
 }
 
 void MenuPage::next() {
-    if (_items.empty()) return;
+    clampSelection();
+    int count = (int)getVisibleItemCount();
+    if (count == 0) return;
     
     // Cycle selection forward
     _selection++;
-    if (_selection >= (int)_items.size()) _selection = 0;
+    if (_selection >= count) _selection = 0;
     
     // Scroll logic: Keep selection within the visible window (assuming 5 lines)
     if (_selection >= _offset + 5) _offset = _selection - 4;
@@ -46,11 +77,13 @@ void MenuPage::next() {
 }
 
 void MenuPage::prev() {
-    if (_items.empty()) return;
+    clampSelection();
+    int count = (int)getVisibleItemCount();
+    if (count == 0) return;
     
     // Cycle selection backward
     _selection--;
-    if (_selection < 0) _selection = (int)_items.size() - 1;
+    if (_selection < 0) _selection = count - 1;
     
     // Scroll logic
     if (_selection >= _offset + 5) _offset = _selection - 4;
@@ -58,15 +91,53 @@ void MenuPage::prev() {
 }
 
 void MenuPage::select(MenuPage*& currentPage) {
-    if (_items.empty()) return;
+    clampSelection();
+    MenuItem* item = getVisibleItem(_selection);
+    if (!item) return;
     // Trigger the selected item's action
-    _items[_selection]->onSelect(currentPage);
+    item->onSelect(currentPage);
 }
 
 void MenuPage::input(int delta) {
-    if (_items.empty()) return;
+    clampSelection();
+    MenuItem* item = getVisibleItem(_selection);
+    if (!item) return;
     // Pass encoder input to the selected item (if it supports editing)
-    _items[_selection]->onInput(delta);
+    item->onInput(delta);
+}
+
+size_t MenuPage::getVisibleItemCount() const {
+    size_t count = 0;
+    for (auto item : _items) {
+        if (item && item->isVisible()) count++;
+    }
+    return count;
+}
+
+MenuItem* MenuPage::getVisibleItem(size_t index) const {
+    size_t visibleIndex = 0;
+    for (auto item : _items) {
+        if (!item || !item->isVisible()) continue;
+        if (visibleIndex == index) return item;
+        visibleIndex++;
+    }
+    return nullptr;
+}
+
+void MenuPage::clampSelection() {
+    int count = (int)getVisibleItemCount();
+    if (count <= 0) {
+        _selection = 0;
+        _offset = 0;
+        return;
+    }
+    if (_selection < 0) _selection = 0;
+    if (_selection >= count) _selection = count - 1;
+    if (_offset < 0) _offset = 0;
+    if (_offset > _selection) _offset = _selection;
+    if (_selection >= _offset + 5) _offset = _selection - 4;
+    int maxOffset = count > 5 ? count - 5 : 0;
+    if (_offset > maxOffset) _offset = maxOffset;
 }
 
 // --- MenuAction (Callback Trigger) ---
@@ -102,6 +173,59 @@ void MenuInt::onInput(int delta) {
 
 void MenuInt::getValueString(char* buffer, size_t size) const {
     snprintf(buffer, size, "%d", _editing ? _temp : *_target);
+}
+
+// --- MenuByte (uint8_t Editor) ---
+MenuByte::MenuByte(const char* label, uint8_t* target, int min, int max)
+    : MenuByte(label, target, min, max, nullptr, 0, nullptr) {}
+
+MenuByte::MenuByte(const char* label, uint8_t* target, int min, int max,
+                   const char* const* labels, size_t labelCount)
+    : MenuByte(label, target, min, max, labels, labelCount, nullptr) {}
+
+MenuByte::MenuByte(const char* label, uint8_t* target, int min, int max,
+                   const char* const* labels, size_t labelCount, ChangeCallback callback)
+    : MenuItem(label),
+      _target(target),
+      _min(min),
+      _max(max),
+      _temp(*target),
+      _editing(false),
+      _labels(labels),
+      _labelCount(labelCount),
+      _changeCallback(callback) {}
+
+void MenuByte::onSelect(MenuPage*& currentPage) {
+    _editing = !_editing;
+    if (_editing) {
+        _temp = *_target;
+    } else {
+        *_target = (uint8_t)_temp;
+        if (_changeCallback) _changeCallback((uint8_t)_temp);
+    }
+}
+
+void MenuByte::onInput(int delta) {
+    if (_editing) {
+        _temp += delta;
+        if (_temp < _min) _temp = _min;
+        if (_temp > _max) _temp = _max;
+        *_target = (uint8_t)_temp;
+        if (_changeCallback) _changeCallback((uint8_t)_temp);
+    }
+}
+
+void MenuByte::getValueString(char* buffer, size_t size) const {
+    int value = _editing ? _temp : (int)*_target;
+    if (_labels && value >= 0 && (size_t)value < _labelCount && _labels[value]) {
+        snprintf(buffer, size, "%s", _labels[value]);
+    } else {
+        snprintf(buffer, size, "%d", value);
+    }
+}
+
+void MenuByte::setChangeCallback(ChangeCallback callback) {
+    _changeCallback = callback;
 }
 
 // --- MenuFloat (Float Editor) ---
@@ -143,14 +267,20 @@ void MenuBool::getValueString(char* buffer, size_t size) const {
 MenuText::MenuText(const char* label, char* target, size_t maxLength)
     : MenuItem(label), _target(target), _maxLength(maxLength), _editing(false), _cursorPos(0) {
     _temp = new char[maxLength + 1];
-    strcpy(_temp, target);
+    strncpy(_temp, target, maxLength);
+    _temp[maxLength] = 0;
+}
+
+MenuText::~MenuText() {
+    delete[] _temp;
 }
 
 void MenuText::onSelect(MenuPage*& currentPage) {
     if (!_editing) {
         // Enter Edit Mode
         _editing = true;
-        strcpy(_temp, _target);
+        strncpy(_temp, _target, _maxLength);
+        _temp[_maxLength] = 0;
         _cursorPos = 0;
     } else {
         // Advance Cursor or Save
@@ -158,7 +288,8 @@ void MenuText::onSelect(MenuPage*& currentPage) {
             _cursorPos++;
         } else {
             // Save and Exit
-            strcpy(_target, _temp);
+            strncpy(_target, _temp, _maxLength);
+            _target[_maxLength] = 0;
             _editing = false;
         }
     }
@@ -194,17 +325,6 @@ void MenuText::onInput(int delta) {
 
 void MenuText::getValueString(char* buffer, size_t size) const {
     if (_editing) {
-        // Show cursor
-        char tempBuf[32];
-        strncpy(tempBuf, _temp, sizeof(tempBuf));
-        // Mark cursor position (e.g., with brackets or just rely on blinking?)
-        // Let's wrap the char in brackets: "A" -> "[A]"
-        // This is hard to fit in the buffer.
-        // Let's just return the string. The UI renderer should handle cursor indication if possible.
-        // But UI renderer is generic.
-        // Let's modify the char at cursor to be inverted or something?
-        // We can't easily.
-        // Let's just return the string for now.
         snprintf(buffer, size, "%s", _temp);
     } else {
         snprintf(buffer, size, "%s", _target);

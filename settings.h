@@ -53,6 +53,7 @@ public:
     
     // --- Runtime Tracking ---
     void updateRuntime();
+    void syncRuntimeClock();
     uint32_t getSessionRuntime();
     uint32_t getTotalRuntime();
     void resetSessionRuntime();
