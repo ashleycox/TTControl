@@ -157,6 +157,10 @@ struct GlobalSettings {
     
     // Current State Persistence
     SpeedMode currentSpeed;
+
+    // Amplifier Monitor
+    float ampTempWarnC;
+    float ampTempShutdownC;
 };
 
 #endif // TYPES_H

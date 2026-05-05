@@ -842,6 +842,30 @@ void initCLI() {
         [](String v) { settings.get().maxAmplitude = (uint8_t)clampInt(v.toInt(), 0, 100); }
     });
 
+#if AMP_MONITOR_ENABLE
+    registry.push_back({ "amp_warn",
+        []() { return String(settings.get().ampTempWarnC); },
+        [](String v) {
+            settings.get().ampTempWarnC = clampFloat(v.toFloat(), AMP_TEMP_MIN_C, AMP_TEMP_MAX_C);
+            if (settings.get().ampTempShutdownC <= settings.get().ampTempWarnC) {
+                settings.get().ampTempShutdownC = settings.get().ampTempWarnC + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
+            }
+            settings.normalize();
+        }
+    });
+
+    registry.push_back({ "amp_shutdown",
+        []() { return String(settings.get().ampTempShutdownC); },
+        [](String v) {
+            settings.get().ampTempShutdownC = clampFloat(v.toFloat(), AMP_TEMP_MIN_C, AMP_TEMP_MAX_C);
+            if (settings.get().ampTempWarnC >= settings.get().ampTempShutdownC) {
+                settings.get().ampTempWarnC = settings.get().ampTempShutdownC - AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
+            }
+            settings.normalize();
+        }
+    });
+#endif
+
     registry.push_back({ "smooth_switch",
         []() { return String(settings.get().smoothSwitching); },
         [](String v) { settings.get().smoothSwitching = (v == "1" || v == "true"); }
@@ -1215,6 +1239,12 @@ void printStatus() {
 
     Serial.print("Amp Thermal: ");
     Serial.println(ampMonitor.isThermalOk() ? "OK" : "TRIPPED");
+
+    Serial.print("Amp Warn/Shutdown: ");
+    Serial.print(settings.get().ampTempWarnC, 1);
+    Serial.print("/");
+    Serial.print(settings.get().ampTempShutdownC, 1);
+    Serial.println(" C");
 #endif
 
     if (networkManager.isAvailable()) {
@@ -1601,6 +1631,10 @@ static void printSettingsDump() {
     Serial.print("Smooth Switch: "); Serial.println(g.smoothSwitching ? "ON" : "OFF");
     Serial.print("Brake Mode: "); Serial.println(brakeModeName(g.brakeMode));
     Serial.print("Brake Duration: "); Serial.print(g.brakeDuration); Serial.println("s");
+#if AMP_MONITOR_ENABLE
+    Serial.print("Amp Warn: "); Serial.print(g.ampTempWarnC); Serial.println("C");
+    Serial.print("Amp Shutdown: "); Serial.print(g.ampTempShutdownC); Serial.println("C");
+#endif
     Serial.print("Relay Active High: "); Serial.println(g.relayActiveHigh ? "YES" : "NO");
     Serial.print("Boot Speed: "); Serial.println(g.bootSpeed);
     Serial.print("Runtime: "); Serial.print(settings.getTotalRuntime()); Serial.println("s");

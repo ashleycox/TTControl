@@ -109,6 +109,7 @@ void commitMenuShadowSettings() {
 void saveMenuChangesAndExit() {
     commitMenuShadowSettings();
     motor.endRelayTest();
+    settings.normalize();
     motor.applySettings();
     settings.save();
     ui.exitMenu();
@@ -546,6 +547,10 @@ void buildMenuSystem() {
     pageSystem->addItem(new MenuFloat("Pitch Step", &settings.get().pitchStepSize, 0.01, 0.01, 1.0));
     pageSystem->addItem(new MenuBool("Pitch Reset", &settings.get().pitchResetOnStop));
     pageSystem->addItem(new MenuBool("Enable 78", &settings.get().enable78rpm));
+#if AMP_MONITOR_ENABLE
+    pageSystem->addItem(new MenuFloat("Amp Warn C", &settings.get().ampTempWarnC, 1.0, AMP_TEMP_MIN_C, AMP_TEMP_MAX_C));
+    pageSystem->addItem(new MenuFloat("Amp Shut C", &settings.get().ampTempShutdownC, 1.0, AMP_TEMP_MIN_C, AMP_TEMP_MAX_C));
+#endif
     pageSystem->addItem(new MenuAction("Error Log", actionEnterErrorLog));
     pageSystem->addItem(new MenuAction("Reset Runtime", [](){
         ui.showConfirm("Reset Runtime?", [](){

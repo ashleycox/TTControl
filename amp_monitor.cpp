@@ -10,8 +10,10 @@
 #include "error_handler.h"
 #include "hal.h"
 #include "motor.h"
+#include "settings.h"
 
 extern MotorController motor;
+extern Settings settings;
 
 AmplifierMonitor ampMonitor;
 
@@ -43,23 +45,28 @@ void AmplifierMonitor::update() {
 
     _thermalOk = hal.digitalRead(PIN_AMP_THERM_OK) == HIGH;
     _temperatureC = readTmp36C();
+    float warnThresholdC = settings.get().ampTempWarnC;
+    float shutdownThresholdC = settings.get().ampTempShutdownC;
+    if (shutdownThresholdC < warnThresholdC + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C) {
+        shutdownThresholdC = warnThresholdC + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
+    }
 
     if (!_thermalOk) {
         shutdownOutputs("Amp thermal cutout");
         return;
     }
 
-    if (_temperatureC >= AMP_TEMP_SHUTDOWN_C) {
+    if (_temperatureC >= shutdownThresholdC) {
         shutdownOutputs("Amp over temperature");
         return;
     }
 
-    if (!_warned && _temperatureC >= AMP_TEMP_WARN_C) {
+    if (!_warned && _temperatureC >= warnThresholdC) {
         _warned = true;
         errorHandler.report(ERR_AMP_THERMAL, "Amp temperature high", false);
     }
 
-    if (_temperatureC < (AMP_TEMP_WARN_C - 5.0f)) {
+    if (_temperatureC < (warnThresholdC - AMP_TEMP_WARN_HYSTERESIS_C)) {
         _warned = false;
     }
 #endif

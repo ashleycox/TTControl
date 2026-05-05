@@ -19,7 +19,17 @@ bool Settings::loadFromSlot(uint8_t slot, GlobalSettings& target) {
     if (LittleFS.exists(path)) {
         File f = LittleFS.open(path, "r");
         if (f) {
-            if (f.read((uint8_t*)&target, sizeof(GlobalSettings)) == sizeof(GlobalSettings)) {
+            size_t bytesRead = f.read((uint8_t*)&target, sizeof(GlobalSettings));
+            if (bytesRead == sizeof(GlobalSettings)) {
+                f.close();
+                return true;
+            }
+
+            const size_t legacyV4Size = sizeof(GlobalSettings) - (sizeof(float) * 2);
+            if (bytesRead == legacyV4Size && target.schemaVersion == 4) {
+                target.schemaVersion = SETTINGS_SCHEMA_VERSION;
+                target.ampTempWarnC = AMP_TEMP_WARN_C;
+                target.ampTempShutdownC = AMP_TEMP_SHUTDOWN_C;
                 f.close();
                 return true;
             }
@@ -235,6 +245,52 @@ struct GlobalSettingsV3 {
     SpeedMode currentSpeed;
 };
 
+// V4: Before configurable amplifier temperature thresholds
+struct GlobalSettingsV4 {
+    uint32_t schemaVersion;
+    uint8_t phaseMode;
+    uint8_t maxAmplitude;
+    uint8_t softStartCurve;
+    bool smoothSwitching;
+    uint8_t switchRampDuration;
+    uint8_t brakeMode;
+    float brakeDuration;
+    float brakePulseGap;
+    float brakeStartFreq;
+    float brakeStopFreq;
+    float softStopCutoff;
+    bool relayActiveHigh;
+    bool muteRelayLinkStandby;
+    bool muteRelayLinkStartStop;
+    uint8_t powerOnRelayDelay;
+    uint8_t displayBrightness;
+    uint8_t displaySleepDelay;
+    bool screensaverEnabled;
+    uint8_t autoDimDelay;
+    bool showRuntime;
+    bool errorDisplayEnabled;
+    uint8_t errorDisplayDuration;
+    uint8_t autoStandbyDelay;
+    bool autoStart;
+    bool autoBoot;
+    bool pitchResetOnStop;
+    SpeedSettings speeds[3];
+    char presetNames[5][17];
+    uint32_t totalRuntime;
+    bool reverseEncoder;
+    float pitchStepSize;
+    uint8_t rampType;
+    uint8_t screensaverMode;
+    bool enable78rpm;
+    uint8_t freqDependentAmplitude;
+    float vfLowFreq;
+    uint8_t vfLowBoost;
+    float vfMidFreq;
+    uint8_t vfMidBoost;
+    uint8_t bootSpeed;
+    SpeedMode currentSpeed;
+};
+
 bool Settings::migrate(uint32_t oldVersion, File& f) {
     GlobalSettings newSettings;
     GlobalSettings backup = _data;
@@ -334,6 +390,56 @@ bool Settings::migrate(uint32_t oldVersion, File& f) {
         save();
         return true;
     }
+    else if (oldVersion == 4) {
+        GlobalSettingsV4 v4;
+        if (f.read((uint8_t*)&v4, sizeof(GlobalSettingsV4)) != sizeof(GlobalSettingsV4)) return false;
+
+        newSettings.phaseMode = v4.phaseMode;
+        newSettings.maxAmplitude = v4.maxAmplitude;
+        newSettings.softStartCurve = v4.softStartCurve;
+        newSettings.smoothSwitching = v4.smoothSwitching;
+        newSettings.switchRampDuration = v4.switchRampDuration;
+        newSettings.brakeMode = v4.brakeMode;
+        newSettings.brakeDuration = v4.brakeDuration;
+        newSettings.brakePulseGap = v4.brakePulseGap;
+        newSettings.brakeStartFreq = v4.brakeStartFreq;
+        newSettings.brakeStopFreq = v4.brakeStopFreq;
+        newSettings.softStopCutoff = v4.softStopCutoff;
+        newSettings.relayActiveHigh = v4.relayActiveHigh;
+        newSettings.muteRelayLinkStandby = v4.muteRelayLinkStandby;
+        newSettings.muteRelayLinkStartStop = v4.muteRelayLinkStartStop;
+        newSettings.powerOnRelayDelay = v4.powerOnRelayDelay;
+        newSettings.displayBrightness = v4.displayBrightness;
+        newSettings.displaySleepDelay = v4.displaySleepDelay;
+        newSettings.screensaverEnabled = v4.screensaverEnabled;
+        newSettings.autoDimDelay = v4.autoDimDelay;
+        newSettings.showRuntime = v4.showRuntime;
+        newSettings.errorDisplayEnabled = v4.errorDisplayEnabled;
+        newSettings.errorDisplayDuration = v4.errorDisplayDuration;
+        newSettings.autoStandbyDelay = v4.autoStandbyDelay;
+        newSettings.autoStart = v4.autoStart;
+        newSettings.autoBoot = v4.autoBoot;
+        newSettings.pitchResetOnStop = v4.pitchResetOnStop;
+        memcpy(newSettings.speeds, v4.speeds, sizeof(v4.speeds));
+        memcpy(newSettings.presetNames, v4.presetNames, sizeof(v4.presetNames));
+        newSettings.totalRuntime = v4.totalRuntime;
+        newSettings.reverseEncoder = v4.reverseEncoder;
+        newSettings.pitchStepSize = v4.pitchStepSize;
+        newSettings.rampType = v4.rampType;
+        newSettings.screensaverMode = v4.screensaverMode;
+        newSettings.enable78rpm = v4.enable78rpm;
+        newSettings.freqDependentAmplitude = v4.freqDependentAmplitude;
+        newSettings.vfLowFreq = v4.vfLowFreq;
+        newSettings.vfLowBoost = v4.vfLowBoost;
+        newSettings.vfMidFreq = v4.vfMidFreq;
+        newSettings.vfMidBoost = v4.vfMidBoost;
+        newSettings.bootSpeed = v4.bootSpeed;
+        newSettings.currentSpeed = v4.currentSpeed;
+
+        _data = newSettings;
+        save();
+        return true;
+    }
 
     return false;
 }
@@ -408,6 +514,17 @@ void Settings::validate() {
     if (_data.vfMidFreq < 0.0) _data.vfMidFreq = 0.0;
     if (_data.vfMidFreq > 100.0) _data.vfMidFreq = 100.0;
     if (_data.bootSpeed > 3) _data.bootSpeed = 3;
+    if (_data.ampTempShutdownC < (AMP_TEMP_MIN_C + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C)) {
+        _data.ampTempShutdownC = AMP_TEMP_MIN_C + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
+    }
+    if (_data.ampTempShutdownC > AMP_TEMP_MAX_C) _data.ampTempShutdownC = AMP_TEMP_MAX_C;
+    if (_data.ampTempWarnC < AMP_TEMP_MIN_C) _data.ampTempWarnC = AMP_TEMP_MIN_C;
+    if (_data.ampTempWarnC > (AMP_TEMP_MAX_C - AMP_TEMP_MIN_SHUTDOWN_MARGIN_C)) {
+        _data.ampTempWarnC = AMP_TEMP_MAX_C - AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
+    }
+    if (_data.ampTempWarnC > (_data.ampTempShutdownC - AMP_TEMP_MIN_SHUTDOWN_MARGIN_C)) {
+        _data.ampTempWarnC = _data.ampTempShutdownC - AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
+    }
 
     // Validate Per-Speed Settings
     for(int i=0; i<3; i++) {
@@ -556,6 +673,8 @@ void Settings::setDefaults() {
     _data.vfMidFreq = 25.0;
     _data.vfMidBoost = 100;
     _data.bootSpeed = 3; // Default to Last Used
+    _data.ampTempWarnC = AMP_TEMP_WARN_C;
+    _data.ampTempShutdownC = AMP_TEMP_SHUTDOWN_C;
 }
 
 bool Settings::loadPreset(uint8_t slot) {

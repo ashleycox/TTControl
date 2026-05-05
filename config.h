@@ -130,6 +130,10 @@
 
 #define AMP_TEMP_WARN_C 65.0f
 #define AMP_TEMP_SHUTDOWN_C 75.0f
+#define AMP_TEMP_MIN_C 30.0f
+#define AMP_TEMP_MAX_C 120.0f
+#define AMP_TEMP_MIN_SHUTDOWN_MARGIN_C 1.0f
+#define AMP_TEMP_WARN_HYSTERESIS_C 5.0f
 
 // --- Network Defaults (Wi-Fi boards only) ---
 #define NETWORK_CONFIG_MAGIC 0x54545746UL
@@ -149,7 +153,7 @@
 #define WELCOME_MESSAGE "Welcome to TT Control"
 
 // --- Storage Schema ---
-#define SETTINGS_SCHEMA_VERSION 4
+#define SETTINGS_SCHEMA_VERSION 5
 
 // --- Default Values ---
 #define DEFAULT_PHASE_MODE 3 // 3-phase

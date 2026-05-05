@@ -337,13 +337,13 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.10. Amplifier Monitoring And Thermal Safety
-- **Compile-Time Enable:** `AMP_MONITOR_ENABLE` enables the amplifier monitor. It is enabled by default and has no menu toggle in the current firmware.
+- **Compile-Time Enable:** `AMP_MONITOR_ENABLE` enables the amplifier monitor. It is enabled by default and has no runtime enable/disable toggle.
 - **Temperature Sensor:** `PIN_AMP_TEMP` reads a TMP36-style analogue heatsink sensor on ADC GP26. The firmware samples it every 500 ms and converts voltage to degrees Celsius.
 - **Thermal Cutout Input:** `PIN_AMP_THERM_OK` reads the amplifier thermal cutout/status line on GP27 using an input pulldown. HIGH means the amplifier thermal chain is healthy; LOW triggers an immediate critical shutdown.
-- **Warning Threshold:** At `AMP_TEMP_WARN_C` (default `65.0C`), the firmware logs a non-critical `ERR_AMP_THERMAL` warning. The warning re-arms once temperature falls at least 5C below the warning threshold.
-- **Shutdown Threshold:** At `AMP_TEMP_SHUTDOWN_C` (default `75.0C`), or when the thermal OK input goes LOW, the firmware calls `motor.emergencyStop()`, logs a critical `ERR_AMP_THERMAL`, mutes/stops outputs, and latches shutdown behavior until reboot.
+- **Warning Threshold:** At the configured warning threshold, defaulting to `AMP_TEMP_WARN_C` (`65.0C`), the firmware logs a non-critical `ERR_AMP_THERMAL` warning. The warning re-arms once temperature falls at least 5C below the warning threshold.
+- **Shutdown Threshold:** At the configured shutdown threshold, defaulting to `AMP_TEMP_SHUTDOWN_C` (`75.0C`), or when the thermal OK input goes LOW, the firmware calls `motor.emergencyStop()`, logs a critical `ERR_AMP_THERMAL`, mutes/stops outputs, and latches shutdown behavior until reboot.
 - **Status Reporting:** The serial `status` / `i` command reports amplifier temperature and thermal state. The web API and Stats dashboard also expose these readings when the feature is compiled in.
-- **Configuration:** Thresholds and pins are compile-time constants in `config.h`; they are not currently exposed as OLED menu or web settings.
+- **Configuration:** When `AMP_MONITOR_ENABLE` is `1`, warning and shutdown thresholds are configurable from the OLED System menu and the web Settings page. Pins remain compile-time hardware assignments in `config.h`.
 
 ---
 
@@ -443,6 +443,8 @@ Use these keys with `set` and `get`. Speed-specific settings apply to the **curr
 | `rev_enc` | Reverse Encoder (0/1) | Bool |
 | `phase_mode` | Phase mode (1-3 by default; 1-4 if `ENABLE_4_CHANNEL_SUPPORT` is set to `1`) | Int |
 | `max_amp` | Global maximum amplitude (0-100) | Int |
+| `amp_warn` | Amplifier warning temperature in C (`AMP_MONITOR_ENABLE` only) | Float |
+| `amp_shutdown` | Amplifier shutdown temperature in C (`AMP_MONITOR_ENABLE` only) | Float |
 | `smooth_switch` | Smooth speed switching (0/1) | Bool |
 | `switch_ramp` | Speed switch ramp duration (s) | Int |
 | `brake_mode` | Brake mode (0=Off, 1=Pulse, 2=Ramp, 3=SoftStop) | Int |
@@ -550,6 +552,8 @@ The menu structure is designed for a data-driven implementation.
 - **Pitch Step:** Step size for pitch control (0.01% - 1.0%).
 - **Pitch Reset:** Reset pitch to 0% on motor stop.
 - **Enable 78:** Toggle availability of 78 RPM mode.
+- **Amp Warn C:** Amplifier warning temperature. (If `AMP_MONITOR_ENABLE`)
+- **Amp Shut C:** Amplifier shutdown temperature. (If `AMP_MONITOR_ENABLE`)
 - **Boot Speed:** Select default speed on boot (0=33, 1=45, 2=Last Used).
 - **Welcome Msg:** Configurable welcome message on boot.
 - **Goodbye Msg:** Configurable goodbye message on shutdown.
@@ -557,7 +561,7 @@ The menu structure is designed for a data-driven implementation.
 - **Reset Runtime:** Reset the total runtime counter (with confirmation).
 - **Fact Reset:** Factory Reset.
 
-Amplifier monitoring does not currently have OLED menu settings. When `AMP_MONITOR_ENABLE` is compiled in, it runs automatically; warnings and shutdowns appear through the Error Log, serial status, and web status/dashboard.
+When `AMP_MONITOR_ENABLE` is compiled in, amplifier monitoring runs automatically. Warnings and shutdowns appear through the Error Log, serial status, and web status/dashboard; thresholds are editable in the System menu and web Settings page.
 
 ### Network
 - **Status:** Shows the current Wi-Fi connection state.
@@ -618,7 +622,7 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Features** | `ENABLE_MUTE_RELAYS` | Enable/Disable Mute Relays | `1` | Controls relay logic. |
 | **Features** | `ENABLE_DPDT_RELAYS` | Use 2x DPDT instead of 4x SPST | `0` | Changes relay switching logic. |
 | **Features** | `ENABLE_4_CHANNEL_SUPPORT` | Enable 4-phase/4-channel support. | `0` | Normal firmware builds expose three channels. Set to `1` to enable optional four-channel/Premotec bridge modes on hardware that has the fourth output populated. |
-| **Features** | `AMP_MONITOR_ENABLE` | Enable amplifier temperature and thermal cutout monitoring. | `1` | Samples every 500 ms using `PIN_AMP_TEMP` and `PIN_AMP_THERM_OK`; no runtime menu toggle. |
+| **Features** | `AMP_MONITOR_ENABLE` | Enable amplifier temperature and thermal cutout monitoring. | `1` | Samples every 500 ms using `PIN_AMP_TEMP` and `PIN_AMP_THERM_OK`; thresholds appear in the System menu and web Settings page. |
 | **Optional Pins**| `PITCH_CONTROL_ENABLE` | Enables the secondary (Pitch) encoder functionality and logic. | `0` (Disabled) | **Required** flag for the optional pitch feature (3.3). |
 | **Optional Pins**| `PIN_ENC_PITCH_CLK` | Assigns the pin for the Pitch Encoder Clock. | `13` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
 | **Optional Pins**| `PIN_ENC_PITCH_DT` | Assigns the pin for the Pitch Encoder Data. | `14` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
@@ -631,10 +635,14 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Optional Pins**| `PIN_BTN_START_STOP` | Assigns the pin for the Start/Stop Button. | `9` | Only compiled if `START_STOP_BUTTON_ENABLE` is `1`; selected because GP9 is exposed on Pico 2 W. |
 | **Monitor Pins**| `PIN_AMP_TEMP` | Amplifier heatsink temperature ADC input. | `26` | TMP36-style analogue sensor. |
 | **Monitor Pins**| `PIN_AMP_THERM_OK` | Amplifier thermal cutout/status input. | `27` | HIGH means healthy; LOW triggers critical shutdown. |
-| **Thermal Limits**| `AMP_TEMP_WARN_C` | Amplifier warning temperature. | `65.0` | Logs non-critical `ERR_AMP_THERMAL`. |
-| **Thermal Limits**| `AMP_TEMP_SHUTDOWN_C` | Amplifier shutdown temperature. | `75.0` | Calls emergency stop, disables waveform output, and mutes relays. |
+| **Thermal Limits**| `AMP_TEMP_WARN_C` | Factory default amplifier warning temperature. | `65.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; logs non-critical `ERR_AMP_THERMAL`. |
+| **Thermal Limits**| `AMP_TEMP_SHUTDOWN_C` | Factory default amplifier shutdown temperature. | `75.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; calls emergency stop, disables waveform output, and mutes relays. |
+| **Thermal Limits**| `AMP_TEMP_MIN_C` | Lowest configurable amplifier threshold. | `30.0` | Used to constrain saved settings. |
+| **Thermal Limits**| `AMP_TEMP_MAX_C` | Highest configurable amplifier threshold. | `120.0` | Used to constrain saved settings. |
+| **Thermal Limits**| `AMP_TEMP_MIN_SHUTDOWN_MARGIN_C` | Minimum gap between warning and shutdown thresholds. | `1.0` | Keeps warning below shutdown. |
+| **Thermal Limits**| `AMP_TEMP_WARN_HYSTERESIS_C` | Temperature drop required to re-arm the warning. | `5.0` | Warning-only hysteresis. |
 | **Display Msg** | `STANDBY_MESSAGE` | Sets the message displayed while the system is in standby, if enabled in the menu. | `message` | Controls message display logic. |
 | **Display Msg** | `WELCOME_MESSAGE` | Sets the message displayed on boot. | `"Welcome to TT Control"` | |
-| **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `4` | Use for compatibility checks when firmware is updated. |
+| **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `5` | Use for compatibility checks when firmware is updated. |
 | **Defaults** | `DEFAULT_PHASE_MODE` | Default phase mode. | `3` (3-phase) | |
 | **Defaults** | `DEFAULT_SPEED_INDEX` | Default speed index. | `0` (33.3 RPM) | |
