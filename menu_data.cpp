@@ -11,6 +11,7 @@
 #include "motor.h"
 #include "error_handler.h"
 #include "settings.h"
+#include "network_manager.h"
 #include <vector>
 
 extern UserInterface ui;
@@ -20,6 +21,7 @@ extern MotorController motor;
 // We use a shadow copy of settings for editing, allowing the user to "Save" or "Cancel" changes.
 char speedLabelBuffer[32];
 MenuItem* menuSpeedSelector = nullptr;
+MenuPage* pageNetwork = nullptr;
 
 // --- Sweep Diagnostic ---
 float sweepMinSep = 80.0;
@@ -36,15 +38,25 @@ static const char* const brakeModeLabels[] = {"Off", "Pulse", "Ramp", "Soft"};
 static const char* const saverModeLabels[] = {"Bounce", "Matrix", "Liss"};
 static const char* const sleepDelayLabels[] = {"Off", "10s", "20s", "30s", "1m", "5m", "10m"};
 static const char* const bootSpeedLabels[] = {"33", "45", "78", "Last"};
+static const char* const networkModeLabels[] = {"Setup AP", "Station", "STA+AP"};
+static const char* const webHomeLabels[] = {"Dash", "Control", "Settings", "Cal", "Network", "Presets", "Bench", "Diag", "Errors"};
 
 #if ENABLE_STANDBY && ENABLE_MUTE_RELAYS && ENABLE_DPDT_RELAYS
 static const char* const relayTestLabels[] = {"All Off", "Standby", "DPDT 1", "DPDT 2"};
 #elif ENABLE_STANDBY && ENABLE_MUTE_RELAYS
+#if ENABLE_4_CHANNEL_SUPPORT
 static const char* const relayTestLabels[] = {"All Off", "Standby", "Mute A", "Mute B", "Mute C", "Mute D"};
+#else
+static const char* const relayTestLabels[] = {"All Off", "Standby", "Mute A", "Mute B", "Mute C"};
+#endif
 #elif ENABLE_MUTE_RELAYS && ENABLE_DPDT_RELAYS
 static const char* const relayTestLabels[] = {"All Off", "DPDT 1", "DPDT 2"};
 #elif ENABLE_MUTE_RELAYS
+#if ENABLE_4_CHANNEL_SUPPORT
 static const char* const relayTestLabels[] = {"All Off", "Mute A", "Mute B", "Mute C", "Mute D"};
+#else
+static const char* const relayTestLabels[] = {"All Off", "Mute A", "Mute B", "Mute C"};
+#endif
 #elif ENABLE_STANDBY
 static const char* const relayTestLabels[] = {"All Off", "Standby"};
 #else
@@ -342,15 +354,71 @@ void actionEnterRelayTest() {
     ui.navigateTo(pageRelayTest);
 }
 
+void actionEnterNetwork() {
+    if (!networkManager.isAvailable()) {
+        ui.showError("No Wi-Fi", 2000);
+        return;
+    }
+
+    if (!pageNetwork) pageNetwork = new MenuPage("Network");
+    pageNetwork->clear();
+
+    NetworkConfig& cfg = networkManager.getConfig();
+    char status[32];
+    snprintf(status, sizeof(status), "Status: %s", networkManager.statusText());
+    pageNetwork->addItem(new MenuDynamicInfo(String(status)));
+
+    String ip = networkManager.ipText();
+    if (ip.length() == 0) ip = "No IP";
+    pageNetwork->addItem(new MenuDynamicInfo(String("Web: ") + ip));
+
+    pageNetwork->addItem(new MenuBool("Wi-Fi", &cfg.enabled));
+    pageNetwork->addItem(new MenuByte("Mode", &cfg.mode, NETWORK_MODE_AP, NETWORK_MODE_STA_AP, networkModeLabels, 3));
+    pageNetwork->addItem(new MenuText("Host", cfg.hostname, NETWORK_HOSTNAME_MAX));
+    pageNetwork->addItem(new MenuText("SSID", cfg.ssid, NETWORK_SSID_MAX));
+    pageNetwork->addItem(new MenuText("Pass", cfg.password, NETWORK_PASSWORD_MAX));
+    pageNetwork->addItem(new MenuBool("DHCP", &cfg.dhcp));
+    pageNetwork->addItem(new MenuBool("AP Fallback", &cfg.apFallback));
+    pageNetwork->addItem(new MenuText("AP SSID", cfg.apSsid, NETWORK_SSID_MAX));
+    pageNetwork->addItem(new MenuText("AP Pass", cfg.apPassword, NETWORK_PASSWORD_MAX));
+    pageNetwork->addItem(new MenuByte("AP Channel", &cfg.apChannel, 1, 13));
+    pageNetwork->addItem(new MenuBool("ReadOnly", &cfg.readOnlyMode));
+    pageNetwork->addItem(new MenuText("Web PIN", cfg.webPin, NETWORK_WEB_PIN_MAX));
+    pageNetwork->addItem(new MenuByte("Web Home", &cfg.webHomePage, 0, WEB_HOME_PAGE_COUNT - 1, webHomeLabels, WEB_HOME_PAGE_COUNT));
+    pageNetwork->addItem(new MenuAction("Reset PIN", [](){
+        NetworkConfig& cfg = networkManager.getConfig();
+        strncpy(cfg.webPin, NETWORK_DEFAULT_WEB_PIN, NETWORK_WEB_PIN_MAX);
+        cfg.webPin[NETWORK_WEB_PIN_MAX] = 0;
+        ui.showMessage("PIN Reset", 1200);
+    }));
+
+    pageNetwork->addItem(new MenuAction("Apply", [](){
+        networkManager.save();
+        networkManager.restart();
+        ui.showMessage("Network Applied", 1500);
+    }));
+    pageNetwork->addItem(new MenuAction("Setup AP", [](){
+        NetworkConfig& cfg = networkManager.getConfig();
+        cfg.enabled = true;
+        cfg.mode = NETWORK_MODE_AP;
+        networkManager.save();
+        networkManager.restart();
+        ui.showMessage("Setup AP On", 1500);
+    }));
+    pageNetwork->addItem(new MenuAction("Refresh", actionEnterNetwork));
+    pageNetwork->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    ui.navigateTo(pageNetwork);
+}
+
 // --- Menu Builder ---
 
 
 void buildMenuSystem() {
     // --- Speed Tuning Page (Per-Speed) ---
     pageSpeedTuning = new MenuPage("Speed Tuning");
-    pageSpeedTuning->addItem(new MenuFloat("Frequency", &menuShadowSettings.frequency, 0.1, 10.0, 3000.0));
-    pageSpeedTuning->addItem(new MenuFloat("Min Freq", &menuShadowSettings.minFrequency, 0.1, 10.0, 3000.0));
-    pageSpeedTuning->addItem(new MenuFloat("Max Freq", &menuShadowSettings.maxFrequency, 0.1, 10.0, 3000.0));
+    pageSpeedTuning->addItem(new MenuFloat("Frequency", &menuShadowSettings.frequency, 0.1, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ));
+    pageSpeedTuning->addItem(new MenuFloat("Min Freq", &menuShadowSettings.minFrequency, 0.1, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ));
+    pageSpeedTuning->addItem(new MenuFloat("Max Freq", &menuShadowSettings.maxFrequency, 0.1, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ));
     pageSpeedTuning->addItem(new MenuByte("Filt Type", &menuShadowSettings.filterType, 0, 2, filterLabels, 3));
     MenuItem* iirAlpha = new MenuFloat("IIR Alpha", &menuShadowSettings.iirAlpha, 0.01, 0.01, 0.99);
     iirAlpha->setVisibleWhen([](){ return menuShadowSettings.filterType == FILTER_IIR; });
@@ -362,7 +430,7 @@ void buildMenuSystem() {
 
     // --- Phase Page (Mixed) ---
     pagePhase = new MenuPage("Phase Control");
-    pagePhase->addItem(new MenuByte("Mode (Glb)", &settings.get().phaseMode, 1, 4, phaseModeLabels, 5));
+    pagePhase->addItem(new MenuByte("Mode (Glb)", &settings.get().phaseMode, 1, MAX_PHASE_MODE, phaseModeLabels, MAX_PHASE_MODE + 1));
     MenuItem* phase2 = new MenuFloat("Ph 2 Offs", &menuShadowSettings.phaseOffset[1], 0.1, -360.0, 360.0);
     phase2->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_2; });
     pagePhase->addItem(phase2);
@@ -370,7 +438,7 @@ void buildMenuSystem() {
     phase3->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_3; });
     pagePhase->addItem(phase3);
     MenuItem* phase4 = new MenuFloat("Ph 4 Offs", &menuShadowSettings.phaseOffset[3], 0.1, -360.0, 360.0);
-    phase4->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_4; });
+    phase4->setVisibleWhen([](){ return ENABLE_4_CHANNEL_SUPPORT && settings.get().phaseMode >= PHASE_4; });
     pagePhase->addItem(phase4);
     MenuItem* sweepDiag = new MenuAction("Sweep Diag.", actionEnterSweep);
     sweepDiag->setVisibleWhen([](){ return settings.get().phaseMode == PHASE_2 || settings.get().phaseMode == PHASE_3; });
@@ -381,7 +449,7 @@ void buildMenuSystem() {
     pageMotor = new MenuPage("Motor Control");
     // Per-Speed
     pageMotor->addItem(new MenuFloat("Soft Start", &menuShadowSettings.softStartDuration, 0.1, 0.0, 10.0));
-    pageMotor->addItem(new MenuByte("Red. Amp %", &menuShadowSettings.reducedAmplitude, 50, 100));
+    pageMotor->addItem(new MenuByte("Red. Amp %", &menuShadowSettings.reducedAmplitude, 10, 100));
     pageMotor->addItem(new MenuByte("Amp Delay", &menuShadowSettings.amplitudeDelay, 0, 60));
     pageMotor->addItem(new MenuByte("Kick Mult", &menuShadowSettings.startupKick, 1, 4));
     MenuItem* kickDuration = new MenuByte("Kick Dur", &menuShadowSettings.startupKickDuration, 0, 15);
@@ -515,6 +583,9 @@ void buildMenuSystem() {
     pageMain->addItem(new MenuNav("Power", pagePower));
     pageMain->addItem(new MenuNav("Display", pageDisplay));
     pageMain->addItem(new MenuNav("System", pageSystem));
+    if (networkManager.isAvailable()) {
+        pageMain->addItem(new MenuAction("Network", actionEnterNetwork));
+    }
     pageMain->addItem(new MenuAction("Presets", actionEnterPresets));
 
     pageMain->addItem(new MenuAction("Save & Exit", actionSaveExit));

@@ -34,6 +34,7 @@ public:
     // --- State Control ---
     void start();
     void stop();
+    void emergencyStop();
     void toggleStartStop();
     void toggleStandby();
     

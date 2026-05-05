@@ -11,6 +11,12 @@
 #include "waveform.h"
 #include "hal.h"
 
+static float clampOutputFrequency(float freq) {
+    if (freq > MAX_OUTPUT_FREQUENCY_HZ) return MAX_OUTPUT_FREQUENCY_HZ;
+    if (freq < -MAX_OUTPUT_FREQUENCY_HZ) return -MAX_OUTPUT_FREQUENCY_HZ;
+    return freq;
+}
+
 MotorController::MotorController() {
     _state = ENABLE_STANDBY ? STATE_STANDBY : STATE_STOPPED;
     _currentSpeedMode = SPEED_33;
@@ -66,7 +72,9 @@ void MotorController::begin() {
             hal.setPinMode(PIN_MUTE_PHASE_A, OUTPUT);
             hal.setPinMode(PIN_MUTE_PHASE_B, OUTPUT);
             hal.setPinMode(PIN_MUTE_PHASE_C, OUTPUT);
+#if ENABLE_4_CHANNEL_SUPPORT
             hal.setPinMode(PIN_MUTE_PHASE_D, OUTPUT);
+#endif
         }
     }
 
@@ -100,7 +108,7 @@ void MotorController::begin() {
 
 void MotorController::startSymmetricSweep(float minSep, float maxSep, float speed) {
     if (_relayTestMode) return;
-    if (settings.get().phaseMode == 4) return; // Invalid for 4-phase twin motors
+    if (settings.get().phaseMode == PHASE_4) return; // Invalid for 4-phase twin motors
 
     _wasRunningBeforeSweep = isRunning();
     if (!isRunning()) {
@@ -242,7 +250,7 @@ void MotorController::update() {
             {
                 float baseFreq = settings.getCurrentSpeedSettings().frequency;
                 float pitchMod = baseFreq * (currentPitchPercent / 100.0);
-                _targetFreq = baseFreq + pitchMod;
+                _targetFreq = clampOutputFrequency(baseFreq + pitchMod);
 
                 if (_currentFreq != _targetFreq) {
                     _currentFreq = _targetFreq;
@@ -351,7 +359,7 @@ void MotorController::update() {
                         // DPDT 1: Always used (Phase A/B or 1/2)
                         pin = PIN_RELAY_DPDT_1;
                     } else if (_relayStage == 2) {
-                        // DPDT 2: Only used for 3 or 4 phase modes
+                        // DPDT 2: Only used for three or more phase modes
                         if (phaseMode >= 3) {
                             pin = PIN_RELAY_DPDT_2;
                         }
@@ -361,8 +369,8 @@ void MotorController::update() {
                 }
             }
         } else {
-            // SPST Logic: 4 stages
-            if (_relayStage < 4) {
+            // SPST Logic: one stage per enabled output phase
+            if (_relayStage < MAX_ACTIVE_PHASE_OUTPUTS) {
                 if (now - _relayStageTime > 100) { // 100ms stagger delay
                     _relayStageTime = now;
                     _relayStage++;
@@ -374,7 +382,9 @@ void MotorController::update() {
                     if (_relayStage == 1) pin = PIN_MUTE_PHASE_A;
                     else if (_relayStage == 2 && phaseMode >= 2) pin = PIN_MUTE_PHASE_B;
                     else if (_relayStage == 3 && phaseMode >= 3) pin = PIN_MUTE_PHASE_C;
+#if ENABLE_4_CHANNEL_SUPPORT
                     else if (_relayStage == 4 && phaseMode >= 4) pin = PIN_MUTE_PHASE_D;
+#endif
 
                     if (pin != -1) hal.digitalWrite(pin, activeHigh ? HIGH : LOW);
                 }
@@ -589,6 +599,23 @@ void MotorController::toggleStandby() {
     currentMotorState = _state;
 }
 
+void MotorController::emergencyStop() {
+    _state = STATE_STOPPED;
+    currentMotorState = _state;
+
+    _isKicking = false;
+    _isKickRamping = false;
+    _isSpeedRamping = false;
+    _isSweepingMode = false;
+    _targetAmp = 0.0;
+    _currentAmp = 0.0;
+
+    setRelays(false);
+    waveform.setAmplitude(0.0);
+    waveform.setEnabled(false);
+    settings.resetSessionRuntime();
+}
+
 void MotorController::cycleSpeed() {
     int s = (int)_currentSpeedMode + 1;
     if (s > SPEED_78) s = SPEED_33;
@@ -628,7 +655,7 @@ void MotorController::setSpeed(SpeedMode mode) {
     // Calculate new target frequency including pitch
     float baseFreq = s.frequency;
     float pitchMod = baseFreq * (currentPitchPercent / 100.0);
-    float newTarget = baseFreq + pitchMod;
+    float newTarget = clampOutputFrequency(baseFreq + pitchMod);
 
     if (_state == STATE_RUNNING) {
         if (settings.get().smoothSwitching) {
@@ -693,7 +720,7 @@ void MotorController::adjustPitchFreq(float deltaHz) {
 void MotorController::applySettings() {
     SpeedSettings& s = settings.getCurrentSpeedSettings();
 
-    _targetFreq = s.frequency;
+    _targetFreq = clampOutputFrequency(s.frequency);
     _currentFreq = _targetFreq;
     currentFrequency = _currentFreq;
 
@@ -740,7 +767,9 @@ void MotorController::setRelays(bool active) {
             hal.digitalWrite(PIN_MUTE_PHASE_A, activeHigh ? LOW : HIGH);
             hal.digitalWrite(PIN_MUTE_PHASE_B, activeHigh ? LOW : HIGH);
             hal.digitalWrite(PIN_MUTE_PHASE_C, activeHigh ? LOW : HIGH);
+#if ENABLE_4_CHANNEL_SUPPORT
             hal.digitalWrite(PIN_MUTE_PHASE_D, activeHigh ? LOW : HIGH);
+#endif
         }
     }
 }
@@ -763,7 +792,7 @@ uint8_t MotorController::getRelayTestStageCount() {
     uint8_t count = 1; // All off
     if (ENABLE_STANDBY) count++;
     if (ENABLE_MUTE_RELAYS) {
-        count += ENABLE_DPDT_RELAYS ? 2 : 4;
+        count += ENABLE_DPDT_RELAYS ? 2 : MAX_ACTIVE_PHASE_OUTPUTS;
     }
     return count;
 }
@@ -802,7 +831,9 @@ void MotorController::setRelayTestStage(uint8_t stage) {
             writeRelayOutput(PIN_MUTE_PHASE_A, false);
             writeRelayOutput(PIN_MUTE_PHASE_B, false);
             writeRelayOutput(PIN_MUTE_PHASE_C, false);
+#if ENABLE_4_CHANNEL_SUPPORT
             writeRelayOutput(PIN_MUTE_PHASE_D, false);
+#endif
         }
     }
 
@@ -826,7 +857,9 @@ void MotorController::setRelayTestStage(uint8_t stage) {
         if (relayStage == 1) writeRelayOutput(PIN_MUTE_PHASE_A, true);
         else if (relayStage == 2) writeRelayOutput(PIN_MUTE_PHASE_B, true);
         else if (relayStage == 3) writeRelayOutput(PIN_MUTE_PHASE_C, true);
+#if ENABLE_4_CHANNEL_SUPPORT
         else if (relayStage == 4) writeRelayOutput(PIN_MUTE_PHASE_D, true);
+#endif
     }
 }
 

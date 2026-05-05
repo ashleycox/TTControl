@@ -27,6 +27,8 @@
 
 // --- Waveform Generation ---
 #define LUT_MAX_SIZE 16384 // Size of Sine Lookup Table
+#define MIN_OUTPUT_FREQUENCY_HZ 10.0f
+#define MAX_OUTPUT_FREQUENCY_HZ 1500.0f
 
 // --- Preset Management ---
 #define MAX_PRESET_SLOTS 5
@@ -41,6 +43,14 @@
 
 // --- Optional Features (Compile-time flags) ---
 // Set to 1 to enable specific hardware features
+#ifndef NETWORK_ENABLE
+#if defined(PICO_CYW43_SUPPORTED)
+#define NETWORK_ENABLE 1
+#else
+#define NETWORK_ENABLE 0
+#endif
+#endif
+
 #ifndef PITCH_CONTROL_ENABLE
 #define PITCH_CONTROL_ENABLE 0
 #endif
@@ -63,6 +73,20 @@
 #endif
 #ifndef ENABLE_DPDT_RELAYS
 #define ENABLE_DPDT_RELAYS 0     // Set to 1 to use 2x DPDT relays instead of 4x SPST
+#endif
+#ifndef ENABLE_4_CHANNEL_SUPPORT
+#define ENABLE_4_CHANNEL_SUPPORT 0 // Set to 1 to enable optional 4-channel/Premotec bridge modes
+#endif
+#ifndef AMP_MONITOR_ENABLE
+#define AMP_MONITOR_ENABLE 1       // Enable amplifier heatsink thermal monitoring
+#endif
+
+#if ENABLE_4_CHANNEL_SUPPORT
+#define MAX_PHASE_MODE 4
+#define MAX_ACTIVE_PHASE_OUTPUTS 4
+#else
+#define MAX_PHASE_MODE 3
+#define MAX_ACTIVE_PHASE_OUTPUTS 3
 #endif
 
 // --- Pin Assignments (RP2350 / Arduino-Pico) ---
@@ -100,7 +124,25 @@
 
 #define PIN_BTN_STANDBY 21
 #define PIN_BTN_SPEED 22
-#define PIN_BTN_START_STOP 23
+#define PIN_BTN_START_STOP 9
+#define PIN_AMP_TEMP 26
+#define PIN_AMP_THERM_OK 27
+
+#define AMP_TEMP_WARN_C 65.0f
+#define AMP_TEMP_SHUTDOWN_C 75.0f
+
+// --- Network Defaults (Wi-Fi boards only) ---
+#define NETWORK_CONFIG_MAGIC 0x54545746UL
+#define NETWORK_CONFIG_VERSION 3
+#define NETWORK_HOSTNAME_MAX 32
+#define NETWORK_SSID_MAX 32
+#define NETWORK_PASSWORD_MAX 64
+#define NETWORK_WEB_PIN_MAX 8
+#define NETWORK_DEFAULT_HOSTNAME "ttcontrol"
+#define NETWORK_DEFAULT_AP_SSID "TTControl-Setup"
+#define NETWORK_DEFAULT_AP_PASSWORD ""
+#define NETWORK_DEFAULT_AP_CHANNEL 6
+#define NETWORK_DEFAULT_WEB_PIN "1234"
 
 // --- UI Strings ---
 #define STANDBY_MESSAGE "TT Control Standby"

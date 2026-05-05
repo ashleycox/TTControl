@@ -35,6 +35,7 @@ public:
     
     // Accessor for the global settings struct
     GlobalSettings& get() { return _data; }
+    void normalize();
     
     // Helper to get current speed settings
     SpeedSettings& getCurrentSpeedSettings();

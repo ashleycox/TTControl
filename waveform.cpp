@@ -78,7 +78,9 @@ void WaveformGenerator::setupPWM() {
     gpio_set_function(PIN_PWM_PHASE_A, GPIO_FUNC_PWM);
     gpio_set_function(PIN_PWM_PHASE_B, GPIO_FUNC_PWM);
     gpio_set_function(PIN_PWM_PHASE_C, GPIO_FUNC_PWM);
+#if ENABLE_4_CHANNEL_SUPPORT
     gpio_set_function(PIN_PWM_PHASE_D, GPIO_FUNC_PWM);
+#endif
     
     _pwmSlice0 = pwm_gpio_to_slice_num(PIN_PWM_PHASE_A);
     _pwmSlice1 = pwm_gpio_to_slice_num(PIN_PWM_PHASE_C);
@@ -255,10 +257,10 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
     const volatile WaveformState* state = _activeState;
     
     for (int i = 0; i < DMA_BUFFER_SIZE; i++) {
-        // Calculate samples for all 4 phases
+        // Calculate samples for enabled phases; disabled channels stay centred.
         int16_t samples[4];
         for (int ch = 0; ch < 4; ch++) {
-            samples[ch] = generateSample(ch);
+            samples[ch] = (ch < MAX_ACTIVE_PHASE_OUTPUTS) ? generateSample(ch) : 0;
             _lastSamples[ch] = samples[ch];
         }
         
@@ -306,6 +308,8 @@ void WaveformGenerator::configure(const SpeedSettings& s) {
 }
 
 void WaveformGenerator::setFrequency(float freq) {
+    if (freq > MAX_OUTPUT_FREQUENCY_HZ) freq = MAX_OUTPUT_FREQUENCY_HZ;
+    if (freq < -MAX_OUTPUT_FREQUENCY_HZ) freq = -MAX_OUTPUT_FREQUENCY_HZ;
     _pendingState->frequency = freq;
     // Recalculate Phase Increment based on PWM frequency (50kHz)
     // Inc = Freq * (1/50000) * 2^32
@@ -324,6 +328,8 @@ void WaveformGenerator::setAmplitude(float amp) {
 }
 
 void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s) {
+    if (freq > MAX_OUTPUT_FREQUENCY_HZ) freq = MAX_OUTPUT_FREQUENCY_HZ;
+    if (freq < -MAX_OUTPUT_FREQUENCY_HZ) freq = -MAX_OUTPUT_FREQUENCY_HZ;
     _pendingState->frequency = freq;
     
     // Recalculate Phase Increment

@@ -78,7 +78,7 @@ struct SpeedSettings {
     
     // Motor Control
     float softStartDuration; // Seconds
-    uint8_t reducedAmplitude; // 50-100%
+    uint8_t reducedAmplitude; // 10-100%
     uint8_t amplitudeDelay; // Seconds
     uint8_t startupKick; // Multiplier (1-4)
     uint8_t startupKickDuration; // Seconds

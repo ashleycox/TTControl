@@ -10,7 +10,7 @@ It features extensive configurability via a hierarchical menu system, hardware c
 | Component | Specification | Default Value / Assignment | Notes |
 | :--- | :--- | :--- | :--- |
 | **Microcontroller** | RP2350 | | Dual Core architecture is mandatory. |
-| **Board** | Pimoroni Pico+2 | | 16MB Flash split: **8MB Sketch / 8MB LittleFS** for settings. |
+| **Board** | Pimoroni Pico+2, Pimoroni PicoPlus2W, or Raspberry Pi Pico 2 W. | | 16MB Flash split on Pico+2/PicoPlus2W: **8MB Sketch / 8MB LittleFS** for settings. Wi-Fi builds use the Arduino-Pico W board targets. |
 | **Development** | Arduino IDE / `earlephilhower/arduino-pico` | | Use `arduino-cli` best practices. |
 | **OLED Display** | SSD1306 (128x64 I2C) | **I2C0 @ 0x3C** | |
 
@@ -34,17 +34,39 @@ All code is extensively commented. The menu system is data-driven and arranged a
   - **OLED:** [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306)
   - **Graphics:** [Adafruit-GFX](https://github.com/adafruit/Adafruit-GFX-Library)
   - **Display I/O:** [Adafruit-BusIO](https://github.com/adafruit/Adafruit_BusIO)
+  - **JSON:** ArduinoJson
+  - **Wi-Fi builds:** Arduino-Pico bundled `WiFi`, `WebServer`, and `DNSServer`
+
+### 1.3. Build Targets
+
+Non-Wi-Fi Pimoroni Pico+2 build:
+
+```sh
+arduino-cli compile --fqbn rp2040:rp2040:pimoroni_pico_plus_2 .
+```
+
+Pimoroni PicoPlus2W build with 8MB LittleFS:
+
+```sh
+arduino-cli compile --fqbn rp2040:rp2040:pimoroni_pico_plus_2w:flash=16777216_8388608 .
+```
+
+Raspberry Pi Pico 2 W build with 1MB LittleFS:
+
+```sh
+arduino-cli compile --fqbn rp2040:rp2040:rpipico2w:flash=4194304_1048576 .
+```
 
 ---
 
-### 1.3. Pin Assignments
+### 1.4. Pin Assignments
 
 | Pin | Function | Notes |
 | :--- | :--- | :--- |
 | 0 | PWM phase A | |
 | 1 | PWM Phase B | |
 | 2 | PWM Phase C | |
-| 3 | PWM Phase D | |
+| 3 | PWM Phase D | Can be disabled only in custom 3-channel builds. |
 | 4 | I2C0 SDA (OLED) | |
 | 5 | I2C0 SCL (OLED) | |
 | 10 | Primary Encoder CLK | |
@@ -57,23 +79,25 @@ All code is extensively commented. The menu system is data-driven and arranged a
 | 17 | Phase A Muting Control | Active High Default (Configurable). Acts as DPDT Relay 1 if `ENABLE_DPDT_RELAYS` is `1`. |
 | 18 | Phase B Muting Control | Active High Default (Configurable). Acts as DPDT Relay 2 if `ENABLE_DPDT_RELAYS` is `1`. |
 | 19 | Phase C Muting Control | Active High Default (Configurable). Unused if `ENABLE_DPDT_RELAYS` is `1`. |
-| 20 | Phase D Muting Control | Active High Default (Configurable). Unused if `ENABLE_DPDT_RELAYS` is `1`. |
+| 20 | Phase D Muting Control | Can be disabled only in custom 3-channel builds; unused if `ENABLE_DPDT_RELAYS` is `1`. |
 | 21 | Standby Button | **Optional, controlled by compile flag.** |
 | 22 | Speed Button | **Optional, controlled by compile flag.** |
-| 23 | Start / Stop Button | **Optional, controlled by compile flag.** |
+| 9 | Start / Stop Button | **Optional, controlled by compile flag.** Uses a Pico 2 W header pin. |
+| 26 | Amplifier Temperature | ADC input for a TMP36-style heatsink sensor, enabled by `AMP_MONITOR_ENABLE`. |
+| 27 | Amplifier Thermal OK | Digital thermal cutout/status input, enabled by `AMP_MONITOR_ENABLE`; HIGH means healthy, LOW trips shutdown. |
 
 ---
 
-### 1.4. Default phase offset angles
+### 1.5. Default phase offset angles
 
 Default angles depend on phase mode and can be adjusted.
 
 | Assigned Output Phase | Initial Default Angle |
 | :--- | :--- |
 | Phase 1 | 0.0° (Fixed Reference) |
-| Phase 2 | +90.0° |
-| Phase 3 | +120.0° |
-| Phase 4 | +240.0°  |
+| Phase 2 | +120.0° |
+| Phase 3 | +240.0° |
+| Phase 4 | +270.0° |
 
 ---
 
@@ -83,8 +107,8 @@ Default angles depend on phase mode and can be adjusted.
 - **High-Precision DMA-based Generation:** Uses the RP2350's Direct Memory Access (DMA) and hardware PWM slices for jitter-free, CPU-independent waveform generation.
 - **Waveform Lookup Table:** Pre-computed, configurable sample lookup table with configurable lookup table size (1024, 2048, 4096, 8192, 16384).
 - **Interpolation:** Linear interpolation to smooth output with smaller sample tables.
-- **Frequency Range:** 10-3000 Hz in 0.1 Hz steps.
-- **Multi-Speed Support:** Supports 33⅓ (default 50Hz), 45 (default 67.5Hz), and 78 (default 113.5Hz) RPM.
+- **Frequency Range:** 10-1500 Hz in 0.1 Hz steps.
+- **Multi-Speed Support:** Supports 33⅓, 45, and 78 RPM. Factory defaults target the primary 12-pole motor: 25.07Hz, 33.85Hz, and 58.66Hz.
 - **78 RPM Toggle:** 78RPM can be enabled or disabled in the menu.
 - **Frequency Constraints:** Configurable minimum and maximum frequency constraint, per speed.
 
@@ -94,8 +118,8 @@ Default angles depend on phase mode and can be adjusted.
 - **Single Phase Mode:** 0 degrees.
 - **2-Phase Mode:** 0° and 90°.
 - **3-Phase Mode:** 0°, 120°, 240°.
-- **4-Phase Mode:** 0°, 90°, 0°, 90°.
-- **Configurable Phase Mode:** Phase mode configurable in menu (global setting), three-phase default.
+- **4-Phase Mode:** Disabled by default. Set `ENABLE_4_CHANNEL_SUPPORT` to `1` in `config.h` to enable optional four-channel/Premotec bridge presets.
+- **Configurable Phase Mode:** Phase mode configurable in menu (global setting), three-phase default. Standard firmware builds expose 1-3 phase modes; four-channel support is an explicit opt-in.
 - **Phase Offset Adjustment:** 0.1° resolution, -360 to +360 degrees.
 - **Independent Channel Offsets:** Independent phase offset adjustment (per-channel).
 - **Fixed Reference:** Phase A is always fixed at 0 degrees.
@@ -118,7 +142,7 @@ Default angles depend on phase mode and can be adjusted.
   - Set to **0** to disable (default).
 - **Voltage/Frequency (V/f) Curves:** an advanced 3-point interpolation curve. Define a voltage boost percentage at a specific low frequency and a mid frequency to eliminate low-speed cogging without overdriving the motor mechanically. A master V/f blend% parameter controls the mix intensity linearly against the fully calculated target amplitude.
 - **Soft Start Curves:** Configurable three soft start acceleration curves (linear, logarithmic, exponential) (global).
-- **Reduced Amplitude Mode:** Configurable reduced amplitude mode (50-100% in 1% steps) to compromise between torque and noise (per speed).
+- **Reduced Amplitude Mode:** Configurable reduced amplitude mode (10-100% in 1% steps) to compromise between torque, heat, and noise (per speed).
 - **Reduced Amplitude Delay:** Configurable delay before amplitude reduction (0s to 60s) allows the motor to get up to speed before the torque is reduced (per speed).
 - **Startup Kick:** Configurable accelerated startup (1x, 2x, 3x, 4x frequency). Starts the motor at a higher speed to overcome drag in the drive system, reduces gradually to desired nominal frequency after configured duration. (Per speed).
 - **Kick Ramp Duration:** Configurable accelerated startup ramp duration (0.0s to 15.0s) (per speed).
@@ -227,6 +251,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Optional Enable:** Optional, enabled or disabled by compile-time configuration flags.
 - **Interactive CLI:** Full command-line interface for control and configuration.
 - **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, and diagnostics.
+- **Serial Wi-Fi Setup:** Wi-Fi builds add `wifi wizard` for guided Serial Monitor network setup, `wifi scan` for nearby SSIDs, `wifi connect <ssid> [password]` for quick DHCP station setup, and `wifi set ...` commands for hostname, mode, DHCP/static IP, setup AP, fallback, and web access options.
 - **Diagnostics:** Serial commands include `brake test start`, `brake test stop`, and `relay test <stage|off>` for bench checks.
 - **JSON Preset Export/Import:** Advanced configuration sharing.
   - `export preset <1-5>`: Dumps the entire layout of the requested preset, along with all global constraints and brake configurations, into a single minified JSON string.
@@ -236,7 +261,41 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 
 ---
 
-### 2.7. Settings Management
+### 2.7. Wi-Fi Web Interface
+- **Automatic Wi-Fi Build Detection:** `NETWORK_ENABLE` defaults to `1` only when the selected Arduino-Pico board target defines `PICO_CYW43_SUPPORTED`. Non-Wi-Fi builds compile the network and web modules out.
+- **Default Setup Access Point:** Wi-Fi-capable builds start in open setup access point mode by default using SSID `TTControl-Setup`, so the network setup UI can be reached before any home network credentials are entered.
+- **Setup-Only Safety:** When reached through an open setup AP, the hosted server only serves Wi-Fi configuration pages and network APIs. Motor controls, full settings, presets, and error logs are blocked until the device is reached through the configured Wi-Fi network, or through a protected setup access point.
+- **Guided Setup Wizard:** The open setup access point serves a network-only wizard for Wi-Fi mode, SSID/password, DHCP/static addressing, fallback AP name/password, and AP channel. Leaving the setup AP password blank creates an open setup network.
+- **Serial Setup Wizard:** The Serial Monitor can configure the same network storage with `wifi wizard`, including Wi-Fi scanning, station credentials, DHCP/static addressing, hostname, fallback setup AP settings, and immediate save/reconnect.
+- **Network Menu:** The OLED menu exposes Wi-Fi enable/disable, setup AP/station mode, hostname, station SSID/password, DHCP, AP fallback, AP SSID/password, AP channel, read-only guest mode, web PIN editing/reset, saved web home page, apply/reconnect, and setup AP actions.
+- **Hosted Web App:** When the device has a station connection or setup AP active, it hosts a local browser interface on port 80.
+- **User-Selectable Home Page:** The device saves which page opens first, including Dashboard, Control, Settings, Calibrate, Network, Presets, Bench, Diagnostics, or Errors. The saved home page applies to any browser that opens the device UI.
+- **Dashboard:** The browser dashboard mirrors the supported display modes: Standard, Stats, Dim, and Scope, using live status data from the firmware. The Standard, Stats, and Scope views include a live telemetry chart for frequency, pitch, and amplifier temperature when available.
+- **Web UI Theme Presets:** The browser UI includes System, Light, Dark, Calm, Workshop, and High Contrast theme presets, plus large controls and visible focus states.
+- **Polished Visual System:** The web UI uses stronger section identities, status color accents, compact button/tab badges, dashboard tiles, sticky navigation/search controls, and a mobile layout tuned for one-handed phone use.
+- **Sticky Safety Controls:** Emergency stop, stop, standby/wake, start, and speed buttons remain available in a sticky browser control bar. Emergency stop immediately exits relay test mode, disables waveform output, mutes relays, and stops the motor.
+- **Simple Control View:** A dedicated large-button control page exposes the day-to-day start/stop/standby/speed/pitch controls without the full settings surface.
+- **78 RPM Visibility:** Browser speed controls, bench speed controls, and calibration speed selectors hide 78 RPM while `Enable 78 RPM` is off. A stale 78 RPM browser action is rejected with a clear message.
+- **Complete Controls:** Browser controls include start, stop, emergency stop, standby/wake, speed switching, pitch reset/set, relay test, relay test off, runtime reset, factory reset, and API support for reboot.
+- **Schema-Driven Full Settings UI:** The web interface fetches `/api/schema` from firmware and builds the complete settings UI from that schema, including global phase, motor, brake, relay, display, system, network, and all per-speed speed/phase/filter/startup settings.
+- **Settings Search and Contextual Help:** The full settings page includes search by label, key, or help text. Every schema-driven setting has a Help control with purpose, range, units, accepted choices, key name, and safety context where relevant.
+- **Staged Editing and Validation:** Browser settings and network forms track unsaved changes, highlight safety-related edits, provide discard buttons, show a review of pending changes before save, and validate ranges, required fields, frequency limits, password length, and static IPv4 fields before applying.
+- **Guided Calibration:** The Calibrate page provides task-based forms for speed frequency, phase offsets, startup kick, braking, and amplitude tuning.
+- **Calibration Stepper:** Calibration tasks are presented as a stepper so each workflow can be tuned without scanning every calibration field at once.
+- **Accessibility Preferences:** The browser UI includes a remembered home page, theme presets, large controls, visible focus states, live status announcements, semantic form grouping, and labels/error text for screen-reader navigation.
+- **Optional Read-Only Guest Mode:** Read-only mode is off by default. When enabled from the web Network page or OLED Network menu, dashboard/status pages remain visible but write actions require the configured web PIN. The PIN can be changed from both the OLED Network menu and the web Network page.
+- **Amplifier Status:** The web status API reports amplifier temperature and thermal state when `AMP_MONITOR_ENABLE` is compiled in; the dashboard and telemetry views show the same information.
+- **Diagnostics and Events:** The Diagnostics page shows firmware/build info, compile-time feature flags, active pin assignments, network state, amplifier state, stored-file presence, and a recent browser event feed.
+- **Bench Test Page:** The Bench page groups live pre-checks, relay output testing, brake start/stop checks, speed and pitch checks, amplifier status, and a generated bench report in one place.
+- **Presets and Logs:** Preset load/save/rename/clear/import/export and error log viewing/clearing are available from the browser. Preset load and import actions include validation reports and preview diffs against the current motor settings before applying or storing JSON, and preset slots can be compared with each other.
+- **Full Backup:** The Diagnostics page can export, validate, and import a full JSON backup containing motor settings, presets, non-secret network metadata, and the error log. Wi-Fi and web PIN passwords are intentionally not exported.
+- **SSE Status Stream:** The dashboard uses a lightweight Server-Sent Events status stream when available, with normal status requests retained for direct refreshes and compatibility.
+- **Chart Controls:** The telemetry chart has gridlines, a legend, and selectable series for frequency, pitch, and amplifier temperature.
+- **Network Storage:** Wi-Fi credentials and network options are stored separately on LittleFS, avoiding changes to the binary motor settings schema.
+
+---
+
+### 2.8. Settings Management
 - **Configurable Presets:** Multiple configurable presets (5 by default, the number defined in configuration flag).
 - **Preset Management:** Presets can be reverted to defaults, loaded, renamed and duplicated.
 - **Preset Naming:** Presets can have names up to 16 characters, a-z 0-9.
@@ -246,7 +305,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Factory Reset:** Factory reset with two-level confirmation.
 - **Hardware Safe Mode Boot:** A catastrophic state recovery mechanism.
   - Holding down the primary encoder button during system power-on intercepts the boot sequence, bypassing loading configuration from Flash entirely.
-  - The system boots directly into a safe, factory-default RAM state (33.3Hz, 0% Amplitude, no filters, standard offsets).
+  - The system boots directly into a safe, factory-default RAM state using the primary motor defaults, with waveform amplitude initially at 0%, no filters, and standard offsets.
   - This prevents boot-looping or hardware damage caused by corrupted or dangerous parameters, allowing the user to examine the system or overwrite the corrupted settings.
 - **Critical Confirmations:** Confirmations for critical settings, such as phase mode and max amplitude changes.
 - **Settings File Schema:**
@@ -256,7 +315,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 
 ---
 
-### 2.8. Power Management
+### 2.9. Power Management
 - Standby mode to enter low power state
   - **Compile-time Flag**: `ENABLE_STANDBY` (default `1`). If disabled, the system boots directly to STOPPED state and all standby features are hidden.
 - Relay control for secondary power to drive load driving circuitry
@@ -277,7 +336,18 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 
 ---
 
-### 2.9. Multi-Core & DMA Architecture
+### 2.10. Amplifier Monitoring And Thermal Safety
+- **Compile-Time Enable:** `AMP_MONITOR_ENABLE` enables the amplifier monitor. It is enabled by default and has no menu toggle in the current firmware.
+- **Temperature Sensor:** `PIN_AMP_TEMP` reads a TMP36-style analogue heatsink sensor on ADC GP26. The firmware samples it every 500 ms and converts voltage to degrees Celsius.
+- **Thermal Cutout Input:** `PIN_AMP_THERM_OK` reads the amplifier thermal cutout/status line on GP27 using an input pulldown. HIGH means the amplifier thermal chain is healthy; LOW triggers an immediate critical shutdown.
+- **Warning Threshold:** At `AMP_TEMP_WARN_C` (default `65.0C`), the firmware logs a non-critical `ERR_AMP_THERMAL` warning. The warning re-arms once temperature falls at least 5C below the warning threshold.
+- **Shutdown Threshold:** At `AMP_TEMP_SHUTDOWN_C` (default `75.0C`), or when the thermal OK input goes LOW, the firmware calls `motor.emergencyStop()`, logs a critical `ERR_AMP_THERMAL`, mutes/stops outputs, and latches shutdown behavior until reboot.
+- **Status Reporting:** The serial `status` / `i` command reports amplifier temperature and thermal state. The web API and Stats dashboard also expose these readings when the feature is compiled in.
+- **Configuration:** Thresholds and pins are compile-time constants in `config.h`; they are not currently exposed as OLED menu or web settings.
+
+---
+
+### 2.11. Multi-Core & DMA Architecture
 - **Core 0:** Handles UI, menu system, encoder input, and high-level motor control logic.
 - **Core 1:** Dedicated to waveform buffer management.
 - **DMA & Hardware PWM:** The actual waveform generation is offloaded to the RP2350's DMA controller and PWM hardware. This ensures:
@@ -291,13 +361,14 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 
 ---
 
-### 2.10. Error Handling
+### 2.12. Error Handling
 - **Initialization Checks:** Display initialization check.
 - **Range Validation:** Settings range validation.
 - **Error Reporting:** Error code system to display errors on screen (configurable in menu) and via serial output (configurable in flag).
 - **Error Display Duration:** Error codes should be displayed on OLED or LCD for a configurable duration (default 10s, configurable in menu).
 - **Error Clearing:** Pressing encoder clears the error.
 - **Safety Shutdown:** Error Mode switches off all relays when an error message is displayed.
+- **Amplifier Thermal Events:** Amplifier temperature warnings, thermal cutout trips, and amplifier over-temperature shutdowns are logged as `ERR_AMP_THERMAL`.
 
 ---
 
@@ -326,11 +397,11 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | :--- | :--- |
 | `start` | Start the motor |
 | `stop` | Stop the motor |
-| `speed <0-2>` | Set speed (0=33, 1=45, 2=78) |
+| `speed <0-2>` | Set speed (0=33, 1=45, 2=78). Speed 2 is rejected when 78 RPM is disabled. |
 | `s` | Cycle speed |
 | `t` | Toggle standby |
 | `p` | Reset pitch |
-| `status` / `i` | Show current status |
+| `status` / `i` | Show current status; includes amplifier temperature and thermal state when `AMP_MONITOR_ENABLE` is enabled |
 | `list` | **List all available settings and values** |
 | `set <key> <val>` | Set a parameter value |
 | `get <key>` | Get a parameter value |
@@ -344,6 +415,16 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `brake test stop` | Stop motor using the configured brake mode |
 | `relay test <0-N>` | Enter relay test and activate a relay output stage |
 | `relay test off` | Exit relay test and restore normal relay handling |
+| `wifi help` | List Serial Monitor Wi-Fi setup commands when network support is enabled |
+| `wifi status` | Show current network state, active IP address, SSID, AP status, MAC, and RSSI |
+| `wifi config` | Show saved network configuration without printing passwords |
+| `wifi wizard` | Start guided Serial Monitor network setup |
+| `wifi scan` | Scan nearby Wi-Fi networks |
+| `wifi connect <ssid> [password]` | Save station credentials, enable Station + setup AP mode, use DHCP, and reconnect |
+| `wifi set <key> <value>` | Stage an individual network setting such as mode, hostname, SSID, DHCP, static IP, fallback, setup AP, web PIN, or read-only mode |
+| `wifi clear password\|ap_password\|ssid` | Clear saved station password, setup AP password, or station SSID |
+| `wifi apply` | Save staged network settings and reconnect |
+| `wifi reset` | Restore network defaults and reconnect |
 | `error dump` | Dump error log |
 | `error clear` | Clear error log |
 | `f` | Factory Reset |
@@ -360,7 +441,7 @@ Use these keys with `set` and `get`. Speed-specific settings apply to the **curr
 | `ramp` | Soft Start Ramp Type (0=Linear, 1=S-Curve) | Int |
 | `pitch_step` | Pitch Step Size (e.g. 0.1) | Float |
 | `rev_enc` | Reverse Encoder (0/1) | Bool |
-| `phase_mode` | Phase mode (1-4) | Int |
+| `phase_mode` | Phase mode (1-3 by default; 1-4 if `ENABLE_4_CHANNEL_SUPPORT` is set to `1`) | Int |
 | `max_amp` | Global maximum amplitude (0-100) | Int |
 | `smooth_switch` | Smooth speed switching (0/1) | Bool |
 | `switch_ramp` | Speed switch ramp duration (s) | Int |
@@ -398,6 +479,7 @@ The menu structure is designed for a data-driven implementation.
 - **Power Control:** Relays, Auto Standby/Boot (Global).
 - **Display:** Sleep, Dim, Saver, Errors (Global).
 - **System:** Pitch Reset, 78RPM, Logs (Global).
+- **Network:** Wi-Fi setup and local web interface connection flow (Wi-Fi builds only).
 - **Presets:** Load, Save, Rename, and Clear presets.
 - **Save & Exit:** Saves all changes to flash and returns to dashboard.
 - **Cancel:** Discards changes and reloads from flash.
@@ -411,7 +493,7 @@ The menu structure is designed for a data-driven implementation.
 - **FIR Prof:** FIR Filter Profile (0=Gentle, 1=Medium, 2=Aggressive).
 
 ### Phase Control
-- **Mode (Glb):** 1, 2, 3, or 4 phase operation.
+- **Mode (Glb):** 1, 2, or 3 phase operation by default; 4 phase operation appears only when `ENABLE_4_CHANNEL_SUPPORT` is set to `1`.
 - **Ph 2 Offs:** Phase 2 offset for multi-phase motors.
 - **Ph 3 Offs:** Phase 3 offset for multi-phase motors.
 - **Ph 4 Offs:** Phase 4 offset for multi-phase motors.
@@ -419,7 +501,7 @@ The menu structure is designed for a data-driven implementation.
 
 ### Motor Control
 - **Soft Start**: Adjustable duration (0.0s to 10.0s) to ramp up amplitude gently.
-- **Red. Amp %**: Automatically lower voltage after spin-up to reduce motor noise and heat (50-100%).
+- **Red. Amp %**: Automatically lower voltage after spin-up to reduce motor noise and heat (10-100%).
 - **Amp Delay**: Configurable delay before amplitude reduction (0s to 60s).
 - **Kick Mult**: Startup kick multiplier.
 - **Kick Dur**: Startup kick duration.
@@ -475,6 +557,29 @@ The menu structure is designed for a data-driven implementation.
 - **Reset Runtime:** Reset the total runtime counter (with confirmation).
 - **Fact Reset:** Factory Reset.
 
+Amplifier monitoring does not currently have OLED menu settings. When `AMP_MONITOR_ENABLE` is compiled in, it runs automatically; warnings and shutdowns appear through the Error Log, serial status, and web status/dashboard.
+
+### Network
+- **Status:** Shows the current Wi-Fi connection state.
+- **Web:** Shows the active IP address for the browser interface.
+- **Wi-Fi:** Enable or disable network services.
+- **Mode:** Select Setup AP, Station, or Station plus setup AP.
+- **Host:** mDNS/DHCP hostname used by the device.
+- **SSID:** Station network SSID.
+- **Pass:** Station network password.
+- **DHCP:** Use DHCP for station networking.
+- **AP Fallback:** Start the setup AP if station connection fails.
+- **AP SSID:** Setup access point SSID.
+- **AP Pass:** Setup access point password.
+- **AP Channel:** Setup access point channel.
+- **ReadOnly:** Enables optional read-only guest mode for the web interface. Off by default.
+- **Web PIN:** Sets the 4-8 character PIN used to unlock web write actions when read-only mode is enabled.
+- **Web Home:** Selects the default page shown when the web interface opens.
+- **Reset PIN:** Restores the web PIN to `NETWORK_DEFAULT_WEB_PIN`.
+- **Apply:** Save network settings and reconnect.
+- **Setup AP:** Force the device into setup access point mode.
+- **Refresh:** Rebuild the Network page with current status.
+
 ### Presets
 
 Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveals:
@@ -497,12 +602,23 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Core Hardware**| `OLED_WIDTH` | Defines the width of the OLED display. | `128` | |
 | **Core Hardware**| `OLED_HEIGHT` | Defines the height of the OLED display. | `64` | |
 | **Waveform** | `LUT_MAX_SIZE` | Sets the maximum size of the sine wave Look-Up Table (LUT). | `16384` | Affects memory usage and processing load. |
+| **Waveform** | `MIN_OUTPUT_FREQUENCY_HZ` | Minimum generated sine frequency. | `10.0` | Used by menus, validation, serial commands, and waveform output. |
+| **Waveform** | `MAX_OUTPUT_FREQUENCY_HZ` | Maximum generated sine frequency. | `1500.0` | Used by menus, validation, serial commands, and waveform output. |
 | **Presets** | `MAX_PRESET_SLOTS` | Defines the maximum number of user-configurable presets. | `5` | Used to size the data structure for presets. |
+| **Network** | `NETWORK_ENABLE` | Enables Wi-Fi, local web server, network menu, and web settings UI. | Auto: `1` on `PICO_CYW43_SUPPORTED`, otherwise `0` | Can be overridden at compile time. |
+| **Network** | `NETWORK_WEB_PIN_MAX` | Maximum web unlock PIN length. | `8` | Web PINs shorter than 4 characters are rejected by the browser/API. |
+| **Network** | `NETWORK_DEFAULT_HOSTNAME` | Default network hostname. | `"ttcontrol"` | Stored separately from motor settings in `/network.bin`. |
+| **Network** | `NETWORK_DEFAULT_AP_SSID` | Default setup access point SSID. | `"TTControl-Setup"` | Used on first boot of Wi-Fi builds. |
+| **Network** | `NETWORK_DEFAULT_AP_PASSWORD` | Default setup access point password. | `""` | Blank means open setup AP. Open setup AP requests are limited to Wi-Fi configuration only. If set, use at least 8 characters. |
+| **Network** | `NETWORK_DEFAULT_AP_CHANNEL` | Default setup access point channel. | `6` | Configurable from menu and web UI. |
+| **Network** | `NETWORK_DEFAULT_WEB_PIN` | Default PIN used if read-only guest mode is enabled before changing the PIN. | `"1234"` | Read-only guest mode is off by default; change this PIN before enabling it on a shared network. |
 | **Serial/Debug** | `SERIAL_MONITOR_ENABLE` | Enables/Disables all Serial Monitor functionality and setup. | `1` or `0` | Global toggle for serial output. |
 | **Serial/Debug** | `DUPLICATE_DISPLAY_TO_SERIAL` | Duplicates all display output to the serial monitor. | `1` or `0` | Requires `SERIAL_MONITOR_ENABLE` to be `1`. |
 | **Features** | `ENABLE_STANDBY` | Enable/Disable Standby Mode | `1` | Controls standby functionality. |
 | **Features** | `ENABLE_MUTE_RELAYS` | Enable/Disable Mute Relays | `1` | Controls relay logic. |
 | **Features** | `ENABLE_DPDT_RELAYS` | Use 2x DPDT instead of 4x SPST | `0` | Changes relay switching logic. |
+| **Features** | `ENABLE_4_CHANNEL_SUPPORT` | Enable 4-phase/4-channel support. | `0` | Normal firmware builds expose three channels. Set to `1` to enable optional four-channel/Premotec bridge modes on hardware that has the fourth output populated. |
+| **Features** | `AMP_MONITOR_ENABLE` | Enable amplifier temperature and thermal cutout monitoring. | `1` | Samples every 500 ms using `PIN_AMP_TEMP` and `PIN_AMP_THERM_OK`; no runtime menu toggle. |
 | **Optional Pins**| `PITCH_CONTROL_ENABLE` | Enables the secondary (Pitch) encoder functionality and logic. | `0` (Disabled) | **Required** flag for the optional pitch feature (3.3). |
 | **Optional Pins**| `PIN_ENC_PITCH_CLK` | Assigns the pin for the Pitch Encoder Clock. | `13` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
 | **Optional Pins**| `PIN_ENC_PITCH_DT` | Assigns the pin for the Pitch Encoder Data. | `14` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
@@ -512,7 +628,11 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Optional Pins**| `SPEED_BUTTON_ENABLE` | Enables the external Speed change button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
 | **Optional Pins**| `PIN_BTN_SPEED` | Assigns the pin for the Speed Button. | `22` | Only compiled if `SPEED_BUTTON_ENABLE` is `1`. |
 | **Optional Pins**| `START_STOP_BUTTON_ENABLE` | Enables the external Start/Stop motor button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
-| **Optional Pins**| `PIN_BTN_START_STOP` | Assigns the pin for the Start/Stop Button. | `23` | Only compiled if `START_STOP_BUTTON_ENABLE` is `1`. |
+| **Optional Pins**| `PIN_BTN_START_STOP` | Assigns the pin for the Start/Stop Button. | `9` | Only compiled if `START_STOP_BUTTON_ENABLE` is `1`; selected because GP9 is exposed on Pico 2 W. |
+| **Monitor Pins**| `PIN_AMP_TEMP` | Amplifier heatsink temperature ADC input. | `26` | TMP36-style analogue sensor. |
+| **Monitor Pins**| `PIN_AMP_THERM_OK` | Amplifier thermal cutout/status input. | `27` | HIGH means healthy; LOW triggers critical shutdown. |
+| **Thermal Limits**| `AMP_TEMP_WARN_C` | Amplifier warning temperature. | `65.0` | Logs non-critical `ERR_AMP_THERMAL`. |
+| **Thermal Limits**| `AMP_TEMP_SHUTDOWN_C` | Amplifier shutdown temperature. | `75.0` | Calls emergency stop, disables waveform output, and mutes relays. |
 | **Display Msg** | `STANDBY_MESSAGE` | Sets the message displayed while the system is in standby, if enabled in the menu. | `message` | Controls message display logic. |
 | **Display Msg** | `WELCOME_MESSAGE` | Sets the message displayed on boot. | `"Welcome to TT Control"` | |
 | **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `4` | Use for compatibility checks when firmware is updated. |

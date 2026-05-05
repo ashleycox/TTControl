@@ -26,6 +26,7 @@ extern MenuPage* pageDisplay;
 extern MenuPage* pageSystem;
 extern MenuPage* pageBrakeTune;
 extern MenuPage* pageRelayTest;
+extern MenuPage* pageNetwork;
 
 // Shadow State for Speed Settings
 // Used to edit settings temporarily before saving

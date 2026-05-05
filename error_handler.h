@@ -20,7 +20,8 @@ enum ErrorCode {
     ERR_MOTOR_STALL = 2,
     ERR_SETTINGS_CORRUPT = 3,
     ERR_I2C_FAILURE = 4,
-    ERR_OUT_OF_MEMORY = 5
+    ERR_OUT_OF_MEMORY = 5,
+    ERR_AMP_THERMAL = 6
 };
 
 /**

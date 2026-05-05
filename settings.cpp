@@ -364,6 +364,10 @@ SpeedSettings& Settings::getCurrentSpeedSettings() {
     return _data.speeds[_data.currentSpeed];
 }
 
+void Settings::normalize() {
+    validate();
+}
+
 void Settings::validate() {
     // Check schema version to handle data migration if needed
     if (_data.schemaVersion != SETTINGS_SCHEMA_VERSION) {
@@ -373,7 +377,7 @@ void Settings::validate() {
     }
 
     // Enforce valid ranges
-    if (_data.phaseMode < PHASE_1 || _data.phaseMode > PHASE_4) _data.phaseMode = DEFAULT_PHASE_MODE;
+    if (_data.phaseMode < PHASE_1 || _data.phaseMode > MAX_PHASE_MODE) _data.phaseMode = DEFAULT_PHASE_MODE;
     if (_data.currentSpeed < SPEED_33 || _data.currentSpeed > SPEED_78) _data.currentSpeed = SPEED_33;
     if (_data.maxAmplitude > 100) _data.maxAmplitude = 100;
     if (_data.softStartCurve > 2) _data.softStartCurve = 0;
@@ -407,17 +411,24 @@ void Settings::validate() {
 
     // Validate Per-Speed Settings
     for(int i=0; i<3; i++) {
+        if (_data.speeds[i].minFrequency < MIN_OUTPUT_FREQUENCY_HZ) _data.speeds[i].minFrequency = MIN_OUTPUT_FREQUENCY_HZ;
+        if (_data.speeds[i].minFrequency > MAX_OUTPUT_FREQUENCY_HZ) _data.speeds[i].minFrequency = MAX_OUTPUT_FREQUENCY_HZ;
+        if (_data.speeds[i].maxFrequency < MIN_OUTPUT_FREQUENCY_HZ) _data.speeds[i].maxFrequency = MIN_OUTPUT_FREQUENCY_HZ;
+        if (_data.speeds[i].maxFrequency > MAX_OUTPUT_FREQUENCY_HZ) _data.speeds[i].maxFrequency = MAX_OUTPUT_FREQUENCY_HZ;
+
         if (_data.speeds[i].minFrequency > _data.speeds[i].maxFrequency) {
             float temp = _data.speeds[i].minFrequency;
             _data.speeds[i].minFrequency = _data.speeds[i].maxFrequency;
             _data.speeds[i].maxFrequency = temp;
         }
+        if (_data.speeds[i].frequency < MIN_OUTPUT_FREQUENCY_HZ) _data.speeds[i].frequency = MIN_OUTPUT_FREQUENCY_HZ;
+        if (_data.speeds[i].frequency > MAX_OUTPUT_FREQUENCY_HZ) _data.speeds[i].frequency = MAX_OUTPUT_FREQUENCY_HZ;
         if (_data.speeds[i].frequency < _data.speeds[i].minFrequency) _data.speeds[i].frequency = _data.speeds[i].minFrequency;
         if (_data.speeds[i].frequency > _data.speeds[i].maxFrequency) _data.speeds[i].frequency = _data.speeds[i].maxFrequency;
 
         if (_data.speeds[i].softStartDuration < 0.0) _data.speeds[i].softStartDuration = 0.0;
         if (_data.speeds[i].softStartDuration > 10.0) _data.speeds[i].softStartDuration = 10.0;
-        if (_data.speeds[i].reducedAmplitude < 50) _data.speeds[i].reducedAmplitude = 50;
+        if (_data.speeds[i].reducedAmplitude < 10) _data.speeds[i].reducedAmplitude = 10;
         if (_data.speeds[i].reducedAmplitude > 100) _data.speeds[i].reducedAmplitude = 100;
         if (_data.speeds[i].amplitudeDelay > 60) _data.speeds[i].amplitudeDelay = 60;
         if (_data.speeds[i].startupKick < 1) _data.speeds[i].startupKick = 1;
@@ -446,7 +457,7 @@ void Settings::setDefaults() {
     }
 
     _data.phaseMode = (PhaseMode)DEFAULT_PHASE_MODE;
-    _data.maxAmplitude = 100;
+    _data.maxAmplitude = 68;
     _data.softStartCurve = 0; // Linear
     _data.smoothSwitching = true;
     _data.switchRampDuration = 2;
@@ -477,12 +488,12 @@ void Settings::setDefaults() {
     _data.pitchResetOnStop = true;
     _data.currentSpeed = (SpeedMode)DEFAULT_SPEED_INDEX;
 
-    // --- 33.3 RPM Defaults (50Hz base) ---
-    _data.speeds[SPEED_33].frequency = 50.0;
-    _data.speeds[SPEED_33].minFrequency = 40.0;
-    _data.speeds[SPEED_33].maxFrequency = 60.0;
+    // --- 33.3 RPM Defaults (primary 12-pole motor, 7.52 belt ratio) ---
+    _data.speeds[SPEED_33].frequency = 25.07;
+    _data.speeds[SPEED_33].minFrequency = 20.0;
+    _data.speeds[SPEED_33].maxFrequency = 30.0;
     _data.speeds[SPEED_33].softStartDuration = 1.0;
-    _data.speeds[SPEED_33].reducedAmplitude = 80;
+    _data.speeds[SPEED_33].reducedAmplitude = 35;
     _data.speeds[SPEED_33].amplitudeDelay = 5;
     _data.speeds[SPEED_33].startupKick = 1;
     _data.speeds[SPEED_33].startupKickDuration = 1;
@@ -491,16 +502,16 @@ void Settings::setDefaults() {
     _data.speeds[SPEED_33].iirAlpha = 0.5;
     _data.speeds[SPEED_33].firProfile = FIR_MEDIUM;
     _data.speeds[SPEED_33].phaseOffset[0] = 0.0;
-    _data.speeds[SPEED_33].phaseOffset[1] = 90.0;
-    _data.speeds[SPEED_33].phaseOffset[2] = 120.0;
-    _data.speeds[SPEED_33].phaseOffset[3] = 240.0;
+    _data.speeds[SPEED_33].phaseOffset[1] = 120.0;
+    _data.speeds[SPEED_33].phaseOffset[2] = 240.0;
+    _data.speeds[SPEED_33].phaseOffset[3] = 270.0;
 
-    // --- 45 RPM Defaults (67.5Hz base) ---
-    _data.speeds[SPEED_45].frequency = 67.5;
-    _data.speeds[SPEED_45].minFrequency = 57.5;
-    _data.speeds[SPEED_45].maxFrequency = 77.5;
+    // --- 45 RPM Defaults (primary 12-pole motor, 7.52 belt ratio) ---
+    _data.speeds[SPEED_45].frequency = 33.85;
+    _data.speeds[SPEED_45].minFrequency = 30.0;
+    _data.speeds[SPEED_45].maxFrequency = 40.0;
     _data.speeds[SPEED_45].softStartDuration = 1.0;
-    _data.speeds[SPEED_45].reducedAmplitude = 80;
+    _data.speeds[SPEED_45].reducedAmplitude = 35;
     _data.speeds[SPEED_45].amplitudeDelay = 5;
     _data.speeds[SPEED_45].startupKick = 1;
     _data.speeds[SPEED_45].startupKickDuration = 1;
@@ -509,16 +520,16 @@ void Settings::setDefaults() {
     _data.speeds[SPEED_45].iirAlpha = 0.5;
     _data.speeds[SPEED_45].firProfile = FIR_MEDIUM;
     _data.speeds[SPEED_45].phaseOffset[0] = 0.0;
-    _data.speeds[SPEED_45].phaseOffset[1] = 90.0;
-    _data.speeds[SPEED_45].phaseOffset[2] = 120.0;
-    _data.speeds[SPEED_45].phaseOffset[3] = 240.0;
+    _data.speeds[SPEED_45].phaseOffset[1] = 120.0;
+    _data.speeds[SPEED_45].phaseOffset[2] = 240.0;
+    _data.speeds[SPEED_45].phaseOffset[3] = 270.0;
 
-    // --- 78 RPM Defaults (113.5Hz base) ---
-    _data.speeds[SPEED_78].frequency = 113.5;
-    _data.speeds[SPEED_78].minFrequency = 100.0;
-    _data.speeds[SPEED_78].maxFrequency = 130.0;
+    // --- 78 RPM Defaults (primary 12-pole motor, 7.52 belt ratio) ---
+    _data.speeds[SPEED_78].frequency = 58.66;
+    _data.speeds[SPEED_78].minFrequency = 50.0;
+    _data.speeds[SPEED_78].maxFrequency = 70.0;
     _data.speeds[SPEED_78].softStartDuration = 1.5;
-    _data.speeds[SPEED_78].reducedAmplitude = 90;
+    _data.speeds[SPEED_78].reducedAmplitude = 35;
     _data.speeds[SPEED_78].amplitudeDelay = 5;
     _data.speeds[SPEED_78].startupKick = 1;
     _data.speeds[SPEED_78].startupKickDuration = 1;
@@ -527,9 +538,9 @@ void Settings::setDefaults() {
     _data.speeds[SPEED_78].iirAlpha = 0.5;
     _data.speeds[SPEED_78].firProfile = FIR_MEDIUM;
     _data.speeds[SPEED_78].phaseOffset[0] = 0.0;
-    _data.speeds[SPEED_78].phaseOffset[1] = 90.0;
-    _data.speeds[SPEED_78].phaseOffset[2] = 120.0;
-    _data.speeds[SPEED_78].phaseOffset[3] = 240.0;
+    _data.speeds[SPEED_78].phaseOffset[1] = 120.0;
+    _data.speeds[SPEED_78].phaseOffset[2] = 240.0;
+    _data.speeds[SPEED_78].phaseOffset[3] = 270.0;
 
     _data.enable78rpm = true;
     _data.totalRuntime = 0;

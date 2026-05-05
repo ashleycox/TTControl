@@ -298,12 +298,10 @@ void MenuText::onSelect(MenuPage*& currentPage) {
 void MenuText::onInput(int delta) {
     if (_editing) {
         char c = _temp[_cursorPos];
-        // Cycle: Space -> A-Z -> 0-9
-        // ASCII: Space=32, 0-9=48-57, A-Z=65-90
-        // Simplified Map: Space, 0-9, A-Z
+        // Keep this broad enough for Wi-Fi credentials while still encoder-friendly.
         
         // Find current index in our charset
-        const char* charset = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        const char* charset = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_@.#$/+!?&*";
         const int len = strlen(charset);
         int idx = 0;
         for (int i=0; i<len; i++) {

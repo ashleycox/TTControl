@@ -21,6 +21,9 @@
 #include "serial_cmd.h"
 #include "hal.h"
 #include "error_handler.h"
+#include "amp_monitor.h"
+#include "network_manager.h"
+#include "web_interface.h"
 
 // --- Global Objects ---
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
@@ -75,6 +78,13 @@ void setup() {
 
     // Initialize Motor Control Logic (State Machine)
     motor.begin();
+
+    // Initialize amplifier thermal monitor
+    ampMonitor.begin();
+
+    // Initialize network services on Wi-Fi-capable builds.
+    networkManager.begin();
+    webInterface.begin();
     
     Serial.println("Core 0 Setup Complete");
     
@@ -92,13 +102,20 @@ void loop() {
     
     // 2. Update Motor Logic (State transitions, speed ramping)
     motor.update();
+
+    // 3. Monitor amplifier thermal safety
+    ampMonitor.update();
     
-    // 3. Handle Serial Commands (Debug/Control)
+    // 4. Handle Serial Commands (Debug/Control)
     if (SERIAL_MONITOR_ENABLE) {
         handleSerialCommands();
     }
+
+    // 5. Service network and web UI without blocking motor control.
+    networkManager.update();
+    webInterface.update();
     
-    // 4. Feed Watchdog only while Core 1 is actively servicing waveform work.
+    // 6. Feed Watchdog only while Core 1 is actively servicing waveform work.
     uint32_t now = hal.getMillis();
     uint32_t core1Age = now - core1HeartbeatMs;
     if (core1HeartbeatMs != 0 && core1Age < 1000) {
