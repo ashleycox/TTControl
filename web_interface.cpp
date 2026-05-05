@@ -16,11 +16,15 @@
 #include "amp_monitor.h"
 #include "globals.h"
 #include <LittleFS.h>
+#include <math.h>
 #include <vector>
 
 WebInterface webInterface;
 
 #if NETWORK_ENABLE
+
+static const size_t WEB_RESPONSE_CHUNK_BYTES = 768;
+static const size_t WEB_JSON_BODY_MAX_BYTES = 12 * 1024;
 
 static const char INDEX_HTML[] = R"HTML(
 <!doctype html>
@@ -346,6 +350,216 @@ document.querySelectorAll("input,select").forEach(el=>{el.oninput=updateSummary;
 </html>
 )HTML";
 
+class CountingPrint : public Print {
+public:
+    size_t length = 0;
+
+    size_t write(uint8_t) override {
+        length++;
+        return 1;
+    }
+
+    size_t write(const uint8_t*, size_t size) override {
+        length += size;
+        return size;
+    }
+};
+
+class ServerBufferedPrint : public Print {
+public:
+    explicit ServerBufferedPrint(WebServer& server)
+        : _server(server),
+          _used(0) {
+    }
+
+    ~ServerBufferedPrint() {
+        flush();
+    }
+
+    size_t write(uint8_t value) override {
+        if (_used >= sizeof(_buffer)) flush();
+        _buffer[_used++] = (char)value;
+        return 1;
+    }
+
+    size_t write(const uint8_t* data, size_t size) override {
+        size_t written = 0;
+        while (written < size) {
+            if (_used >= sizeof(_buffer)) flush();
+            size_t room = sizeof(_buffer) - _used;
+            size_t count = size - written;
+            if (count > room) count = room;
+            memcpy(_buffer + _used, data + written, count);
+            _used += count;
+            written += count;
+        }
+        return size;
+    }
+
+    void flush() override {
+        if (_used == 0) return;
+        _server.sendContent(_buffer, _used);
+        _used = 0;
+    }
+
+private:
+    WebServer& _server;
+    char _buffer[WEB_RESPONSE_CHUNK_BYTES];
+    size_t _used;
+};
+
+class RawJsonRequestHandler : public RequestHandler {
+public:
+    RawJsonRequestHandler(const char* uri,
+                          HTTPServer::THandlerFunction handler,
+                          HTTPServer::THandlerFunction rawHandler)
+        : _uri(uri),
+          _handler(handler),
+          _rawHandler(rawHandler) {
+    }
+
+    bool canHandle(HTTPServer&, HTTPMethod method, String uri) override {
+        return method == HTTP_POST && strcmp(uri.c_str(), _uri) == 0;
+    }
+
+    bool canRaw(HTTPServer& server, String uri) override {
+        return canHandle(server, HTTP_POST, uri);
+    }
+
+    bool canUpload(HTTPServer&, String) override {
+        return false;
+    }
+
+    bool handle(HTTPServer&, HTTPMethod, String) override {
+        _handler();
+        return true;
+    }
+
+    void raw(HTTPServer&, String, HTTPRaw&) override {
+        _rawHandler();
+    }
+
+private:
+    const char* _uri;
+    HTTPServer::THandlerFunction _handler;
+    HTTPServer::THandlerFunction _rawHandler;
+};
+
+static void writeComma(Print& out, bool& first) {
+    if (first) {
+        first = false;
+    } else {
+        out.write(',');
+    }
+}
+
+static void writeJsonString(Print& out, const char* text) {
+    out.write('"');
+    if (text) {
+        while (*text) {
+            char c = *text++;
+            switch (c) {
+                case '"': out.print("\\\""); break;
+                case '\\': out.print("\\\\"); break;
+                case '\b': out.print("\\b"); break;
+                case '\f': out.print("\\f"); break;
+                case '\n': out.print("\\n"); break;
+                case '\r': out.print("\\r"); break;
+                case '\t': out.print("\\t"); break;
+                default:
+                    if ((uint8_t)c < 0x20) {
+                        char escaped[7];
+                        snprintf(escaped, sizeof(escaped), "\\u%04x", (unsigned int)(uint8_t)c);
+                        out.print(escaped);
+                    } else {
+                        out.write((uint8_t)c);
+                    }
+                    break;
+            }
+        }
+    }
+    out.write('"');
+}
+
+static void writeKey(Print& out, const char* key) {
+    writeJsonString(out, key);
+    out.write(':');
+}
+
+static void writeStringProp(Print& out, bool& first, const char* key, const char* value) {
+    writeComma(out, first);
+    writeKey(out, key);
+    writeJsonString(out, value);
+}
+
+static void writeBoolProp(Print& out, bool& first, const char* key, bool value) {
+    writeComma(out, first);
+    writeKey(out, key);
+    out.print(value ? "true" : "false");
+}
+
+static void writeIntProp(Print& out, bool& first, const char* key, long value) {
+    writeComma(out, first);
+    writeKey(out, key);
+    out.print(value);
+}
+
+static void writeUIntProp(Print& out, bool& first, const char* key, unsigned long value) {
+    writeComma(out, first);
+    writeKey(out, key);
+    out.print(value);
+}
+
+static void writeFloatValue(Print& out, float value) {
+    if (!isfinite(value)) {
+        out.print("null");
+        return;
+    }
+    out.print(value, 4);
+}
+
+static void writeFloatProp(Print& out, bool& first, const char* key, float value) {
+    writeComma(out, first);
+    writeKey(out, key);
+    writeFloatValue(out, value);
+}
+
+static void beginObjectProp(Print& out, bool& first, const char* key) {
+    writeComma(out, first);
+    writeKey(out, key);
+    out.write('{');
+}
+
+static void beginArrayProp(Print& out, bool& first, const char* key) {
+    writeComma(out, first);
+    writeKey(out, key);
+    out.write('[');
+}
+
+static void formatIpBytes(const uint8_t bytes[4], char* buffer, size_t bufferSize) {
+    snprintf(buffer, bufferSize, "%u.%u.%u.%u",
+             (unsigned)bytes[0], (unsigned)bytes[1], (unsigned)bytes[2], (unsigned)bytes[3]);
+}
+
+static void formatIpAddress(const IPAddress& ip, char* buffer, size_t bufferSize) {
+    snprintf(buffer, bufferSize, "%u.%u.%u.%u",
+             (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2], (unsigned)ip[3]);
+}
+
+static void formatMacAddress(char* buffer, size_t bufferSize) {
+    uint8_t mac[6] = {0};
+    WiFi.macAddress(mac);
+    snprintf(buffer, bufferSize, "%02x:%02x:%02x:%02x:%02x:%02x",
+             (unsigned)mac[0], (unsigned)mac[1], (unsigned)mac[2],
+             (unsigned)mac[3], (unsigned)mac[4], (unsigned)mac[5]);
+}
+
+static const char* networkModeName(uint8_t mode) {
+    if (mode == NETWORK_MODE_STA) return "Station";
+    if (mode == NETWORK_MODE_STA_AP) return "Station + setup AP";
+    return "Setup AP";
+}
+
 static const char* speedName(SpeedMode speed) {
     if (speed == SPEED_33) return "33 RPM";
     if (speed == SPEED_45) return "45 RPM";
@@ -413,94 +627,351 @@ static bool parseIpString(const char* text, uint8_t out[4]) {
     return true;
 }
 
-static String ipBytesToString(const uint8_t bytes[4]) {
-    char buffer[18];
-    snprintf(buffer, sizeof(buffer), "%u.%u.%u.%u", bytes[0], bytes[1], bytes[2], bytes[3]);
-    return String(buffer);
+static void streamOptionPair(Print& out, bool& first, int value, const char* label) {
+    writeComma(out, first);
+    out.write('[');
+    out.print(value);
+    out.write(',');
+    writeJsonString(out, label);
+    out.write(']');
 }
 
-static JsonObject addSchemaField(JsonArray fields,
-                                 const char* key,
-                                 const char* label,
-                                 const char* type,
-                                 const char* help = nullptr,
-                                 const char* unit = nullptr,
-                                 bool safety = false) {
-    JsonObject field = fields.add<JsonObject>();
-    field["k"] = key;
-    field["l"] = label;
-    field["t"] = type;
-    if (help && help[0]) field["help"] = help;
-    if (unit && unit[0]) field["unit"] = unit;
-    if (safety) field["safety"] = true;
-    return field;
+static void streamOptions(Print& out) {
+    bool firstOptionSet = true;
+
+    beginArrayProp(out, firstOptionSet, "phaseMode");
+    bool first = true;
+    streamOptionPair(out, first, 1, "1 phase");
+    streamOptionPair(out, first, 2, "2 phase");
+    streamOptionPair(out, first, 3, "3 phase");
+#if MAX_PHASE_MODE >= 4
+    streamOptionPair(out, first, 4, "4 phase");
+#endif
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "filterType");
+    first = true;
+    streamOptionPair(out, first, FILTER_NONE, "None");
+    streamOptionPair(out, first, FILTER_IIR, "IIR");
+    streamOptionPair(out, first, FILTER_FIR, "FIR");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "firProfile");
+    first = true;
+    streamOptionPair(out, first, FIR_GENTLE, "Gentle");
+    streamOptionPair(out, first, FIR_MEDIUM, "Medium");
+    streamOptionPair(out, first, FIR_AGGRESSIVE, "Aggressive");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "softStartCurve");
+    first = true;
+    streamOptionPair(out, first, 0, "Linear");
+    streamOptionPair(out, first, 1, "Log");
+    streamOptionPair(out, first, 2, "Exp");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "rampType");
+    first = true;
+    streamOptionPair(out, first, RAMP_LINEAR, "Linear");
+    streamOptionPair(out, first, RAMP_SCURVE, "S-curve");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "brakeMode");
+    first = true;
+    streamOptionPair(out, first, BRAKE_OFF, "Off");
+    streamOptionPair(out, first, BRAKE_PULSE, "Pulse");
+    streamOptionPair(out, first, BRAKE_RAMP, "Ramp");
+    streamOptionPair(out, first, BRAKE_SOFT_STOP, "Soft stop");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "screensaverMode");
+    first = true;
+    streamOptionPair(out, first, SAVER_BOUNCE, "Bounce");
+    streamOptionPair(out, first, SAVER_MATRIX, "Matrix");
+    streamOptionPair(out, first, SAVER_LISSAJOUS, "Lissajous");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "displaySleepDelay");
+    first = true;
+    streamOptionPair(out, first, 0, "Off");
+    streamOptionPair(out, first, 1, "10 sec");
+    streamOptionPair(out, first, 2, "20 sec");
+    streamOptionPair(out, first, 3, "30 sec");
+    streamOptionPair(out, first, 4, "1 min");
+    streamOptionPair(out, first, 5, "5 min");
+    streamOptionPair(out, first, 6, "10 min");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "bootSpeed");
+    first = true;
+    streamOptionPair(out, first, 0, "33 RPM");
+    streamOptionPair(out, first, 1, "45 RPM");
+    streamOptionPair(out, first, 2, "78 RPM");
+    streamOptionPair(out, first, 3, "Last used");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "netMode");
+    first = true;
+    streamOptionPair(out, first, NETWORK_MODE_AP, "Setup AP");
+    streamOptionPair(out, first, NETWORK_MODE_STA, "Station");
+    streamOptionPair(out, first, NETWORK_MODE_STA_AP, "Station + setup AP");
+    out.write(']');
+
+    beginArrayProp(out, firstOptionSet, "homePage");
+    first = true;
+    streamOptionPair(out, first, WEB_HOME_DASHBOARD, "Dashboard");
+    streamOptionPair(out, first, WEB_HOME_CONTROL, "Control");
+    streamOptionPair(out, first, WEB_HOME_SETTINGS, "Settings");
+    streamOptionPair(out, first, WEB_HOME_CALIBRATE, "Calibrate");
+    streamOptionPair(out, first, WEB_HOME_NETWORK, "Network");
+    streamOptionPair(out, first, WEB_HOME_PRESETS, "Presets");
+    streamOptionPair(out, first, WEB_HOME_BENCH, "Bench");
+    streamOptionPair(out, first, WEB_HOME_DIAGNOSTICS, "Diagnostics");
+    streamOptionPair(out, first, WEB_HOME_ERRORS, "Errors");
+    out.write(']');
 }
 
-static void addNumberField(JsonArray fields,
-                           const char* key,
-                           const char* label,
-                           float minValue,
-                           float maxValue,
-                           float step,
-                           const char* help = nullptr,
-                           const char* unit = nullptr,
-                           bool safety = false) {
-    JsonObject field = addSchemaField(fields, key, label, "number", help, unit, safety);
-    field["min"] = minValue;
-    field["max"] = maxValue;
-    field["step"] = step;
+static bool streamSchemaFieldBase(Print& out,
+                                  bool& first,
+                                  const char* key,
+                                  const char* label,
+                                  const char* type,
+                                  const char* help = nullptr,
+                                  const char* unit = nullptr,
+                                  bool safety = false) {
+    writeComma(out, first);
+    out.write('{');
+    bool fieldFirst = true;
+    writeStringProp(out, fieldFirst, "k", key);
+    writeStringProp(out, fieldFirst, "l", label);
+    writeStringProp(out, fieldFirst, "t", type);
+    if (help && help[0]) writeStringProp(out, fieldFirst, "help", help);
+    if (unit && unit[0]) writeStringProp(out, fieldFirst, "unit", unit);
+    if (safety) writeBoolProp(out, fieldFirst, "safety", true);
+    return fieldFirst;
 }
 
-static void addSelectField(JsonArray fields,
-                           const char* key,
-                           const char* label,
-                           const char* optionKey,
-                           const char* help = nullptr,
-                           bool safety = false) {
-    JsonObject field = addSchemaField(fields, key, label, "select", help, nullptr, safety);
-    field["o"] = optionKey;
+static void streamNumberField(Print& out,
+                              bool& first,
+                              const char* key,
+                              const char* label,
+                              float minValue,
+                              float maxValue,
+                              float step,
+                              const char* help = nullptr,
+                              const char* unit = nullptr,
+                              bool safety = false) {
+    bool fieldFirst = streamSchemaFieldBase(out, first, key, label, "number", help, unit, safety);
+    writeComma(out, fieldFirst);
+    writeKey(out, "min");
+    writeFloatValue(out, minValue);
+    writeComma(out, fieldFirst);
+    writeKey(out, "max");
+    writeFloatValue(out, maxValue);
+    writeComma(out, fieldFirst);
+    writeKey(out, "step");
+    writeFloatValue(out, step);
+    out.write('}');
 }
 
-static void addCheckboxField(JsonArray fields,
-                             const char* key,
-                             const char* label,
-                             const char* help = nullptr,
-                             bool safety = false) {
-    addSchemaField(fields, key, label, "checkbox", help, nullptr, safety);
+static void streamSelectField(Print& out,
+                              bool& first,
+                              const char* key,
+                              const char* label,
+                              const char* optionKey,
+                              const char* help = nullptr,
+                              bool safety = false) {
+    bool fieldFirst = streamSchemaFieldBase(out, first, key, label, "select", help, nullptr, safety);
+    writeStringProp(out, fieldFirst, "o", optionKey);
+    out.write('}');
 }
 
-static void addTextField(JsonArray fields,
-                         const char* key,
-                         const char* label,
-                         const char* help = nullptr,
-                         uint16_t maxLength = 0,
-                         const char* format = nullptr) {
-    JsonObject field = addSchemaField(fields, key, label, "text", help);
-    if (maxLength > 0) field["maxLength"] = maxLength;
-    if (format && format[0]) field["format"] = format;
+static void streamCheckboxField(Print& out,
+                                bool& first,
+                                const char* key,
+                                const char* label,
+                                const char* help = nullptr,
+                                bool safety = false) {
+    streamSchemaFieldBase(out, first, key, label, "checkbox", help, nullptr, safety);
+    out.write('}');
 }
 
-static void addPasswordField(JsonArray fields,
-                             const char* key,
-                             const char* label,
-                             const char* help = nullptr,
-                             uint16_t maxLength = 0,
-                             uint8_t minLength = 0) {
-    JsonObject field = addSchemaField(fields, key, label, "password", help);
-    if (maxLength > 0) field["maxLength"] = maxLength;
-    if (minLength > 0) field["minLength"] = minLength;
+static void streamTextField(Print& out,
+                            bool& first,
+                            const char* key,
+                            const char* label,
+                            const char* help = nullptr,
+                            uint16_t maxLength = 0,
+                            const char* format = nullptr) {
+    bool fieldFirst = streamSchemaFieldBase(out, first, key, label, "text", help);
+    if (maxLength > 0) writeUIntProp(out, fieldFirst, "maxLength", maxLength);
+    if (format && format[0]) writeStringProp(out, fieldFirst, "format", format);
+    out.write('}');
 }
 
-static void addOptionPair(JsonArray options, int value, const char* label) {
-    JsonArray option = options.add<JsonArray>();
-    option.add(value);
-    option.add(label);
+static void streamPasswordField(Print& out,
+                                bool& first,
+                                const char* key,
+                                const char* label,
+                                const char* help = nullptr,
+                                uint16_t maxLength = 0,
+                                uint8_t minLength = 0) {
+    bool fieldFirst = streamSchemaFieldBase(out, first, key, label, "password", help);
+    if (maxLength > 0) writeUIntProp(out, fieldFirst, "maxLength", maxLength);
+    if (minLength > 0) writeUIntProp(out, fieldFirst, "minLength", minLength);
+    out.write('}');
 }
 
-static JsonArray addFieldGroup(JsonArray groups, const char* title) {
-    JsonArray group = groups.add<JsonArray>();
-    group.add(title);
-    return group.add<JsonArray>();
+static void beginFieldGroup(Print& out, bool& firstGroup, const char* title) {
+    writeComma(out, firstGroup);
+    out.write('[');
+    writeJsonString(out, title);
+    out.print(",[");
+}
+
+static void endFieldGroup(Print& out) {
+    out.print("]]");
+}
+
+static void streamGlobalGroups(Print& out) {
+    bool firstGroup = true;
+    bool firstField;
+
+    beginFieldGroup(out, firstGroup, "Phase");
+    firstField = true;
+    streamSelectField(out, firstField, "phaseMode", "Phase mode", "phaseMode", "Number of active phase outputs.", true);
+    endFieldGroup(out);
+
+    beginFieldGroup(out, firstGroup, "Motor");
+    firstField = true;
+    streamNumberField(out, firstField, "maxAmplitude", "Maximum amplitude", 0, 100, 1, "Upper output amplitude limit.", "percent", true);
+    streamNumberField(out, firstField, "freqDependentAmplitude", "V/f blend", 0, 100, 1, "How strongly the V/f boost curve affects output amplitude.", "percent", true);
+    streamNumberField(out, firstField, "vfLowFreq", "V/f low frequency", 0, 50, 1, "Low-frequency point for voltage boost.", "Hz", true);
+    streamNumberField(out, firstField, "vfLowBoost", "V/f low boost", 0, 100, 1, "Output boost at the low-frequency V/f point.", "percent", true);
+    streamNumberField(out, firstField, "vfMidFreq", "V/f mid frequency", 0, 100, 1, "Mid-frequency point for voltage boost.", "Hz", true);
+    streamNumberField(out, firstField, "vfMidBoost", "V/f mid boost", 0, 100, 1, "Output boost at the mid-frequency V/f point.", "percent", true);
+    streamSelectField(out, firstField, "rampType", "Ramp type", "rampType", "Acceleration curve used for speed changes.");
+    streamSelectField(out, firstField, "softStartCurve", "Soft start curve", "softStartCurve", "Curve used during startup.");
+    streamCheckboxField(out, firstField, "smoothSwitching", "Smooth speed switching", "Ramp between speed presets instead of stepping instantly.");
+    streamNumberField(out, firstField, "switchRampDuration", "Switch ramp duration", 1, 5, 1, "Duration used when smooth speed switching is enabled.", "sec");
+    streamSelectField(out, firstField, "brakeMode", "Brake mode", "brakeMode", "How the motor is stopped.", true);
+    streamNumberField(out, firstField, "brakeDuration", "Brake duration", 0, 10, 0.1f, "Braking or ramp-down duration.", "sec", true);
+    streamNumberField(out, firstField, "brakePulseGap", "Brake pulse gap", 0.1f, 2, 0.1f, "Gap between brake pulses.", "sec", true);
+    streamNumberField(out, firstField, "brakeStartFreq", "Brake start frequency", 10, 200, 1, "Starting frequency for active braking.", "Hz", true);
+    streamNumberField(out, firstField, "brakeStopFreq", "Brake stop frequency", 0, 50, 1, "Final frequency for active braking.", "Hz", true);
+    streamNumberField(out, firstField, "softStopCutoff", "Soft stop cutoff", 0, 50, 1, "Frequency below which soft stop disables drive.", "Hz", true);
+    streamCheckboxField(out, firstField, "autoStart", "Auto start", "Start automatically after waking from standby.", true);
+    endFieldGroup(out);
+
+    beginFieldGroup(out, firstGroup, "Power");
+    firstField = true;
+    streamCheckboxField(out, firstField, "relayActiveHigh", "Relay active high", "Enable when relay boards switch on with a high signal.", true);
+    streamCheckboxField(out, firstField, "muteRelayLinkStandby", "Mute relays in standby", "Link mute relay state to standby.", true);
+    streamCheckboxField(out, firstField, "muteRelayLinkStartStop", "Mute relays on stop", "Mute outputs when the motor is stopped.", true);
+    streamNumberField(out, firstField, "powerOnRelayDelay", "Power-on relay delay", 0, 10, 1, "Delay before relays engage after power-on.", "sec", true);
+    streamNumberField(out, firstField, "autoStandbyDelay", "Auto standby delay", 0, 60, 1, "Minutes of inactivity before standby. Zero disables it.", "min");
+    streamCheckboxField(out, firstField, "autoBoot", "Auto boot to powered state", "Wake to powered state after boot.", true);
+    endFieldGroup(out);
+
+    beginFieldGroup(out, firstGroup, "Display");
+    firstField = true;
+    streamNumberField(out, firstField, "displayBrightness", "Display brightness", 0, 255, 1, "OLED brightness level.");
+    streamSelectField(out, firstField, "displaySleepDelay", "Display sleep delay", "displaySleepDelay", "Delay before the display sleeps.");
+    streamCheckboxField(out, firstField, "screensaverEnabled", "Screensaver enabled", "Show a screensaver after the sleep delay.");
+    streamSelectField(out, firstField, "screensaverMode", "Screensaver mode", "screensaverMode", "Animation shown after the display sleep delay.");
+    streamNumberField(out, firstField, "autoDimDelay", "Auto dim delay", 0, 60, 1, "Minutes before dimming. Zero disables it.", "min");
+    streamCheckboxField(out, firstField, "showRuntime", "Show runtime", "Include runtime on the display.");
+    streamCheckboxField(out, firstField, "errorDisplayEnabled", "Error display enabled", "Show errors on the OLED.");
+    streamNumberField(out, firstField, "errorDisplayDuration", "Error display duration", 1, 60, 1, "How long OLED error messages stay visible.", "sec");
+    endFieldGroup(out);
+
+    beginFieldGroup(out, firstGroup, "System");
+    firstField = true;
+    streamCheckboxField(out, firstField, "reverseEncoder", "Reverse encoder", "Invert main encoder direction.");
+    streamNumberField(out, firstField, "pitchStepSize", "Pitch step size", 0.01f, 1, 0.01f, "Pitch adjustment step size.", "Hz");
+    streamCheckboxField(out, firstField, "pitchResetOnStop", "Pitch reset on stop", "Reset pitch after stopping.");
+    streamCheckboxField(out, firstField, "enable78rpm", "Enable 78 RPM", "Expose and allow 78 RPM mode.");
+#if AMP_MONITOR_ENABLE
+    streamNumberField(out, firstField, "ampTempWarnC", "Amplifier warning temperature", AMP_TEMP_MIN_C, AMP_TEMP_MAX_C, 1, "Temperature that logs a non-critical amplifier thermal warning.", "C", true);
+    streamNumberField(out, firstField, "ampTempShutdownC", "Amplifier shutdown temperature", AMP_TEMP_MIN_C, AMP_TEMP_MAX_C, 1, "Temperature that immediately stops the motor and latches amplifier thermal shutdown.", "C", true);
+#endif
+    streamSelectField(out, firstField, "bootSpeed", "Boot speed", "bootSpeed", "Speed selected at startup.");
+    endFieldGroup(out);
+}
+
+static void streamSpeedFields(Print& out) {
+    bool firstField = true;
+    streamNumberField(out, firstField, "frequency", "Frequency", MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ, 0.1f, "Nominal drive frequency for this speed.", "Hz", true);
+    streamNumberField(out, firstField, "minFrequency", "Minimum frequency", MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ, 0.1f, "Lower pitch/frequency limit for this speed.", "Hz", true);
+    streamNumberField(out, firstField, "maxFrequency", "Maximum frequency", MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ, 0.1f, "Upper pitch/frequency limit for this speed.", "Hz", true);
+    streamNumberField(out, firstField, "phase0", "Phase 1 offset", -360, 360, 0.1f, "Phase 1 offset from reference.", "deg", true);
+    streamNumberField(out, firstField, "phase1", "Phase 2 offset", -360, 360, 0.1f, "Phase 2 offset from reference.", "deg", true);
+    streamNumberField(out, firstField, "phase2", "Phase 3 offset", -360, 360, 0.1f, "Phase 3 offset from reference.", "deg", true);
+    streamNumberField(out, firstField, "phase3", "Phase 4 offset", -360, 360, 0.1f, "Phase 4 offset from reference.", "deg", true);
+    streamNumberField(out, firstField, "softStartDuration", "Soft start duration", 0, 10, 0.1f, "Startup ramp duration for this speed.", "sec", true);
+    streamNumberField(out, firstField, "reducedAmplitude", "Reduced amplitude", 10, 100, 1, "Running amplitude after startup delay.", "percent", true);
+    streamNumberField(out, firstField, "amplitudeDelay", "Amplitude delay", 0, 60, 1, "Delay before reducing amplitude.", "sec", true);
+    streamNumberField(out, firstField, "startupKick", "Startup kick multiplier", 1, 4, 1, "Temporary startup torque multiplier.", "x", true);
+    streamNumberField(out, firstField, "startupKickDuration", "Startup kick duration", 0, 15, 1, "How long startup kick stays active.", "sec", true);
+    streamNumberField(out, firstField, "startupKickRampDuration", "Startup kick ramp", 0, 15, 0.1f, "Ramp-out duration for startup kick.", "sec", true);
+    streamSelectField(out, firstField, "filterType", "Filter type", "filterType", "Digital smoothing filter for speed changes.");
+    streamNumberField(out, firstField, "iirAlpha", "IIR alpha", 0.01f, 0.99f, 0.01f, "IIR smoothing coefficient.");
+    streamSelectField(out, firstField, "firProfile", "FIR profile", "firProfile", "FIR smoothing profile.");
+}
+
+static void streamNetworkFields(Print& out) {
+    bool firstField = true;
+    streamCheckboxField(out, firstField, "enabled", "Wi-Fi enabled", "Turn Wi-Fi features on for this board.");
+    streamSelectField(out, firstField, "mode", "Connection mode", "netMode", "Choose setup AP, Wi-Fi client, or both.");
+    streamTextField(out, firstField, "hostname", "Hostname", "Local network host name.", NETWORK_HOSTNAME_MAX);
+    streamTextField(out, firstField, "ssid", "Network SSID", "Wi-Fi network name.", NETWORK_SSID_MAX);
+    streamCheckboxField(out, firstField, "hiddenSsid", "Hidden SSID", "Connect even when the network does not advertise its name.");
+    streamPasswordField(out, firstField, "password", "Network password", "Leave blank to keep the saved password.", NETWORK_PASSWORD_MAX, 8);
+    streamCheckboxField(out, firstField, "dhcp", "Use DHCP", "Automatically request an IP address.");
+    streamTextField(out, firstField, "staticIp", "Static IP", "Used when DHCP is off.", 15, "ip");
+    streamTextField(out, firstField, "gateway", "Gateway", "Used when DHCP is off.", 15, "ip");
+    streamTextField(out, firstField, "subnet", "Subnet mask", "Used when DHCP is off.", 15, "ip");
+    streamTextField(out, firstField, "dns", "DNS server", "Used when DHCP is off.", 15, "ip");
+    streamCheckboxField(out, firstField, "apFallback", "Setup AP fallback", "Reopen setup AP when Wi-Fi fails.");
+    streamTextField(out, firstField, "apSsid", "Setup AP SSID", "Name of the setup network.", NETWORK_SSID_MAX);
+    streamPasswordField(out, firstField, "apPassword", "Setup AP password", "Leave blank for an open setup network.", NETWORK_PASSWORD_MAX, 8);
+    streamNumberField(out, firstField, "apChannel", "Setup AP channel", 1, 13, 1, "Wi-Fi channel used by the setup AP.");
+    streamCheckboxField(out, firstField, "readOnlyMode", "Read-only guest mode", "When enabled, dashboard/status stay visible but controls and settings require the web PIN.");
+    streamPasswordField(out, firstField, "webPin", "Web PIN", "Leave blank to keep the saved PIN. Use 4 to 8 characters.", NETWORK_WEB_PIN_MAX, 4);
+    streamSelectField(out, firstField, "webHomePage", "Web home page", "homePage", "Default page shown when the local browser interface opens.");
+}
+
+static void streamSchema(Print& out) {
+    out.write('{');
+    bool first = true;
+    writeIntProp(out, first, "settingsSchemaVersion", SETTINGS_SCHEMA_VERSION);
+    writeIntProp(out, first, "networkSchemaVersion", NETWORK_CONFIG_VERSION);
+
+    beginArrayProp(out, first, "speedNames");
+    writeJsonString(out, "33 RPM");
+    out.write(',');
+    writeJsonString(out, "45 RPM");
+    out.write(',');
+    writeJsonString(out, "78 RPM");
+    out.write(']');
+
+    beginObjectProp(out, first, "options");
+    streamOptions(out);
+    out.write('}');
+
+    beginArrayProp(out, first, "globalGroups");
+    streamGlobalGroups(out);
+    out.write(']');
+
+    beginArrayProp(out, first, "speedFields");
+    streamSpeedFields(out);
+    out.write(']');
+
+    beginArrayProp(out, first, "networkFields");
+    streamNetworkFields(out);
+    out.write(']');
+
+    out.write('}');
 }
 
 static bool presetSlotExists(int slot) {
@@ -512,7 +983,12 @@ static bool presetSlotExists(int slot) {
 WebInterface::WebInterface()
     : _server(80),
       _started(false),
-      _authExpiresMs(0) {
+      _authExpiresMs(0),
+      _rawBody(nullptr),
+      _rawBodyLength(0),
+      _rawBodyCapacity(0),
+      _rawBodyOverflow(false),
+      _rawBodyComplete(false) {
     _authToken[0] = 0;
 }
 
@@ -535,33 +1011,51 @@ bool WebInterface::isStarted() const {
 
 void WebInterface::setupRoutes() {
     _server.collectHeaders("X-TTControl-Token");
+    auto rawBody = [this]() { handleRawBody(); };
     _server.on("/", HTTP_GET, [this]() { handleRoot(); });
     _server.on("/api/auth", HTTP_GET, [this]() { handleAuthGet(); });
-    _server.on("/api/auth", HTTP_POST, [this]() { handleAuthPost(); });
+    _server.addHandler(new RawJsonRequestHandler("/api/auth", [this]() { handleAuthPost(); }, rawBody));
     _server.on("/api/preferences", HTTP_GET, [this]() { handlePreferencesGet(); });
-    _server.on("/api/preferences", HTTP_POST, [this]() { handlePreferencesPost(); });
+    _server.addHandler(new RawJsonRequestHandler("/api/preferences", [this]() { handlePreferencesPost(); }, rawBody));
     _server.on("/api/schema", HTTP_GET, [this]() { handleSchemaGet(); });
     _server.on("/api/status", HTTP_GET, [this]() { handleStatus(); });
     _server.on("/api/events", HTTP_GET, [this]() { handleEventsGet(); });
     _server.on("/api/settings", HTTP_GET, [this]() { handleSettingsGet(); });
-    _server.on("/api/settings", HTTP_POST, [this]() { handleSettingsPost(); });
-    _server.on("/api/control", HTTP_POST, [this]() { handleControl(); });
+    _server.addHandler(new RawJsonRequestHandler("/api/settings", [this]() { handleSettingsPost(); }, rawBody));
+    _server.addHandler(new RawJsonRequestHandler("/api/control", [this]() { handleControl(); }, rawBody));
     _server.on("/api/network", HTTP_GET, [this]() { handleNetworkGet(); });
-    _server.on("/api/network", HTTP_POST, [this]() { handleNetworkPost(); });
+    _server.addHandler(new RawJsonRequestHandler("/api/network", [this]() { handleNetworkPost(); }, rawBody));
     _server.on("/api/network/scan", HTTP_GET, [this]() { handleNetworkScan(); });
     _server.on("/api/diagnostics", HTTP_GET, [this]() { handleDiagnosticsGet(); });
     _server.on("/api/presets", HTTP_GET, [this]() { handlePresetsGet(); });
-    _server.on("/api/preset", HTTP_POST, [this]() { handlePresetPost(); });
+    _server.addHandler(new RawJsonRequestHandler("/api/preset", [this]() { handlePresetPost(); }, rawBody));
     _server.on("/api/errors", HTTP_GET, [this]() { handleErrorsGet(); });
     _server.on("/api/errors", HTTP_POST, [this]() { handleErrorsPost(); });
     _server.onNotFound([this]() { handleNotFound(); });
 }
 
 void WebInterface::sendJson(int code, JsonDocument& doc) {
-    String out;
-    serializeJson(doc, out);
     _server.sendHeader("Cache-Control", "no-store");
-    _server.send(code, "application/json", out);
+    _server.setContentLength(measureJson(doc));
+    _server.send(code, "application/json", "", 0);
+    ServerBufferedPrint out(_server);
+    serializeJson(doc, out);
+    out.flush();
+    releaseRawBody();
+}
+
+void WebInterface::sendStaticHtml(PGM_P content, size_t contentLength) {
+    _server.sendHeader("Cache-Control", "no-store");
+    _server.setContentLength(contentLength);
+    _server.send(200, "text/html", "", 0);
+    size_t offset = 0;
+    while (offset < contentLength) {
+        size_t count = contentLength - offset;
+        if (count > WEB_RESPONSE_CHUNK_BYTES) count = WEB_RESPONSE_CHUNK_BYTES;
+        _server.sendContent_P(content + offset, count);
+        offset += count;
+        yield();
+    }
 }
 
 void WebInterface::sendError(int code, const char* message) {
@@ -572,13 +1066,20 @@ void WebInterface::sendError(int code, const char* message) {
 }
 
 bool WebInterface::parseBody(JsonDocument& doc) {
-    String body = _server.arg("plain");
-    if (body.length() == 0) {
+    if (_rawBodyOverflow) {
+        releaseRawBody();
+        sendError(413, "Request body is too large");
+        return false;
+    }
+
+    if (!_rawBodyComplete || _rawBodyLength == 0 || !_rawBody) {
+        releaseRawBody();
         sendError(400, "Missing request body");
         return false;
     }
 
-    DeserializationError error = deserializeJson(doc, body);
+    DeserializationError error = deserializeJson(doc, (const char*)_rawBody, _rawBodyLength);
+    releaseRawBody();
     if (error) {
         sendError(400, error.c_str());
         return false;
@@ -587,9 +1088,63 @@ bool WebInterface::parseBody(JsonDocument& doc) {
     return true;
 }
 
+void WebInterface::handleRawBody() {
+    HTTPRaw& raw = _server.raw();
+    switch (raw.status) {
+        case RAW_START: {
+            releaseRawBody();
+            size_t length = _server.clientContentLength();
+            if (length == 0) {
+                _rawBodyComplete = true;
+                return;
+            }
+            if (length > WEB_JSON_BODY_MAX_BYTES) {
+                _rawBodyOverflow = true;
+                return;
+            }
+            _rawBody = (char*)malloc(length + 1);
+            if (!_rawBody) {
+                _rawBodyOverflow = true;
+                return;
+            }
+            _rawBodyCapacity = length;
+            _rawBodyLength = 0;
+            break;
+        }
+        case RAW_WRITE:
+            if (_rawBodyOverflow || !_rawBody) return;
+            if (_rawBodyLength + raw.currentSize > _rawBodyCapacity) {
+                _rawBodyOverflow = true;
+                return;
+            }
+            memcpy(_rawBody + _rawBodyLength, raw.buf, raw.currentSize);
+            _rawBodyLength += raw.currentSize;
+            break;
+        case RAW_END:
+            if (_rawBodyOverflow) return;
+            if (_rawBody) _rawBody[_rawBodyLength] = 0;
+            _rawBodyComplete = true;
+            break;
+        case RAW_ABORTED:
+            _rawBodyOverflow = true;
+            _rawBodyComplete = false;
+            break;
+    }
+}
+
+void WebInterface::releaseRawBody() {
+    if (_rawBody) {
+        free(_rawBody);
+        _rawBody = nullptr;
+    }
+    _rawBodyLength = 0;
+    _rawBodyCapacity = 0;
+    _rawBodyOverflow = false;
+    _rawBodyComplete = false;
+}
+
 bool WebInterface::isOpenSetupRequest() {
-    return networkManager.isSetupApOpen() &&
-           _server.client().localIP().toString() == networkManager.apIpText();
+    return networkManager.isSetupApOpen() && _server.client().localIP() == WiFi.softAPIP();
 }
 
 bool WebInterface::rejectOpenSetupAccess() {
@@ -636,13 +1191,11 @@ void WebInterface::handleRoot() {
         return;
     }
 
-    _server.sendHeader("Cache-Control", "no-store");
-    _server.send(200, "text/html", INDEX_HTML);
+    sendStaticHtml(INDEX_HTML, sizeof(INDEX_HTML) - 1);
 }
 
 void WebInterface::handleSetupRoot() {
-    _server.sendHeader("Cache-Control", "no-store");
-    _server.send(200, "text/html", SETUP_HTML);
+    sendStaticHtml(SETUP_HTML, sizeof(SETUP_HTML) - 1);
 }
 
 void WebInterface::handleAuthGet() {
@@ -718,176 +1271,15 @@ void WebInterface::handlePreferencesPost() {
 void WebInterface::handleSchemaGet() {
     if (rejectOpenSetupAccess()) return;
 
-    JsonDocument doc;
-    doc["settingsSchemaVersion"] = SETTINGS_SCHEMA_VERSION;
-    doc["networkSchemaVersion"] = NETWORK_CONFIG_VERSION;
+    CountingPrint counter;
+    streamSchema(counter);
 
-    JsonArray speedNames = doc["speedNames"].to<JsonArray>();
-    speedNames.add("33 RPM");
-    speedNames.add("45 RPM");
-    speedNames.add("78 RPM");
-
-    JsonObject options = doc["options"].to<JsonObject>();
-    JsonArray phaseMode = options["phaseMode"].to<JsonArray>();
-    addOptionPair(phaseMode, 1, "1 phase");
-    addOptionPair(phaseMode, 2, "2 phase");
-    addOptionPair(phaseMode, 3, "3 phase");
-#if MAX_PHASE_MODE >= 4
-    addOptionPair(phaseMode, 4, "4 phase");
-#endif
-
-    JsonArray filterType = options["filterType"].to<JsonArray>();
-    addOptionPair(filterType, FILTER_NONE, "None");
-    addOptionPair(filterType, FILTER_IIR, "IIR");
-    addOptionPair(filterType, FILTER_FIR, "FIR");
-
-    JsonArray firProfile = options["firProfile"].to<JsonArray>();
-    addOptionPair(firProfile, FIR_GENTLE, "Gentle");
-    addOptionPair(firProfile, FIR_MEDIUM, "Medium");
-    addOptionPair(firProfile, FIR_AGGRESSIVE, "Aggressive");
-
-    JsonArray softStartCurve = options["softStartCurve"].to<JsonArray>();
-    addOptionPair(softStartCurve, 0, "Linear");
-    addOptionPair(softStartCurve, 1, "Log");
-    addOptionPair(softStartCurve, 2, "Exp");
-
-    JsonArray rampType = options["rampType"].to<JsonArray>();
-    addOptionPair(rampType, RAMP_LINEAR, "Linear");
-    addOptionPair(rampType, RAMP_SCURVE, "S-curve");
-
-    JsonArray brakeMode = options["brakeMode"].to<JsonArray>();
-    addOptionPair(brakeMode, BRAKE_OFF, "Off");
-    addOptionPair(brakeMode, BRAKE_PULSE, "Pulse");
-    addOptionPair(brakeMode, BRAKE_RAMP, "Ramp");
-    addOptionPair(brakeMode, BRAKE_SOFT_STOP, "Soft stop");
-
-    JsonArray screensaverMode = options["screensaverMode"].to<JsonArray>();
-    addOptionPair(screensaverMode, SAVER_BOUNCE, "Bounce");
-    addOptionPair(screensaverMode, SAVER_MATRIX, "Matrix");
-    addOptionPair(screensaverMode, SAVER_LISSAJOUS, "Lissajous");
-
-    JsonArray displaySleepDelay = options["displaySleepDelay"].to<JsonArray>();
-    addOptionPair(displaySleepDelay, 0, "Off");
-    addOptionPair(displaySleepDelay, 1, "10 sec");
-    addOptionPair(displaySleepDelay, 2, "20 sec");
-    addOptionPair(displaySleepDelay, 3, "30 sec");
-    addOptionPair(displaySleepDelay, 4, "1 min");
-    addOptionPair(displaySleepDelay, 5, "5 min");
-    addOptionPair(displaySleepDelay, 6, "10 min");
-
-    JsonArray bootSpeed = options["bootSpeed"].to<JsonArray>();
-    addOptionPair(bootSpeed, 0, "33 RPM");
-    addOptionPair(bootSpeed, 1, "45 RPM");
-    addOptionPair(bootSpeed, 2, "78 RPM");
-    addOptionPair(bootSpeed, 3, "Last used");
-
-    JsonArray netMode = options["netMode"].to<JsonArray>();
-    addOptionPair(netMode, NETWORK_MODE_AP, "Setup AP");
-    addOptionPair(netMode, NETWORK_MODE_STA, "Station");
-    addOptionPair(netMode, NETWORK_MODE_STA_AP, "Station + setup AP");
-
-    JsonArray homePage = options["homePage"].to<JsonArray>();
-    addOptionPair(homePage, WEB_HOME_DASHBOARD, "Dashboard");
-    addOptionPair(homePage, WEB_HOME_CONTROL, "Control");
-    addOptionPair(homePage, WEB_HOME_SETTINGS, "Settings");
-    addOptionPair(homePage, WEB_HOME_CALIBRATE, "Calibrate");
-    addOptionPair(homePage, WEB_HOME_NETWORK, "Network");
-    addOptionPair(homePage, WEB_HOME_PRESETS, "Presets");
-    addOptionPair(homePage, WEB_HOME_BENCH, "Bench");
-    addOptionPair(homePage, WEB_HOME_DIAGNOSTICS, "Diagnostics");
-    addOptionPair(homePage, WEB_HOME_ERRORS, "Errors");
-
-    JsonArray globalGroups = doc["globalGroups"].to<JsonArray>();
-    JsonArray fields = addFieldGroup(globalGroups, "Phase");
-    addSelectField(fields, "phaseMode", "Phase mode", "phaseMode", "Number of active phase outputs.", true);
-
-    fields = addFieldGroup(globalGroups, "Motor");
-    addNumberField(fields, "maxAmplitude", "Maximum amplitude", 0, 100, 1, "Upper output amplitude limit.", "percent", true);
-    addNumberField(fields, "freqDependentAmplitude", "V/f blend", 0, 100, 1, "How strongly the V/f boost curve affects output amplitude.", "percent", true);
-    addNumberField(fields, "vfLowFreq", "V/f low frequency", 0, 50, 1, "Low-frequency point for voltage boost.", "Hz", true);
-    addNumberField(fields, "vfLowBoost", "V/f low boost", 0, 100, 1, "Output boost at the low-frequency V/f point.", "percent", true);
-    addNumberField(fields, "vfMidFreq", "V/f mid frequency", 0, 100, 1, "Mid-frequency point for voltage boost.", "Hz", true);
-    addNumberField(fields, "vfMidBoost", "V/f mid boost", 0, 100, 1, "Output boost at the mid-frequency V/f point.", "percent", true);
-    addSelectField(fields, "rampType", "Ramp type", "rampType", "Acceleration curve used for speed changes.");
-    addSelectField(fields, "softStartCurve", "Soft start curve", "softStartCurve", "Curve used during startup.");
-    addCheckboxField(fields, "smoothSwitching", "Smooth speed switching", "Ramp between speed presets instead of stepping instantly.");
-    addNumberField(fields, "switchRampDuration", "Switch ramp duration", 1, 5, 1, "Duration used when smooth speed switching is enabled.", "sec");
-    addSelectField(fields, "brakeMode", "Brake mode", "brakeMode", "How the motor is stopped.", true);
-    addNumberField(fields, "brakeDuration", "Brake duration", 0, 10, 0.1f, "Braking or ramp-down duration.", "sec", true);
-    addNumberField(fields, "brakePulseGap", "Brake pulse gap", 0.1f, 2, 0.1f, "Gap between brake pulses.", "sec", true);
-    addNumberField(fields, "brakeStartFreq", "Brake start frequency", 10, 200, 1, "Starting frequency for active braking.", "Hz", true);
-    addNumberField(fields, "brakeStopFreq", "Brake stop frequency", 0, 50, 1, "Final frequency for active braking.", "Hz", true);
-    addNumberField(fields, "softStopCutoff", "Soft stop cutoff", 0, 50, 1, "Frequency below which soft stop disables drive.", "Hz", true);
-    addCheckboxField(fields, "autoStart", "Auto start", "Start automatically after waking from standby.", true);
-
-    fields = addFieldGroup(globalGroups, "Power");
-    addCheckboxField(fields, "relayActiveHigh", "Relay active high", "Enable when relay boards switch on with a high signal.", true);
-    addCheckboxField(fields, "muteRelayLinkStandby", "Mute relays in standby", "Link mute relay state to standby.", true);
-    addCheckboxField(fields, "muteRelayLinkStartStop", "Mute relays on stop", "Mute outputs when the motor is stopped.", true);
-    addNumberField(fields, "powerOnRelayDelay", "Power-on relay delay", 0, 10, 1, "Delay before relays engage after power-on.", "sec", true);
-    addNumberField(fields, "autoStandbyDelay", "Auto standby delay", 0, 60, 1, "Minutes of inactivity before standby. Zero disables it.", "min");
-    addCheckboxField(fields, "autoBoot", "Auto boot to powered state", "Wake to powered state after boot.", true);
-
-    fields = addFieldGroup(globalGroups, "Display");
-    addNumberField(fields, "displayBrightness", "Display brightness", 0, 255, 1, "OLED brightness level.");
-    addSelectField(fields, "displaySleepDelay", "Display sleep delay", "displaySleepDelay", "Delay before the display sleeps.");
-    addCheckboxField(fields, "screensaverEnabled", "Screensaver enabled", "Show a screensaver after the sleep delay.");
-    addSelectField(fields, "screensaverMode", "Screensaver mode", "screensaverMode", "Animation shown after the display sleep delay.");
-    addNumberField(fields, "autoDimDelay", "Auto dim delay", 0, 60, 1, "Minutes before dimming. Zero disables it.", "min");
-    addCheckboxField(fields, "showRuntime", "Show runtime", "Include runtime on the display.");
-    addCheckboxField(fields, "errorDisplayEnabled", "Error display enabled", "Show errors on the OLED.");
-    addNumberField(fields, "errorDisplayDuration", "Error display duration", 1, 60, 1, "How long OLED error messages stay visible.", "sec");
-
-    fields = addFieldGroup(globalGroups, "System");
-    addCheckboxField(fields, "reverseEncoder", "Reverse encoder", "Invert main encoder direction.");
-    addNumberField(fields, "pitchStepSize", "Pitch step size", 0.01f, 1, 0.01f, "Pitch adjustment step size.", "Hz");
-    addCheckboxField(fields, "pitchResetOnStop", "Pitch reset on stop", "Reset pitch after stopping.");
-    addCheckboxField(fields, "enable78rpm", "Enable 78 RPM", "Expose and allow 78 RPM mode.");
-#if AMP_MONITOR_ENABLE
-    addNumberField(fields, "ampTempWarnC", "Amplifier warning temperature", AMP_TEMP_MIN_C, AMP_TEMP_MAX_C, 1, "Temperature that logs a non-critical amplifier thermal warning.", "C", true);
-    addNumberField(fields, "ampTempShutdownC", "Amplifier shutdown temperature", AMP_TEMP_MIN_C, AMP_TEMP_MAX_C, 1, "Temperature that immediately stops the motor and latches amplifier thermal shutdown.", "C", true);
-#endif
-    addSelectField(fields, "bootSpeed", "Boot speed", "bootSpeed", "Speed selected at startup.");
-
-    JsonArray speedFields = doc["speedFields"].to<JsonArray>();
-    addNumberField(speedFields, "frequency", "Frequency", MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ, 0.1f, "Nominal drive frequency for this speed.", "Hz", true);
-    addNumberField(speedFields, "minFrequency", "Minimum frequency", MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ, 0.1f, "Lower pitch/frequency limit for this speed.", "Hz", true);
-    addNumberField(speedFields, "maxFrequency", "Maximum frequency", MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ, 0.1f, "Upper pitch/frequency limit for this speed.", "Hz", true);
-    addNumberField(speedFields, "phase0", "Phase 1 offset", -360, 360, 0.1f, "Phase 1 offset from reference.", "deg", true);
-    addNumberField(speedFields, "phase1", "Phase 2 offset", -360, 360, 0.1f, "Phase 2 offset from reference.", "deg", true);
-    addNumberField(speedFields, "phase2", "Phase 3 offset", -360, 360, 0.1f, "Phase 3 offset from reference.", "deg", true);
-    addNumberField(speedFields, "phase3", "Phase 4 offset", -360, 360, 0.1f, "Phase 4 offset from reference.", "deg", true);
-    addNumberField(speedFields, "softStartDuration", "Soft start duration", 0, 10, 0.1f, "Startup ramp duration for this speed.", "sec", true);
-    addNumberField(speedFields, "reducedAmplitude", "Reduced amplitude", 10, 100, 1, "Running amplitude after startup delay.", "percent", true);
-    addNumberField(speedFields, "amplitudeDelay", "Amplitude delay", 0, 60, 1, "Delay before reducing amplitude.", "sec", true);
-    addNumberField(speedFields, "startupKick", "Startup kick multiplier", 1, 4, 1, "Temporary startup torque multiplier.", "x", true);
-    addNumberField(speedFields, "startupKickDuration", "Startup kick duration", 0, 15, 1, "How long startup kick stays active.", "sec", true);
-    addNumberField(speedFields, "startupKickRampDuration", "Startup kick ramp", 0, 15, 0.1f, "Ramp-out duration for startup kick.", "sec", true);
-    addSelectField(speedFields, "filterType", "Filter type", "filterType", "Digital smoothing filter for speed changes.");
-    addNumberField(speedFields, "iirAlpha", "IIR alpha", 0.01f, 0.99f, 0.01f, "IIR smoothing coefficient.");
-    addSelectField(speedFields, "firProfile", "FIR profile", "firProfile", "FIR smoothing profile.");
-
-    JsonArray networkFields = doc["networkFields"].to<JsonArray>();
-    addCheckboxField(networkFields, "enabled", "Wi-Fi enabled", "Turn Wi-Fi features on for this board.");
-    addSelectField(networkFields, "mode", "Connection mode", "netMode", "Choose setup AP, Wi-Fi client, or both.");
-    addTextField(networkFields, "hostname", "Hostname", "Local network host name.", NETWORK_HOSTNAME_MAX);
-    addTextField(networkFields, "ssid", "Network SSID", "Wi-Fi network name.", NETWORK_SSID_MAX);
-    addCheckboxField(networkFields, "hiddenSsid", "Hidden SSID", "Connect even when the network does not advertise its name.");
-    addPasswordField(networkFields, "password", "Network password", "Leave blank to keep the saved password.", NETWORK_PASSWORD_MAX, 8);
-    addCheckboxField(networkFields, "dhcp", "Use DHCP", "Automatically request an IP address.");
-    addTextField(networkFields, "staticIp", "Static IP", "Used when DHCP is off.", 15, "ip");
-    addTextField(networkFields, "gateway", "Gateway", "Used when DHCP is off.", 15, "ip");
-    addTextField(networkFields, "subnet", "Subnet mask", "Used when DHCP is off.", 15, "ip");
-    addTextField(networkFields, "dns", "DNS server", "Used when DHCP is off.", 15, "ip");
-    addCheckboxField(networkFields, "apFallback", "Setup AP fallback", "Reopen setup AP when Wi-Fi fails.");
-    addTextField(networkFields, "apSsid", "Setup AP SSID", "Name of the setup network.", NETWORK_SSID_MAX);
-    addPasswordField(networkFields, "apPassword", "Setup AP password", "Leave blank for an open setup network.", NETWORK_PASSWORD_MAX, 8);
-    addNumberField(networkFields, "apChannel", "Setup AP channel", 1, 13, 1, "Wi-Fi channel used by the setup AP.");
-    addCheckboxField(networkFields, "readOnlyMode", "Read-only guest mode", "When enabled, dashboard/status stay visible but controls and settings require the web PIN.");
-    addPasswordField(networkFields, "webPin", "Web PIN", "Leave blank to keep the saved PIN. Use 4 to 8 characters.", NETWORK_WEB_PIN_MAX, 4);
-    addSelectField(networkFields, "webHomePage", "Web home page", "homePage", "Default page shown when the local browser interface opens.");
-
-    sendJson(200, doc);
+    _server.sendHeader("Cache-Control", "no-store");
+    _server.setContentLength(counter.length);
+    _server.send(200, "application/json", "", 0);
+    ServerBufferedPrint out(_server);
+    streamSchema(out);
+    out.flush();
 }
 
 void WebInterface::populateStatus(JsonDocument& doc) {
@@ -931,25 +1323,128 @@ void WebInterface::populateStatus(JsonDocument& doc) {
     amp["enabled"] = false;
 #endif
 
+    const NetworkConfig& cfg = networkManager.getConfig();
+    char ip[18] = "";
+    const char* ssid = cfg.ssid;
+    if (networkManager.isConnected()) {
+        formatIpAddress(WiFi.localIP(), ip, sizeof(ip));
+        ssid = WiFi.SSID().c_str();
+    } else if (networkManager.isApActive()) {
+        formatIpAddress(WiFi.softAPIP(), ip, sizeof(ip));
+        ssid = cfg.apSsid;
+    }
+
     JsonObject net = doc["network"].to<JsonObject>();
     net["available"] = networkManager.isAvailable();
     net["enabled"] = networkManager.isEnabled();
     net["status"] = networkManager.statusText();
-    net["ip"] = networkManager.ipText();
-    net["ssid"] = networkManager.ssidText();
+    net["ip"] = ip;
+    net["ssid"] = ssid;
     net["rssi"] = networkManager.rssi();
     net["clients"] = networkManager.connectedClientCount();
 
     JsonObject auth = doc["auth"].to<JsonObject>();
-    const NetworkConfig& cfg = networkManager.getConfig();
     net["hiddenSsid"] = cfg.hiddenSsid;
     auth["readOnlyMode"] = cfg.readOnlyMode;
     auth["required"] = networkManager.isWebAccessLocked();
     auth["unlocked"] = hasWriteAccess();
 }
 
+void WebInterface::streamStatus(Print& out) {
+    const NetworkConfig& cfg = networkManager.getConfig();
+    char ip[18] = "";
+    const char* ssid = cfg.ssid;
+    if (networkManager.isConnected()) {
+        formatIpAddress(WiFi.localIP(), ip, sizeof(ip));
+        ssid = WiFi.SSID().c_str();
+    } else if (networkManager.isApActive()) {
+        formatIpAddress(WiFi.softAPIP(), ip, sizeof(ip));
+        ssid = cfg.apSsid;
+    }
+
+    out.write('{');
+    bool first = true;
+    writeStringProp(out, first, "firmware", FIRMWARE_VERSION);
+    writeStringProp(out, first, "buildDate", BUILD_DATE);
+    writeBoolProp(out, first, "safeMode", safeModeActive);
+
+    beginObjectProp(out, first, "motor");
+    bool objectFirst = true;
+    writeStringProp(out, objectFirst, "state", motorStateName());
+    writeIntProp(out, objectFirst, "stateCode", (long)motor.getState());
+    writeBoolProp(out, objectFirst, "running", motor.isRunning());
+    writeBoolProp(out, objectFirst, "standby", motor.isStandby());
+    writeIntProp(out, objectFirst, "speed", (long)motor.getSpeed());
+    writeStringProp(out, objectFirst, "speedName", speedName(motor.getSpeed()));
+    writeFloatProp(out, objectFirst, "frequency", motor.getCurrentFrequency());
+    writeFloatProp(out, objectFirst, "pitch", motor.getPitchPercent());
+    writeFloatProp(out, objectFirst, "pitchRange", motor.getPitchRange());
+    writeFloatProp(out, objectFirst, "motionProgress", motor.getMotionProgress());
+    writeBoolProp(out, objectFirst, "speedRamping", motor.isSpeedRamping());
+    writeBoolProp(out, objectFirst, "relayTest", motor.isRelayTestMode());
+    writeIntProp(out, objectFirst, "relayStage", motor.getRelayTestStage());
+    writeIntProp(out, objectFirst, "relayStageCount", motor.getRelayTestStageCount());
+    out.write('}');
+
+    beginObjectProp(out, first, "runtime");
+    objectFirst = true;
+    writeUIntProp(out, objectFirst, "session", settings.getSessionRuntime());
+    writeUIntProp(out, objectFirst, "total", settings.getTotalRuntime());
+    out.write('}');
+
+    beginObjectProp(out, first, "scope");
+    objectFirst = true;
+    writeIntProp(out, objectFirst, "a", waveform.getSample(0));
+    writeIntProp(out, objectFirst, "b", waveform.getSample(1));
+    out.write('}');
+
+    beginObjectProp(out, first, "amp");
+    objectFirst = true;
+#if AMP_MONITOR_ENABLE
+    writeBoolProp(out, objectFirst, "enabled", true);
+    writeFloatProp(out, objectFirst, "temperatureC", ampMonitor.getTemperatureC());
+    writeBoolProp(out, objectFirst, "thermalOk", ampMonitor.isThermalOk());
+    writeStringProp(out, objectFirst, "state", ampMonitor.isThermalOk() ? "OK" : "TRIPPED");
+    writeFloatProp(out, objectFirst, "warnC", settings.get().ampTempWarnC);
+    writeFloatProp(out, objectFirst, "shutdownC", settings.get().ampTempShutdownC);
+#else
+    writeBoolProp(out, objectFirst, "enabled", false);
+#endif
+    out.write('}');
+
+    beginObjectProp(out, first, "network");
+    objectFirst = true;
+    writeBoolProp(out, objectFirst, "available", networkManager.isAvailable());
+    writeBoolProp(out, objectFirst, "enabled", networkManager.isEnabled());
+    writeStringProp(out, objectFirst, "status", networkManager.statusText());
+    writeStringProp(out, objectFirst, "ip", ip);
+    writeStringProp(out, objectFirst, "ssid", ssid);
+    writeIntProp(out, objectFirst, "rssi", networkManager.rssi());
+    writeIntProp(out, objectFirst, "clients", networkManager.connectedClientCount());
+    writeBoolProp(out, objectFirst, "hiddenSsid", cfg.hiddenSsid);
+    out.write('}');
+
+    beginObjectProp(out, first, "auth");
+    objectFirst = true;
+    writeBoolProp(out, objectFirst, "readOnlyMode", cfg.readOnlyMode);
+    writeBoolProp(out, objectFirst, "required", networkManager.isWebAccessLocked());
+    writeBoolProp(out, objectFirst, "unlocked", hasWriteAccess());
+    out.write('}');
+
+    out.write('}');
+}
+
 void WebInterface::handleStatus() {
     if (rejectOpenSetupAccess()) return;
+
+    _server.sendHeader("Cache-Control", "no-store");
+    if (_server.chunkedResponseModeStart(200, PSTR("application/json"))) {
+        ServerBufferedPrint out(_server);
+        streamStatus(out);
+        out.flush();
+        _server.chunkedResponseFinalize();
+        return;
+    }
 
     JsonDocument doc;
     populateStatus(doc);
@@ -959,18 +1454,29 @@ void WebInterface::handleStatus() {
 void WebInterface::handleEventsGet() {
     if (rejectOpenSetupAccess()) return;
 
+    _server.sendHeader("Cache-Control", "no-store");
+    if (_server.chunkedResponseModeStart(200, PSTR("text/event-stream"))) {
+        _server.sendContent_P(PSTR("retry: 1000\n"));
+        _server.sendContent_P(PSTR("event: status\n"));
+        _server.sendContent_P(PSTR("data: "));
+        ServerBufferedPrint out(_server);
+        streamStatus(out);
+        out.flush();
+        _server.sendContent_P(PSTR("\n\n"));
+        _server.chunkedResponseFinalize();
+        return;
+    }
+
     JsonDocument doc;
     populateStatus(doc);
-    String payload;
-    serializeJson(doc, payload);
-    String out = "retry: 1000\n";
-    out += "event: status\n";
-    out += "data: ";
-    out += payload;
-    out += "\n\n";
-
-    _server.sendHeader("Cache-Control", "no-store");
-    _server.send(200, "text/event-stream", out);
+    const size_t prefixLength = 32;
+    _server.setContentLength(prefixLength + measureJson(doc) + 2);
+    _server.send(200, "text/event-stream", "", 0);
+    _server.sendContent_P(PSTR("retry: 1000\nevent: status\ndata: "));
+    ServerBufferedPrint out(_server);
+    serializeJson(doc, out);
+    out.flush();
+    _server.sendContent_P(PSTR("\n\n"));
 }
 
 void WebInterface::handleSettingsGet() {
@@ -1214,17 +1720,45 @@ void WebInterface::handleControl() {
 void WebInterface::handleNetworkGet() {
     JsonDocument doc;
     NetworkConfig& c = networkManager.getConfig();
+    char ip[18] = "";
+    char stationIp[18] = "";
+    char apIp[18] = "";
+    char mac[18] = "";
+    char staticIp[18];
+    char gateway[18];
+    char subnet[18];
+    char dns[18];
+    const char* ssid = c.ssid;
+
+    if (networkManager.isConnected()) {
+        formatIpAddress(WiFi.localIP(), stationIp, sizeof(stationIp));
+        strncpy(ip, stationIp, sizeof(ip));
+        ip[sizeof(ip) - 1] = 0;
+        ssid = WiFi.SSID().c_str();
+    }
+    if (networkManager.isApActive()) {
+        formatIpAddress(WiFi.softAPIP(), apIp, sizeof(apIp));
+        if (ip[0] == 0) strncpy(ip, apIp, sizeof(ip));
+        ip[sizeof(ip) - 1] = 0;
+        if (!networkManager.isConnected()) ssid = c.apSsid;
+    }
+    formatMacAddress(mac, sizeof(mac));
+    formatIpBytes(c.staticIp, staticIp, sizeof(staticIp));
+    formatIpBytes(c.gateway, gateway, sizeof(gateway));
+    formatIpBytes(c.subnet, subnet, sizeof(subnet));
+    formatIpBytes(c.dns, dns, sizeof(dns));
+
     doc["available"] = networkManager.isAvailable();
     doc["enabled"] = networkManager.isEnabled();
     doc["connected"] = networkManager.isConnected();
     doc["apActive"] = networkManager.isApActive();
     doc["status"] = networkManager.statusText();
-    doc["modeText"] = networkManager.modeText();
-    doc["ip"] = networkManager.ipText();
-    doc["stationIp"] = networkManager.stationIpText();
-    doc["apIp"] = networkManager.apIpText();
-    doc["ssid"] = networkManager.ssidText();
-    doc["mac"] = networkManager.macText();
+    doc["modeText"] = networkModeName(c.mode);
+    doc["ip"] = ip;
+    doc["stationIp"] = stationIp;
+    doc["apIp"] = apIp;
+    doc["ssid"] = ssid;
+    doc["mac"] = mac;
     doc["rssi"] = networkManager.rssi();
     doc["clients"] = networkManager.connectedClientCount();
 
@@ -1237,10 +1771,10 @@ void WebInterface::handleNetworkGet() {
     config["password"] = "";
     config["passwordSet"] = c.password[0] != 0;
     config["dhcp"] = c.dhcp;
-    config["staticIp"] = ipBytesToString(c.staticIp);
-    config["gateway"] = ipBytesToString(c.gateway);
-    config["subnet"] = ipBytesToString(c.subnet);
-    config["dns"] = ipBytesToString(c.dns);
+    config["staticIp"] = staticIp;
+    config["gateway"] = gateway;
+    config["subnet"] = subnet;
+    config["dns"] = dns;
     config["apFallback"] = c.apFallback;
     config["apSsid"] = c.apSsid;
     config["apPassword"] = "";
@@ -1372,17 +1906,36 @@ void WebInterface::handleDiagnosticsGet() {
     pins["Amp thermal OK"] = PIN_AMP_THERM_OK;
 
     JsonObject network = doc["network"].to<JsonObject>();
+    const NetworkConfig& cfg = networkManager.getConfig();
+    char ip[18] = "";
+    char stationIp[18] = "";
+    char apIp[18] = "";
+    char mac[18] = "";
+    const char* ssid = cfg.ssid;
+    if (networkManager.isConnected()) {
+        formatIpAddress(WiFi.localIP(), stationIp, sizeof(stationIp));
+        strncpy(ip, stationIp, sizeof(ip));
+        ip[sizeof(ip) - 1] = 0;
+        ssid = WiFi.SSID().c_str();
+    }
+    if (networkManager.isApActive()) {
+        formatIpAddress(WiFi.softAPIP(), apIp, sizeof(apIp));
+        if (ip[0] == 0) strncpy(ip, apIp, sizeof(ip));
+        ip[sizeof(ip) - 1] = 0;
+        if (!networkManager.isConnected()) ssid = cfg.apSsid;
+    }
+    formatMacAddress(mac, sizeof(mac));
     network["status"] = networkManager.statusText();
-    network["mode"] = networkManager.modeText();
-    network["ip"] = networkManager.ipText();
-    network["stationIp"] = networkManager.stationIpText();
-    network["apIp"] = networkManager.apIpText();
-    network["ssid"] = networkManager.ssidText();
-    network["mac"] = networkManager.macText();
+    network["mode"] = networkModeName(cfg.mode);
+    network["ip"] = ip;
+    network["stationIp"] = stationIp;
+    network["apIp"] = apIp;
+    network["ssid"] = ssid;
+    network["mac"] = mac;
     network["rssi"] = networkManager.rssi();
     network["clients"] = networkManager.connectedClientCount();
-    network["readOnlyMode"] = networkManager.getConfig().readOnlyMode;
-    network["hiddenSsid"] = networkManager.getConfig().hiddenSsid;
+    network["readOnlyMode"] = cfg.readOnlyMode;
+    network["hiddenSsid"] = cfg.hiddenSsid;
 
     JsonObject files = doc["files"].to<JsonObject>();
     files["settings"] = LittleFS.exists("/settings.bin");

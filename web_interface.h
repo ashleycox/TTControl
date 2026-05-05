@@ -31,17 +31,26 @@ private:
     bool _started;
     char _authToken[17];
     uint32_t _authExpiresMs;
+    char* _rawBody;
+    size_t _rawBodyLength;
+    size_t _rawBodyCapacity;
+    bool _rawBodyOverflow;
+    bool _rawBodyComplete;
 
     void setupRoutes();
     void sendJson(int code, JsonDocument& doc);
+    void sendStaticHtml(PGM_P content, size_t contentLength);
     void sendError(int code, const char* message);
     bool parseBody(JsonDocument& doc);
+    void handleRawBody();
+    void releaseRawBody();
     bool isOpenSetupRequest();
     bool rejectOpenSetupAccess();
     bool hasWriteAccess();
     bool requireWriteAccess();
     void clearAuthToken();
     void issueAuthToken();
+    void streamStatus(Print& out);
     void populateStatus(JsonDocument& doc);
 
     void handleRoot();
