@@ -251,7 +251,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Optional Enable:** Optional, enabled or disabled by compile-time configuration flags.
 - **Interactive CLI:** Full command-line interface for control and configuration.
 - **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, and diagnostics.
-- **Serial Wi-Fi Setup:** Wi-Fi builds add `wifi wizard` for guided Serial Monitor network setup, `wifi scan` for nearby SSIDs, `wifi connect <ssid> [password]` for quick DHCP station setup, and `wifi set ...` commands for hostname, mode, DHCP/static IP, setup AP, fallback, and web access options.
+- **Serial Wi-Fi Setup:** Wi-Fi builds add `wifi wizard` for guided Serial Monitor network setup, `wifi scan` for nearby SSIDs, `wifi connect <ssid> [password]` for quick DHCP station setup, and `wifi set ...` commands for hostname, mode, hidden SSIDs, DHCP/static IP, setup AP, fallback, and web access options.
 - **Diagnostics:** Serial commands include `brake test start`, `brake test stop`, and `relay test <stage|off>` for bench checks.
 - **JSON Preset Export/Import:** Advanced configuration sharing.
   - `export preset <1-5>`: Dumps the entire layout of the requested preset, along with all global constraints and brake configurations, into a single minified JSON string.
@@ -265,9 +265,10 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Automatic Wi-Fi Build Detection:** `NETWORK_ENABLE` defaults to `1` only when the selected Arduino-Pico board target defines `PICO_CYW43_SUPPORTED`. Non-Wi-Fi builds compile the network and web modules out.
 - **Default Setup Access Point:** Wi-Fi-capable builds start in open setup access point mode by default using SSID `TTControl-Setup`, so the network setup UI can be reached before any home network credentials are entered.
 - **Setup-Only Safety:** When reached through an open setup AP, the hosted server only serves Wi-Fi configuration pages and network APIs. Motor controls, full settings, presets, and error logs are blocked until the device is reached through the configured Wi-Fi network, or through a protected setup access point.
-- **Guided Setup Wizard:** The open setup access point serves a network-only wizard for Wi-Fi mode, SSID/password, DHCP/static addressing, fallback AP name/password, and AP channel. Leaving the setup AP password blank creates an open setup network.
-- **Serial Setup Wizard:** The Serial Monitor can configure the same network storage with `wifi wizard`, including Wi-Fi scanning, station credentials, DHCP/static addressing, hostname, fallback setup AP settings, and immediate save/reconnect.
-- **Network Menu:** The OLED menu exposes Wi-Fi enable/disable, setup AP/station mode, hostname, station SSID/password, DHCP, AP fallback, AP SSID/password, AP channel, read-only guest mode, web PIN editing/reset, saved web home page, apply/reconnect, and setup AP actions.
+- **Guided Setup Wizard:** The open setup access point serves a network-only wizard for Wi-Fi mode, SSID/password, hidden SSID selection, DHCP/static addressing, fallback AP name/password, and AP channel. Leaving the setup AP password blank creates an open setup network.
+- **Serial Setup Wizard:** The Serial Monitor can configure the same network storage with `wifi wizard`, including Wi-Fi scanning, station credentials, hidden SSID selection, DHCP/static addressing, hostname, fallback setup AP settings, and immediate save/reconnect.
+- **Network Menu:** The OLED menu exposes Wi-Fi enable/disable, setup AP/station mode, hostname, station SSID/password, hidden SSID selection, DHCP, AP fallback, AP SSID/password, AP channel, read-only guest mode, web PIN editing/reset, saved web home page, apply/reconnect, and setup AP actions.
+- **Credential Characters:** Browser, serial, and OLED network entry support printable special characters in SSIDs and passwords, including `@`, `/`, `!`, `#`, `$`, and `£`. The OLED text editor includes a shift option for uppercase entry.
 - **Hosted Web App:** When the device has a station connection or setup AP active, it hosts a local browser interface on port 80.
 - **User-Selectable Home Page:** The device saves which page opens first, including Dashboard, Control, Settings, Calibrate, Network, Presets, Bench, Diagnostics, or Errors. The saved home page applies to any browser that opens the device UI.
 - **Dashboard:** The browser dashboard mirrors the supported display modes: Standard, Stats, Dim, and Scope, using live status data from the firmware. The Standard, Stats, and Scope views include a live telemetry chart for frequency, pitch, and amplifier temperature when available.
@@ -421,7 +422,8 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `wifi wizard` | Start guided Serial Monitor network setup |
 | `wifi scan` | Scan nearby Wi-Fi networks |
 | `wifi connect <ssid> [password]` | Save station credentials, enable Station + setup AP mode, use DHCP, and reconnect |
-| `wifi set <key> <value>` | Stage an individual network setting such as mode, hostname, SSID, DHCP, static IP, fallback, setup AP, web PIN, or read-only mode |
+| `wifi set hidden <on\|off>` | Mark the configured station SSID as hidden or visible |
+| `wifi set <key> <value>` | Stage an individual network setting such as mode, hostname, SSID, hidden SSID flag, DHCP, static IP, fallback, setup AP, web PIN, or read-only mode |
 | `wifi clear password\|ap_password\|ssid` | Clear saved station password, setup AP password, or station SSID |
 | `wifi apply` | Save staged network settings and reconnect |
 | `wifi reset` | Restore network defaults and reconnect |
@@ -570,6 +572,7 @@ When `AMP_MONITOR_ENABLE` is compiled in, amplifier monitoring runs automaticall
 - **Mode:** Select Setup AP, Station, or Station plus setup AP.
 - **Host:** mDNS/DHCP hostname used by the device.
 - **SSID:** Station network SSID.
+- **Hidden SSID:** Connect to a network that does not advertise its name.
 - **Pass:** Station network password.
 - **DHCP:** Use DHCP for station networking.
 - **AP Fallback:** Start the setup AP if station connection fails.
@@ -610,6 +613,7 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Waveform** | `MAX_OUTPUT_FREQUENCY_HZ` | Maximum generated sine frequency. | `1500.0` | Used by menus, validation, serial commands, and waveform output. |
 | **Presets** | `MAX_PRESET_SLOTS` | Defines the maximum number of user-configurable presets. | `5` | Used to size the data structure for presets. |
 | **Network** | `NETWORK_ENABLE` | Enables Wi-Fi, local web server, network menu, and web settings UI. | Auto: `1` on `PICO_CYW43_SUPPORTED`, otherwise `0` | Can be overridden at compile time. |
+| **Network** | `NETWORK_CONFIG_VERSION` | Tag for network settings schema. | `4` | Used to migrate `/network.bin` when Wi-Fi settings change. |
 | **Network** | `NETWORK_WEB_PIN_MAX` | Maximum web unlock PIN length. | `8` | Web PINs shorter than 4 characters are rejected by the browser/API. |
 | **Network** | `NETWORK_DEFAULT_HOSTNAME` | Default network hostname. | `"ttcontrol"` | Stored separately from motor settings in `/network.bin`. |
 | **Network** | `NETWORK_DEFAULT_AP_SSID` | Default setup access point SSID. | `"TTControl-Setup"` | Used on first boot of Wi-Fi builds. |

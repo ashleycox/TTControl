@@ -264,11 +264,42 @@ void MenuBool::getValueString(char* buffer, size_t size) const {
 }
 
 // --- MenuText (String Editor) ---
+static const char MENU_TEXT_SHIFT_TOKEN = 1;
+static const char MENU_TEXT_POUND_TOKEN = 2;
+static const char MENU_TEXT_POUND_UTF8[] = "\xC2\xA3";
+static const char MENU_TEXT_LOWER_CHARSET[] =
+    "\x01"
+    " abcdefghijklmnopqrstuvwxyz0123456789"
+    "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+    "\x02";
+static const char MENU_TEXT_UPPER_CHARSET[] =
+    "\x01"
+    " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+    "\x02";
+
+static const char* menuTextCharset(bool uppercase) {
+    return uppercase ? MENU_TEXT_UPPER_CHARSET : MENU_TEXT_LOWER_CHARSET;
+}
+
+static void appendMenuTextDisplayChar(char c, char* buffer, size_t size, size_t& out) {
+    if (!buffer || out >= size) return;
+
+    if (c == MENU_TEXT_SHIFT_TOKEN) {
+        const char* text = "^";
+        while (*text && out + 1 < size) buffer[out++] = *text++;
+    } else if (c == MENU_TEXT_POUND_TOKEN) {
+        const char* text = MENU_TEXT_POUND_UTF8;
+        while (*text && out + 1 < size) buffer[out++] = *text++;
+    } else if ((uint8_t)c >= 32 && out + 1 < size) {
+        buffer[out++] = c;
+    }
+}
+
 MenuText::MenuText(const char* label, char* target, size_t maxLength)
-    : MenuItem(label), _target(target), _maxLength(maxLength), _editing(false), _cursorPos(0) {
+    : MenuItem(label), _target(target), _maxLength(maxLength), _editing(false), _uppercase(false), _cursorPos(0) {
     _temp = new char[maxLength + 1];
-    strncpy(_temp, target, maxLength);
-    _temp[maxLength] = 0;
+    loadTargetIntoTemp();
 }
 
 MenuText::~MenuText() {
@@ -279,17 +310,25 @@ void MenuText::onSelect(MenuPage*& currentPage) {
     if (!_editing) {
         // Enter Edit Mode
         _editing = true;
-        strncpy(_temp, _target, _maxLength);
-        _temp[_maxLength] = 0;
+        _uppercase = false;
+        loadTargetIntoTemp();
         _cursorPos = 0;
     } else {
+        if (_temp[_cursorPos] == MENU_TEXT_SHIFT_TOKEN) {
+            _uppercase = !_uppercase;
+            _temp[_cursorPos] = _uppercase ? 'A' : 'a';
+            if (_cursorPos == strlen(_temp) && _cursorPos < _maxLength) {
+                _temp[_cursorPos + 1] = 0;
+            }
+            return;
+        }
+
         // Advance Cursor or Save
         if (_cursorPos < strlen(_temp) && _cursorPos < _maxLength - 1) {
             _cursorPos++;
         } else {
             // Save and Exit
-            strncpy(_target, _temp, _maxLength);
-            _target[_maxLength] = 0;
+            saveTempToTarget();
             _editing = false;
         }
     }
@@ -297,34 +336,109 @@ void MenuText::onSelect(MenuPage*& currentPage) {
 
 void MenuText::onInput(int delta) {
     if (_editing) {
-        char c = _temp[_cursorPos];
-        // Keep this broad enough for Wi-Fi credentials while still encoder-friendly.
+        size_t tempLen = strlen(_temp);
+        if (_cursorPos > tempLen) _cursorPos = tempLen;
+        char c = (_cursorPos < tempLen) ? _temp[_cursorPos] : ' ';
         
         // Find current index in our charset
-        const char* charset = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_@.#$/+!?&*";
-        const int len = strlen(charset);
+        const char* charset = menuTextCharset(_uppercase);
+        const int charsetLen = strlen(charset);
         int idx = 0;
-        for (int i=0; i<len; i++) {
+        for (int i=0; i<charsetLen; i++) {
             if (charset[i] == c) { idx = i; break; }
         }
         
         idx += delta;
-        while (idx < 0) idx += len;
-        while (idx >= len) idx -= len;
+        while (idx < 0) idx += charsetLen;
+        while (idx >= charsetLen) idx -= charsetLen;
         
         _temp[_cursorPos] = charset[idx];
         
         // If we just changed the null terminator (end of string), extend string
-        if (_cursorPos == strlen(_temp)) {
+        if (_cursorPos == tempLen && _cursorPos < _maxLength) {
             _temp[_cursorPos + 1] = 0;
         }
     }
 }
 
 void MenuText::getValueString(char* buffer, size_t size) const {
+    if (!buffer || size == 0) return;
+
     if (_editing) {
-        snprintf(buffer, size, "%s", _temp);
+        if (_temp[_cursorPos] == MENU_TEXT_SHIFT_TOKEN) {
+            snprintf(buffer, size, "%s Shift", _uppercase ? "U" : "L");
+            return;
+        }
+
+        size_t out = 0;
+        if (out + 1 < size) buffer[out++] = _uppercase ? 'U' : 'L';
+        if (out + 1 < size) buffer[out++] = ':';
+        for (size_t i = 0; _temp[i] && out + 1 < size; i++) {
+            appendMenuTextDisplayChar(_temp[i], buffer, size, out);
+        }
+        buffer[out] = 0;
     } else {
         snprintf(buffer, size, "%s", _target);
     }
+}
+
+bool MenuText::isDirty() const {
+    size_t targetIndex = 0;
+    size_t tempIndex = 0;
+
+    while (_temp[tempIndex] != 0) {
+        char c = _temp[tempIndex++];
+        if (c == MENU_TEXT_SHIFT_TOKEN) continue;
+
+        if (c == MENU_TEXT_POUND_TOKEN) {
+            if ((uint8_t)_target[targetIndex] == 0xC2 &&
+                (uint8_t)_target[targetIndex + 1] == 0xA3) {
+                targetIndex += 2;
+                continue;
+            }
+            if ((uint8_t)_target[targetIndex] == 0xA3) {
+                targetIndex++;
+                continue;
+            }
+            return true;
+        }
+
+        if (_target[targetIndex++] != c) return true;
+    }
+
+    return _target[targetIndex] != 0;
+}
+
+void MenuText::loadTargetIntoTemp() {
+    size_t out = 0;
+    for (size_t i = 0; _target && _target[i] && out < _maxLength; i++) {
+        uint8_t c = (uint8_t)_target[i];
+        if (c == 0xC2 && (uint8_t)_target[i + 1] == 0xA3) {
+            _temp[out++] = MENU_TEXT_POUND_TOKEN;
+            i++;
+        } else if (c == 0xA3) {
+            _temp[out++] = MENU_TEXT_POUND_TOKEN;
+        } else {
+            _temp[out++] = (char)c;
+        }
+    }
+    _temp[out] = 0;
+}
+
+void MenuText::saveTempToTarget() {
+    size_t out = 0;
+    for (size_t i = 0; _temp[i] && out < _maxLength; i++) {
+        char c = _temp[i];
+        if (c == MENU_TEXT_SHIFT_TOKEN) continue;
+
+        if (c == MENU_TEXT_POUND_TOKEN) {
+            if (out + 2 > _maxLength) break;
+            _target[out++] = MENU_TEXT_POUND_UTF8[0];
+            _target[out++] = MENU_TEXT_POUND_UTF8[1];
+        } else {
+            _target[out++] = c;
+        }
+    }
+    _target[out] = 0;
+    loadTargetIntoTemp();
 }

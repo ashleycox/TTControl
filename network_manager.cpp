@@ -256,6 +256,7 @@ void NetworkManager::setDefaults() {
     _config.apChannel = NETWORK_DEFAULT_AP_CHANNEL;
     _config.readOnlyMode = false;
     _config.webHomePage = WEB_HOME_DASHBOARD;
+    _config.hiddenSsid = false;
     copyBounded(_config.hostname, sizeof(_config.hostname), NETWORK_DEFAULT_HOSTNAME);
     copyBounded(_config.apSsid, sizeof(_config.apSsid), NETWORK_DEFAULT_AP_SSID);
     copyBounded(_config.apPassword, sizeof(_config.apPassword), NETWORK_DEFAULT_AP_PASSWORD);
@@ -299,6 +300,10 @@ void NetworkManager::load() {
         migrated = true;
     } else if (loaded.version == 2 && readSize >= offsetof(NetworkConfig, webHomePage)) {
         loaded.webHomePage = WEB_HOME_DASHBOARD;
+        loaded.version = NETWORK_CONFIG_VERSION;
+        migrated = true;
+    } else if (loaded.version == 3 && readSize >= offsetof(NetworkConfig, hiddenSsid)) {
+        loaded.hiddenSsid = false;
         loaded.version = NETWORK_CONFIG_VERSION;
         migrated = true;
     } else if (loaded.version != NETWORK_CONFIG_VERSION || readSize != sizeof(NetworkConfig)) {
@@ -375,7 +380,7 @@ void NetworkManager::startStation() {
     _staStarted = true;
     _connectStartMs = millis();
     _lastReconnectMs = _connectStartMs;
-    setStatus("Connecting");
+    setStatus(_config.hiddenSsid ? "Connecting hidden" : "Connecting");
 #endif
 }
 

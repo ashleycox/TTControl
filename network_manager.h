@@ -56,6 +56,7 @@ struct NetworkConfig {
     bool readOnlyMode;
     char webPin[NETWORK_WEB_PIN_MAX + 1];
     uint8_t webHomePage;
+    bool hiddenSsid;
 };
 
 class NetworkManager {

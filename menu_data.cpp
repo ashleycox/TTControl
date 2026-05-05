@@ -377,6 +377,7 @@ void actionEnterNetwork() {
     pageNetwork->addItem(new MenuByte("Mode", &cfg.mode, NETWORK_MODE_AP, NETWORK_MODE_STA_AP, networkModeLabels, 3));
     pageNetwork->addItem(new MenuText("Host", cfg.hostname, NETWORK_HOSTNAME_MAX));
     pageNetwork->addItem(new MenuText("SSID", cfg.ssid, NETWORK_SSID_MAX));
+    pageNetwork->addItem(new MenuBool("Hidden SSID", &cfg.hiddenSsid));
     pageNetwork->addItem(new MenuText("Pass", cfg.password, NETWORK_PASSWORD_MAX));
     pageNetwork->addItem(new MenuBool("DHCP", &cfg.dhcp));
     pageNetwork->addItem(new MenuBool("AP Fallback", &cfg.apFallback));

@@ -229,14 +229,18 @@ public:
 
     bool isEditable() const override { return true; }
     bool isEditing() const override { return _editing; }
-    bool isDirty() const override { return strcmp(_target, _temp) != 0; }
+    bool isDirty() const override;
 
 private:
     char* _target;
     char* _temp;
     size_t _maxLength;
     bool _editing;
+    bool _uppercase;
     size_t _cursorPos;
+
+    void loadTargetIntoTemp();
+    void saveTempToTarget();
 };
 
 #endif // MENU_SYSTEM_H

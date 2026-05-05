@@ -234,6 +234,7 @@ enum WifiWizardStep : uint8_t {
     WIFI_WIZARD_SCAN_CHOICE,
     WIFI_WIZARD_SCAN_WAIT,
     WIFI_WIZARD_SSID,
+    WIFI_WIZARD_HIDDEN,
     WIFI_WIZARD_PASSWORD,
     WIFI_WIZARD_DHCP,
     WIFI_WIZARD_STATIC_IP,
@@ -277,6 +278,8 @@ static void printWifiConfigSummary(const NetworkConfig& cfg) {
     Serial.println(cfg.hostname);
     Serial.print("Station SSID: ");
     Serial.println(cfg.ssid[0] ? cfg.ssid : "(not set)");
+    Serial.print("Hidden SSID: ");
+    Serial.println(onOffText(cfg.hiddenSsid));
     Serial.print("Station password: ");
     Serial.println(cfg.password[0] ? "(saved)" : "(open/none)");
     Serial.print("DHCP: ");
@@ -377,6 +380,11 @@ static void promptWifiWizardStep() {
             Serial.println("Station password. Leave blank for an open network, or enter '-' to keep the saved password.");
             Serial.print("Password [");
             Serial.print(wifiWizardConfig.password[0] ? "saved" : "open");
+            Serial.println("]:");
+            break;
+        case WIFI_WIZARD_HIDDEN:
+            Serial.print("Is this a hidden SSID? [");
+            Serial.print(wifiWizardConfig.hiddenSsid ? "y" : "n");
             Serial.println("]:");
             break;
         case WIFI_WIZARD_DHCP:
@@ -647,6 +655,18 @@ static void handleWifiWizardInput(String input) {
                     promptWifiWizardStep();
                     return;
                 }
+                if (isNumber) wifiWizardConfig.hiddenSsid = false;
+            }
+            setWifiWizardStep(WIFI_WIZARD_HIDDEN);
+            break;
+        case WIFI_WIZARD_HIDDEN:
+            if (input.length() > 0) {
+                if (!parseBoolValue(input, parsedBool)) {
+                    Serial.println("Enter y or n.");
+                    promptWifiWizardStep();
+                    return;
+                }
+                wifiWizardConfig.hiddenSsid = parsedBool;
             }
             setWifiWizardStep(WIFI_WIZARD_PASSWORD);
             break;
@@ -1292,6 +1312,7 @@ static void printWifiHelp() {
     Serial.println("wifi set enabled <on|off>");
     Serial.println("wifi set mode <ap|sta|sta_ap>");
     Serial.println("wifi set ssid <ssid>");
+    Serial.println("wifi set hidden <on|off>");
     Serial.println("wifi set password <password>");
     Serial.println("wifi set hostname <name>");
     Serial.println("wifi set dhcp <on|off>");
@@ -1303,7 +1324,7 @@ static void printWifiHelp() {
     Serial.println("wifi clear password|ap_password|ssid");
     Serial.println("wifi apply - Save staged settings and reconnect");
     Serial.println("wifi reset - Restore network defaults and reconnect");
-    Serial.println("Use quotes for names or passwords with spaces.");
+    Serial.println("Printable special characters are accepted; use quotes for spaces.");
 }
 
 static void printWifiStatus() {
@@ -1325,6 +1346,8 @@ static void printWifiStatus() {
     Serial.println(networkManager.statusText());
     Serial.print("Station configured: ");
     Serial.println(cfg.ssid[0] ? cfg.ssid : "(none)");
+    Serial.print("Hidden SSID: ");
+    Serial.println(yesNoText(cfg.hiddenSsid));
     Serial.print("Active SSID: ");
     Serial.println(networkManager.ssidText().length() ? networkManager.ssidText() : "(none)");
     Serial.print("Connected: ");
@@ -1390,6 +1413,13 @@ static void handleWifiSetCommand(const std::vector<String>& args) {
         markWifiConfigUpdated();
     } else if (key == "ssid") {
         if (!copyConfigString(cfg.ssid, sizeof(cfg.ssid), args[2], "Station SSID")) return;
+        markWifiConfigUpdated();
+    } else if (key == "hidden" || key == "hidden_ssid") {
+        if (!parseBoolValue(args[2], parsedBool)) {
+            Serial.println("Use on/off, yes/no, or true/false.");
+            return;
+        }
+        cfg.hiddenSsid = parsedBool;
         markWifiConfigUpdated();
     } else if (key == "password") {
         if (!copyConfigString(cfg.password, sizeof(cfg.password), args[2], "Station password")) return;
@@ -1539,6 +1569,7 @@ static void handleWifiConnectCommand(const std::vector<String>& args) {
     cfg.mode = NETWORK_MODE_STA_AP;
     cfg.dhcp = true;
     cfg.apFallback = true;
+    cfg.hiddenSsid = false;
     if (cfg.hostname[0] == 0) {
         copyConfigString(cfg.hostname, sizeof(cfg.hostname), NETWORK_DEFAULT_HOSTNAME, "Hostname");
     }
