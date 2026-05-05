@@ -12,6 +12,7 @@
 #include "hal.h"
 #include "amp_monitor.h"
 #include "network_manager.h"
+#include "system_monitor.h"
 
 extern UserInterface ui;
 
@@ -99,6 +100,10 @@ static const char* networkModeName(uint8_t mode) {
     return "Setup AP";
 }
 
+static const char* networkStandbyModeName(uint8_t mode) {
+    return mode == NETWORK_STANDBY_ECO ? "Eco standby" : "Network standby";
+}
+
 static String ipBytesToString(const uint8_t bytes[4]) {
     String out;
     out.reserve(15);
@@ -141,6 +146,21 @@ static bool parseNetworkMode(String value, uint8_t& mode) {
     if (value == "2" || value == "sta_ap" || value == "station_ap" || value == "station_setup" ||
         value == "both") {
         mode = NETWORK_MODE_STA_AP;
+        return true;
+    }
+    return false;
+}
+
+static bool parseNetworkStandbyMode(String value, uint8_t& mode) {
+    value.trim();
+    value.toLowerCase();
+    value.replace("-", "_");
+    if (value == "0" || value == "network" || value == "network_standby") {
+        mode = NETWORK_STANDBY_NETWORK;
+        return true;
+    }
+    if (value == "1" || value == "eco" || value == "eco_standby") {
+        mode = NETWORK_STANDBY_ECO;
         return true;
     }
     return false;
@@ -274,6 +294,8 @@ static void printWifiConfigSummary(const NetworkConfig& cfg) {
     Serial.println(onOffText(cfg.enabled));
     Serial.print("Mode: ");
     Serial.println(networkModeName(cfg.mode));
+    Serial.print("Standby: ");
+    Serial.println(networkStandbyModeName(cfg.standbyMode));
     Serial.print("Hostname: ");
     Serial.println(cfg.hostname);
     Serial.print("Station SSID: ");
@@ -849,6 +871,21 @@ void initCLI() {
         [](String v) { settings.get().screensaverMode = (uint8_t)clampInt(v.toInt(), 0, 2); }
     });
 
+    registry.push_back({ "show_cpu",
+        []() { return String(settings.get().showCpuDashboard); },
+        [](String v) { settings.get().showCpuDashboard = (v == "1" || v == "true"); }
+    });
+
+    registry.push_back({ "show_memory",
+        []() { return String(settings.get().showMemoryDashboard); },
+        [](String v) { settings.get().showMemoryDashboard = (v == "1" || v == "true"); }
+    });
+
+    registry.push_back({ "show_flash",
+        []() { return String(settings.get().showFlashDashboard); },
+        [](String v) { settings.get().showFlashDashboard = (v == "1" || v == "true"); }
+    });
+
     registry.push_back({ "phase_mode",
         []() { return String(settings.get().phaseMode); },
         [](String v) {
@@ -1277,6 +1314,35 @@ void printStatus() {
         }
         Serial.println();
     }
+
+    SystemMetricsSnapshot metrics = systemMonitor.snapshot();
+    Serial.print("CPU: Core0 ");
+    Serial.print(metrics.core0LoadPercent, 0);
+    Serial.print("%, Waveform ");
+    Serial.print(metrics.core1LoadPercent, 0);
+    Serial.println("%");
+
+    Serial.print("Heap: ");
+    Serial.print(metrics.heapUsedBytes / 1024UL);
+    Serial.print("K used, ");
+    Serial.print(metrics.heapFreeBytes / 1024UL);
+    Serial.print("K free, ");
+    Serial.print(metrics.heapTotalBytes / 1024UL);
+    Serial.println("K total");
+
+    Serial.print("Flash: sketch ");
+    Serial.print(metrics.sketchUsedBytes / 1024UL);
+    Serial.print("K/");
+    Serial.print(metrics.sketchCapacityBytes / 1024UL);
+    Serial.print("K, FS ");
+    if (metrics.filesystemMounted) {
+        Serial.print(metrics.filesystemUsedBytes / 1024UL);
+        Serial.print("K/");
+        Serial.print(metrics.filesystemTotalBytes / 1024UL);
+        Serial.println("K");
+    } else {
+        Serial.println("not mounted");
+    }
     
     Serial.println("-------------------------");
 }
@@ -1311,6 +1377,7 @@ static void printWifiHelp() {
     Serial.println("wifi connect <ssid> [password] - Save station credentials and reconnect");
     Serial.println("wifi set enabled <on|off>");
     Serial.println("wifi set mode <ap|sta|sta_ap>");
+    Serial.println("wifi set standby <network|eco>");
     Serial.println("wifi set ssid <ssid>");
     Serial.println("wifi set hidden <on|off>");
     Serial.println("wifi set password <password>");
@@ -1342,8 +1409,12 @@ static void printWifiStatus() {
     Serial.println(onOffText(cfg.enabled));
     Serial.print("Mode: ");
     Serial.println(networkManager.modeText());
+    Serial.print("Standby: ");
+    Serial.println(networkStandbyModeName(cfg.standbyMode));
     Serial.print("Status: ");
     Serial.println(networkManager.statusText());
+    Serial.print("Eco standby suspended: ");
+    Serial.println(yesNoText(networkManager.isEcoStandbySuspended()));
     Serial.print("Station configured: ");
     Serial.println(cfg.ssid[0] ? cfg.ssid : "(none)");
     Serial.print("Hidden SSID: ");
@@ -1391,6 +1462,7 @@ static void handleWifiSetCommand(const std::vector<String>& args) {
     NetworkConfig& cfg = networkManager.getConfig();
     bool parsedBool = false;
     uint8_t parsedMode = NETWORK_MODE_AP;
+    uint8_t parsedStandbyMode = NETWORK_STANDBY_NETWORK;
     uint8_t parsedIp[4];
     uint8_t parsedGateway[4];
     uint8_t parsedSubnet[4];
@@ -1410,6 +1482,13 @@ static void handleWifiSetCommand(const std::vector<String>& args) {
         }
         cfg.mode = parsedMode;
         if (cfg.mode == NETWORK_MODE_STA_AP) cfg.apFallback = true;
+        markWifiConfigUpdated();
+    } else if (key == "standby" || key == "standby_mode") {
+        if (!parseNetworkStandbyMode(args[2], parsedStandbyMode)) {
+            Serial.println("Standby mode must be network or eco.");
+            return;
+        }
+        cfg.standbyMode = parsedStandbyMode;
         markWifiConfigUpdated();
     } else if (key == "ssid") {
         if (!copyConfigString(cfg.ssid, sizeof(cfg.ssid), args[2], "Station SSID")) return;

@@ -12,6 +12,7 @@
 #include "bitmaps.h"
 #include "hal.h" // Added HAL
 #include "waveform.h" // Added for Scope View
+#include "system_monitor.h"
 #include <Fonts/FreeSans12pt7b.h>
 
 static const char* dashboardStateLabel() {
@@ -26,6 +27,39 @@ static const char* dashboardStateLabel() {
         case STATE_STOPPING: return "BRAKE";
     }
     return "----";
+}
+
+static bool dashboardModeEnabled(int mode) {
+    switch (mode) {
+        case 4: return settings.get().showCpuDashboard;
+        case 5: return settings.get().showMemoryDashboard;
+        case 6: return settings.get().showFlashDashboard;
+        default: return true;
+    }
+}
+
+static int nextDashboardMode(int current, int direction) {
+    const int maxMode = 6;
+    for (int i = 0; i <= maxMode; i++) {
+        current += direction;
+        if (current > maxMode) current = 0;
+        if (current < 0) current = maxMode;
+        if (dashboardModeEnabled(current)) return current;
+    }
+    return 0;
+}
+
+static void drawMetricBar(int x, int y, int w, int h, uint32_t used, uint32_t total) {
+    display.drawRect(x, y, w, h, SSD1306_WHITE);
+    if (total == 0) return;
+    uint32_t fill = (used * (uint32_t)(w - 2)) / total;
+    if (fill > (uint32_t)(w - 2)) fill = w - 2;
+    display.fillRect(x + 1, y + 1, (int)fill, h - 2, SSD1306_WHITE);
+}
+
+static void printKilobytes(uint32_t bytes) {
+    display.print(bytes / 1024UL);
+    display.print("K");
 }
 
 UserInterface::UserInterface() {
@@ -400,9 +434,7 @@ void UserInterface::handleInput() {
         // 4. Rotate: Change Speed, or press+rotate to change dashboard mode
         if (delta != 0) {
             if (_input.isButtonDown()) {
-                _statusMode += (delta > 0) ? 1 : -1;
-                if (_statusMode > 3) _statusMode = 0;
-                if (_statusMode < 0) _statusMode = 3;
+                _statusMode = nextDashboardMode(_statusMode, delta > 0 ? 1 : -1);
             } else {
                 SpeedMode s = motor.getSpeed();
                 int currentIdx = (int)s;
@@ -593,6 +625,10 @@ void UserInterface::drawDashboard() {
     // --- Graphical Dashboard ---
     extern bool safeModeActive;
 
+    if (!dashboardModeEnabled(_statusMode)) {
+        _statusMode = nextDashboardMode(_statusMode, 1);
+    }
+
     // Mode 2: Dim / Minimal
     if (_statusMode == 2) {
         display.dim(true); // Low contrast
@@ -722,6 +758,86 @@ void UserInterface::drawDashboard() {
             display.fillRect(64+29, 2+29, 3, 3, SSD1306_WHITE);
         }
 
+        return;
+    }
+
+    // Mode 4: CPU load
+    if (_statusMode == 4) {
+        SystemMetricsSnapshot metrics = systemMonitor.snapshot();
+
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 20);
+        display.print("CPU Load");
+
+        display.setCursor(0, 34);
+        display.print("Core0 ");
+        display.print(metrics.core0LoadPercent, 0);
+        display.print("%");
+        drawMetricBar(62, 32, 58, 7, (uint32_t)metrics.core0LoadPercent, 100);
+
+        display.setCursor(0, 50);
+        display.print("Wave  ");
+        display.print(metrics.core1LoadPercent, 0);
+        display.print("%");
+        drawMetricBar(62, 48, 58, 7, (uint32_t)metrics.core1LoadPercent, 100);
+        return;
+    }
+
+    // Mode 5: Memory
+    if (_statusMode == 5) {
+        SystemMetricsSnapshot metrics = systemMonitor.snapshot();
+
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 20);
+        display.print("Memory");
+
+        display.setCursor(0, 34);
+        display.print("Heap U:");
+        printKilobytes(metrics.heapUsedBytes);
+        display.print(" F:");
+        printKilobytes(metrics.heapFreeBytes);
+        drawMetricBar(0, 43, 120, 6, metrics.heapUsedBytes, metrics.heapTotalBytes);
+
+        display.setCursor(0, 54);
+        if (metrics.psramTotalBytes > 0) {
+            display.print("PSRAM U:");
+            printKilobytes(metrics.psramUsedBytes);
+            display.print(" F:");
+            printKilobytes(metrics.psramFreeBytes);
+        } else {
+            display.print("Total ");
+            printKilobytes(metrics.heapTotalBytes);
+        }
+        return;
+    }
+
+    // Mode 6: Flash and filesystem
+    if (_statusMode == 6) {
+        SystemMetricsSnapshot metrics = systemMonitor.snapshot();
+
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 20);
+        display.print("Flash");
+
+        display.setCursor(0, 34);
+        display.print("Sketch ");
+        printKilobytes(metrics.sketchUsedBytes);
+        display.print("/");
+        printKilobytes(metrics.sketchCapacityBytes);
+        drawMetricBar(0, 43, 120, 6, metrics.sketchUsedBytes, metrics.sketchCapacityBytes);
+
+        display.setCursor(0, 54);
+        display.print("FS ");
+        if (metrics.filesystemMounted) {
+            printKilobytes(metrics.filesystemUsedBytes);
+            display.print("/");
+            printKilobytes(metrics.filesystemTotalBytes);
+        } else {
+            display.print("not mounted");
+        }
         return;
     }
 

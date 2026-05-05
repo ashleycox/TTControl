@@ -88,7 +88,7 @@ private:
     float _transitionProgress; // 0.0 to 1.0
     
     // Dashboard State
-    int _statusMode; // 0=Standard, 1=Stats, 2=Dim
+    int _statusMode; // 0=Standard, 1=Stats, 2=Dim, 3=Scope, 4=CPU, 5=Memory, 6=Flash
     
     // Smooth Scroll State
     MenuPage* _nextPage;

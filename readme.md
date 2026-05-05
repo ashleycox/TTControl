@@ -239,6 +239,9 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
   2. **Stats:** Tracking counters for total hardware run time and current session time.
   3. **Dim:** Auto-lowers contrast and shows only the speed target.
   4. **Oscilloscope (Scope):** real-time Lissajous diagnostic dashboard drawing X/Y (Phase A / Phase B) waveforms sampled directly from the Pico's DMA bus to visually verify sine tracking integrity and structural Phase Offset health.
+  5. **CPU:** Core 0 service load and Core 1 waveform generation load.
+  6. **Memory:** Heap usage/free space, plus PSRAM when present.
+  7. **Flash:** Sketch flash usage and LittleFS usage.
 - **Runtime Tracking:** Optional Runtime tracking to track session and total runtime. Useful for monitoring stylus usage or turntable maintenance schedules.
 - **Status Cycling:** Status display cycling (speed, frequency, phase mode, phase angles, runtime) with user settings to toggle the available statuses.
 - **Scrolling Messages:**
@@ -251,7 +254,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Optional Enable:** Optional, enabled or disabled by compile-time configuration flags.
 - **Interactive CLI:** Full command-line interface for control and configuration.
 - **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, and diagnostics.
-- **Serial Wi-Fi Setup:** Wi-Fi builds add `wifi wizard` for guided Serial Monitor network setup, `wifi scan` for nearby SSIDs, `wifi connect <ssid> [password]` for quick DHCP station setup, and `wifi set ...` commands for hostname, mode, hidden SSIDs, DHCP/static IP, setup AP, fallback, and web access options.
+- **Serial Wi-Fi Setup:** Wi-Fi builds add `wifi wizard` for guided Serial Monitor network setup, `wifi scan` for nearby SSIDs, `wifi connect <ssid> [password]` for quick DHCP station setup, and `wifi set ...` commands for hostname, mode, standby mode, hidden SSIDs, DHCP/static IP, setup AP, fallback, and web access options.
 - **Diagnostics:** Serial commands include `brake test start`, `brake test stop`, and `relay test <stage|off>` for bench checks.
 - **JSON Preset Export/Import:** Advanced configuration sharing.
   - `export preset <1-5>`: Dumps the entire layout of the requested preset, along with all global constraints and brake configurations, into a single minified JSON string.
@@ -267,14 +270,15 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Setup-Only Safety:** When reached through an open setup AP, the hosted server only serves Wi-Fi configuration pages and network APIs. Motor controls, full settings, presets, and error logs are blocked until the device is reached through the configured Wi-Fi network, or through a protected setup access point.
 - **Guided Setup Wizard:** The open setup access point serves a network-only wizard for Wi-Fi mode, SSID/password, hidden SSID selection, DHCP/static addressing, fallback AP name/password, and AP channel. Leaving the setup AP password blank creates an open setup network.
 - **Serial Setup Wizard:** The Serial Monitor can configure the same network storage with `wifi wizard`, including Wi-Fi scanning, station credentials, hidden SSID selection, DHCP/static addressing, hostname, fallback setup AP settings, and immediate save/reconnect.
-- **Network Menu:** The OLED menu exposes Wi-Fi enable/disable, setup AP/station mode, hostname, station SSID/password, hidden SSID selection, DHCP, AP fallback, AP SSID/password, AP channel, read-only guest mode, web PIN editing/reset, saved web home page, apply/reconnect, and setup AP actions.
+- **Network Menu:** The OLED menu exposes Wi-Fi enable/disable, setup AP/station mode, standby mode, hostname, station SSID/password, hidden SSID selection, DHCP, AP fallback, AP SSID/password, AP channel, read-only guest mode, web PIN editing/reset, saved web home page, apply/reconnect, and setup AP actions.
 - **Credential Characters:** Browser, serial, and OLED network entry support printable special characters in SSIDs and passwords, including `@`, `/`, `!`, `#`, `$`, and `£`. The OLED text editor includes a shift option for uppercase entry.
 - **Hosted Web App:** When the device has a station connection or setup AP active, it hosts a local browser interface on port 80.
 - **User-Selectable Home Page:** The device saves which page opens first, including Dashboard, Control, Settings, Calibrate, Network, Presets, Bench, Diagnostics, or Errors. The saved home page applies to any browser that opens the device UI.
-- **Dashboard:** The browser dashboard mirrors the supported display modes: Standard, Stats, Dim, and Scope, using live status data from the firmware. The Standard, Stats, and Scope views include a live telemetry chart for frequency, pitch, and amplifier temperature when available.
+- **Dashboard:** The browser dashboard mirrors the supported display modes: Standard, Stats, Dim, Scope, CPU, Memory, and Flash, using live status data from the firmware. The Standard, Stats, and Scope views include a live telemetry chart for frequency, pitch, and amplifier temperature when available.
 - **Web UI Theme Presets:** The browser UI includes System, Light, Dark, Calm, Workshop, and High Contrast theme presets, plus large controls and visible focus states.
 - **Polished Visual System:** The web UI uses stronger section identities, status color accents, compact button/tab badges, dashboard tiles, sticky navigation/search controls, and a mobile layout tuned for one-handed phone use.
 - **Sticky Safety Controls:** Emergency stop, stop, standby/wake, start, and speed buttons remain available in a sticky browser control bar. Emergency stop immediately exits relay test mode, disables waveform output, mutes relays, and stops the motor.
+- **Standby Networking:** Network standby keeps Wi-Fi available while the controller is in standby. Eco standby turns Wi-Fi off during standby and reconnects after a physical wake; the web Standby/Wake button can enter Eco standby but is disabled once the browser can no longer wake the device.
 - **Simple Control View:** A dedicated large-button control page exposes the day-to-day start/stop/standby/speed/pitch controls without the full settings surface.
 - **78 RPM Visibility:** Browser speed controls, bench speed controls, and calibration speed selectors hide 78 RPM while `Enable 78 RPM` is off. A stale 78 RPM browser action is rejected with a clear message.
 - **Complete Controls:** Browser controls include start, stop, emergency stop, standby/wake, speed switching, pitch reset/set, relay test, relay test off, runtime reset, factory reset, and API support for reboot.
@@ -402,7 +406,7 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `s` | Cycle speed |
 | `t` | Toggle standby |
 | `p` | Reset pitch |
-| `status` / `i` | Show current status; includes amplifier temperature and thermal state when `AMP_MONITOR_ENABLE` is enabled |
+| `status` / `i` | Show current status; includes CPU load, heap use, flash/filesystem use, and amplifier temperature/thermal state when enabled |
 | `list` | **List all available settings and values** |
 | `set <key> <val>` | Set a parameter value |
 | `get <key>` | Get a parameter value |
@@ -422,8 +426,9 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `wifi wizard` | Start guided Serial Monitor network setup |
 | `wifi scan` | Scan nearby Wi-Fi networks |
 | `wifi connect <ssid> [password]` | Save station credentials, enable Station + setup AP mode, use DHCP, and reconnect |
+| `wifi set standby <network\|eco>` | Select Network standby or Eco standby |
 | `wifi set hidden <on\|off>` | Mark the configured station SSID as hidden or visible |
-| `wifi set <key> <value>` | Stage an individual network setting such as mode, hostname, SSID, hidden SSID flag, DHCP, static IP, fallback, setup AP, web PIN, or read-only mode |
+| `wifi set <key> <value>` | Stage an individual network setting such as mode, standby mode, hostname, SSID, hidden SSID flag, DHCP, static IP, fallback, setup AP, web PIN, or read-only mode |
 | `wifi clear password\|ap_password\|ssid` | Clear saved station password, setup AP password, or station SSID |
 | `wifi apply` | Save staged network settings and reconnect |
 | `wifi reset` | Restore network defaults and reconnect |
@@ -545,6 +550,9 @@ The menu structure is designed for a data-driven implementation.
 - **Saver Mode:** Select screensaver animation (0=Bounce, 1=Matrix, 2=Lissajous).
 - **Auto Dim:** Auto-dim delay (min).
 - **Show Runtime:** Toggle runtime display on dashboard.
+- **Show CPU:** Toggle the CPU load dashboard option.
+- **Show Memory:** Toggle the memory usage dashboard option.
+- **Show Flash:** Toggle the flash/filesystem dashboard option.
 - **Err Display:** Toggle on-screen error messages.
 - **Err Dur:** Duration of error messages (s).
 
@@ -576,6 +584,7 @@ When `AMP_MONITOR_ENABLE` is compiled in, amplifier monitoring runs automaticall
 - **Pass:** Station network password.
 - **DHCP:** Use DHCP for station networking.
 - **AP Fallback:** Start the setup AP if station connection fails.
+- **Standby:** Select Network standby, which keeps Wi-Fi enabled in standby, or Eco standby, which turns Wi-Fi off in standby and reconnects after physical wake.
 - **AP SSID:** Setup access point SSID.
 - **AP Pass:** Setup access point password.
 - **AP Channel:** Setup access point channel.

@@ -39,6 +39,7 @@ static const char* const saverModeLabels[] = {"Bounce", "Matrix", "Liss"};
 static const char* const sleepDelayLabels[] = {"Off", "10s", "20s", "30s", "1m", "5m", "10m"};
 static const char* const bootSpeedLabels[] = {"33", "45", "78", "Last"};
 static const char* const networkModeLabels[] = {"Setup AP", "Station", "STA+AP"};
+static const char* const networkStandbyLabels[] = {"Network", "Eco"};
 static const char* const webHomeLabels[] = {"Dash", "Control", "Settings", "Cal", "Network", "Presets", "Bench", "Diag", "Errors"};
 
 #if ENABLE_STANDBY && ENABLE_MUTE_RELAYS && ENABLE_DPDT_RELAYS
@@ -381,6 +382,7 @@ void actionEnterNetwork() {
     pageNetwork->addItem(new MenuText("Pass", cfg.password, NETWORK_PASSWORD_MAX));
     pageNetwork->addItem(new MenuBool("DHCP", &cfg.dhcp));
     pageNetwork->addItem(new MenuBool("AP Fallback", &cfg.apFallback));
+    pageNetwork->addItem(new MenuByte("Standby", &cfg.standbyMode, NETWORK_STANDBY_NETWORK, NETWORK_STANDBY_ECO, networkStandbyLabels, 2));
     pageNetwork->addItem(new MenuText("AP SSID", cfg.apSsid, NETWORK_SSID_MAX));
     pageNetwork->addItem(new MenuText("AP Pass", cfg.apPassword, NETWORK_PASSWORD_MAX));
     pageNetwork->addItem(new MenuByte("AP Channel", &cfg.apChannel, 1, 13));
@@ -535,6 +537,9 @@ void buildMenuSystem() {
     pageDisplay->addItem(saverMode);
     pageDisplay->addItem(new MenuByte("Auto Dim", &settings.get().autoDimDelay, 0, 60));
     pageDisplay->addItem(new MenuBool("Show Runtime", &settings.get().showRuntime));
+    pageDisplay->addItem(new MenuBool("Show CPU", &settings.get().showCpuDashboard));
+    pageDisplay->addItem(new MenuBool("Show Memory", &settings.get().showMemoryDashboard));
+    pageDisplay->addItem(new MenuBool("Show Flash", &settings.get().showFlashDashboard));
     pageDisplay->addItem(new MenuBool("Err Display", &settings.get().errorDisplayEnabled));
     MenuItem* errorDuration = new MenuByte("Err Dur", &settings.get().errorDisplayDuration, 1, 60);
     errorDuration->setVisibleWhen([](){ return settings.get().errorDisplayEnabled; });

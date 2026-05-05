@@ -7,6 +7,7 @@
  */
 
 #include "network_manager.h"
+#include "globals.h"
 #include "settings.h"
 #include <LittleFS.h>
 #include <stddef.h>
@@ -46,6 +47,7 @@ NetworkManager::NetworkManager()
     : _loaded(false),
       _apActive(false),
       _staStarted(false),
+      _ecoStandbySuspended(false),
       _connectStartMs(0),
       _lastReconnectMs(0) {
     setDefaults();
@@ -55,7 +57,12 @@ void NetworkManager::begin() {
     load();
 #if NETWORK_ENABLE
     if (_config.enabled) {
-        start();
+        if (shouldSuspendForStandby()) {
+            _ecoStandbySuspended = true;
+            setStatus("Eco standby");
+        } else {
+            start();
+        }
     } else {
         setStatus("Disabled");
     }
@@ -66,6 +73,24 @@ void NetworkManager::begin() {
 
 void NetworkManager::update() {
 #if NETWORK_ENABLE
+    if (_config.enabled && shouldSuspendForStandby()) {
+        if (!_ecoStandbySuspended || _apActive || _staStarted) {
+            stop();
+            _ecoStandbySuspended = true;
+        }
+        setStatus("Eco standby");
+        return;
+    }
+
+    if (_ecoStandbySuspended) {
+        _ecoStandbySuspended = false;
+        if (_config.enabled) {
+            start();
+        } else {
+            setStatus("Disabled");
+        }
+    }
+
     if (!_config.enabled) return;
 
     if (_apActive) {
@@ -93,9 +118,15 @@ void NetworkManager::update() {
 
 void NetworkManager::restart() {
     stop();
+    _ecoStandbySuspended = false;
 #if NETWORK_ENABLE
     if (_config.enabled) {
-        start();
+        if (shouldSuspendForStandby()) {
+            _ecoStandbySuspended = true;
+            setStatus("Eco standby");
+        } else {
+            start();
+        }
     } else {
         setStatus("Disabled");
     }
@@ -159,6 +190,10 @@ bool NetworkManager::isSetupApOpen() const {
 
 bool NetworkManager::isServerAvailable() const {
     return isConnected() || _apActive;
+}
+
+bool NetworkManager::isEcoStandbySuspended() const {
+    return _ecoStandbySuspended;
 }
 
 bool NetworkManager::hasStationCredentials() const {
@@ -257,6 +292,7 @@ void NetworkManager::setDefaults() {
     _config.readOnlyMode = false;
     _config.webHomePage = WEB_HOME_DASHBOARD;
     _config.hiddenSsid = false;
+    _config.standbyMode = NETWORK_STANDBY_NETWORK;
     copyBounded(_config.hostname, sizeof(_config.hostname), NETWORK_DEFAULT_HOSTNAME);
     copyBounded(_config.apSsid, sizeof(_config.apSsid), NETWORK_DEFAULT_AP_SSID);
     copyBounded(_config.apPassword, sizeof(_config.apPassword), NETWORK_DEFAULT_AP_PASSWORD);
@@ -296,16 +332,26 @@ void NetworkManager::load() {
         loaded.readOnlyMode = false;
         copyBounded(loaded.webPin, sizeof(loaded.webPin), NETWORK_DEFAULT_WEB_PIN);
         loaded.webHomePage = WEB_HOME_DASHBOARD;
+        loaded.hiddenSsid = false;
+        loaded.standbyMode = NETWORK_STANDBY_NETWORK;
         loaded.version = NETWORK_CONFIG_VERSION;
         migrated = true;
     } else if (loaded.version == 2 && readSize >= offsetof(NetworkConfig, webHomePage)) {
         loaded.webHomePage = WEB_HOME_DASHBOARD;
+        loaded.hiddenSsid = false;
+        loaded.standbyMode = NETWORK_STANDBY_NETWORK;
         loaded.version = NETWORK_CONFIG_VERSION;
         migrated = true;
     } else if (loaded.version == 3 && readSize >= offsetof(NetworkConfig, hiddenSsid)) {
         loaded.hiddenSsid = false;
+        loaded.standbyMode = NETWORK_STANDBY_NETWORK;
         loaded.version = NETWORK_CONFIG_VERSION;
         migrated = true;
+    } else if (loaded.version == NETWORK_CONFIG_VERSION && readSize >= offsetof(NetworkConfig, standbyMode)) {
+        if (readSize < offsetof(NetworkConfig, standbyMode) + sizeof(loaded.standbyMode)) {
+            loaded.standbyMode = NETWORK_STANDBY_NETWORK;
+            migrated = true;
+        }
     } else if (loaded.version != NETWORK_CONFIG_VERSION || readSize != sizeof(NetworkConfig)) {
         setDefaults();
         return;
@@ -320,6 +366,7 @@ void NetworkManager::load() {
     _config.webPin[NETWORK_WEB_PIN_MAX] = 0;
 
     if (_config.mode > NETWORK_MODE_STA_AP) _config.mode = NETWORK_MODE_AP;
+    if (_config.standbyMode > NETWORK_STANDBY_ECO) _config.standbyMode = NETWORK_STANDBY_NETWORK;
     if (_config.apChannel < 1 || _config.apChannel > 13) _config.apChannel = NETWORK_DEFAULT_AP_CHANNEL;
     if (_config.webHomePage >= WEB_HOME_PAGE_COUNT) _config.webHomePage = WEB_HOME_DASHBOARD;
     if (_config.hostname[0] == 0) copyBounded(_config.hostname, sizeof(_config.hostname), NETWORK_DEFAULT_HOSTNAME);
@@ -412,6 +459,11 @@ void NetworkManager::stopAccessPoint() {
     }
 #endif
     _apActive = false;
+}
+
+bool NetworkManager::shouldSuspendForStandby() const {
+    return _config.standbyMode == NETWORK_STANDBY_ECO &&
+           currentMotorState == STATE_STANDBY;
 }
 
 void NetworkManager::setStatus(const char* text) {

@@ -24,6 +24,7 @@
 #include "amp_monitor.h"
 #include "network_manager.h"
 #include "web_interface.h"
+#include "system_monitor.h"
 
 // --- Global Objects ---
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
@@ -60,6 +61,7 @@ void setup() {
 
     // Initialize Settings (Mounts LittleFS and loads config)
     settings.begin();
+    systemMonitor.begin();
 
     // Initialize Display (I2C)
     Wire.setSDA(PIN_I2C0_SDA);
@@ -97,6 +99,8 @@ void setup() {
 }
 
 void loop() {
+    systemMonitor.beginCore0Loop();
+
     // 1. Update User Interface (Poll inputs, draw screen)
     ui.update();
     
@@ -114,6 +118,8 @@ void loop() {
     // 5. Service network and web UI without blocking motor control.
     networkManager.update();
     webInterface.update();
+    systemMonitor.update();
+    systemMonitor.endCore0Loop();
     
     // 6. Feed Watchdog only while Core 1 is actively servicing waveform work.
     uint32_t now = hal.getMillis();

@@ -602,6 +602,9 @@ void Settings::setDefaults() {
     _data.errorDisplayDuration = 10;
 
     _data.showRuntime = true;
+    _data.showCpuDashboard = true;
+    _data.showMemoryDashboard = true;
+    _data.showFlashDashboard = true;
     _data.pitchResetOnStop = true;
     _data.currentSpeed = (SpeedMode)DEFAULT_SPEED_INDEX;
 

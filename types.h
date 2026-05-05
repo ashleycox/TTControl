@@ -161,6 +161,11 @@ struct GlobalSettings {
     // Amplifier Monitor
     float ampTempWarnC;
     float ampTempShutdownC;
+
+    // Dashboard resource pages
+    bool showCpuDashboard;
+    bool showMemoryDashboard;
+    bool showFlashDashboard;
 };
 
 #endif // TYPES_H

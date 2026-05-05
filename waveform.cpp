@@ -8,6 +8,7 @@
 
 #include "waveform.h"
 #include "hal.h"
+#include "system_monitor.h"
 #include <math.h>
 
 // Global pointer for ISR access
@@ -225,12 +226,16 @@ void __not_in_flash_func(WaveformGenerator::update)() {
     
     if (chan0Busy && lastFilledBuffer != 1) {
         // Chan 0 is reading Buffer 0, so Buffer 1 is free to fill
+        uint32_t startUs = time_us_32();
         fillBuffer(1);
+        systemMonitor.recordCore1WorkMicros(time_us_32() - startUs);
         lastFilledBuffer = 1;
     }
     else if (chan1Busy && lastFilledBuffer != 0) {
         // Chan 1 is reading Buffer 1, so Buffer 0 is free to fill
+        uint32_t startUs = time_us_32();
         fillBuffer(0);
+        systemMonitor.recordCore1WorkMicros(time_us_32() - startUs);
         lastFilledBuffer = 0;
     }
 }

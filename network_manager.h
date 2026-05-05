@@ -36,6 +36,11 @@ enum WebHomePage : uint8_t {
     WEB_HOME_PAGE_COUNT = 9
 };
 
+enum NetworkStandbyMode : uint8_t {
+    NETWORK_STANDBY_NETWORK = 0,
+    NETWORK_STANDBY_ECO = 1
+};
+
 struct NetworkConfig {
     uint32_t magic;
     uint16_t version;
@@ -57,6 +62,7 @@ struct NetworkConfig {
     char webPin[NETWORK_WEB_PIN_MAX + 1];
     uint8_t webHomePage;
     bool hiddenSsid;
+    uint8_t standbyMode;
 };
 
 class NetworkManager {
@@ -76,6 +82,7 @@ public:
     bool isApActive() const;
     bool isSetupApOpen() const;
     bool isServerAvailable() const;
+    bool isEcoStandbySuspended() const;
     bool hasStationCredentials() const;
     bool isWebAccessLocked() const;
     bool verifyWebPin(const char* pin) const;
@@ -98,6 +105,7 @@ private:
     bool _loaded;
     bool _apActive;
     bool _staStarted;
+    bool _ecoStandbySuspended;
     uint32_t _connectStartMs;
     uint32_t _lastReconnectMs;
     char _statusText[48];
@@ -111,6 +119,7 @@ private:
     void startStation();
     void startAccessPoint();
     void stopAccessPoint();
+    bool shouldSuspendForStandby() const;
     void setStatus(const char* text);
 };
 
