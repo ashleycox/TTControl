@@ -43,7 +43,7 @@ public:
     // --- Dialogs ---
     void showMessage(const char* msg, uint32_t duration);
     void showConfirm(const char* msg, void (*action)()); 
-    void showError(const char* msg, uint32_t duration);
+    void showError(const char* msg, uint32_t duration, bool muteOutputs = false);
     
     // --- Input Injection (for Serial/Debug) ---
     void injectInput(int delta, bool btn);

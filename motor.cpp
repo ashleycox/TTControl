@@ -403,6 +403,17 @@ void MotorController::start() {
     if (_relayTestMode) return;
     if (_state == STATE_RUNNING || _state == STATE_STARTING) return;
 
+    if (_state == STATE_STANDBY) {
+        _state = STATE_STOPPED;
+        setStandbyRelay(true);
+
+        if (settings.get().muteRelayLinkStandby && !settings.get().muteRelayLinkStartStop) {
+            setRelays(true);
+        } else {
+            setRelays(false);
+        }
+    }
+
     _state = STATE_STARTING;
     _stateStartTime = hal.getMillis();
     settings.syncRuntimeClock();
@@ -600,6 +611,12 @@ void MotorController::toggleStandby() {
 }
 
 void MotorController::emergencyStop() {
+    if (_relayTestMode) {
+        setRelayTestStage(0);
+        _relayTestMode = false;
+        _relayTestStage = 0;
+    }
+
     _state = STATE_STOPPED;
     currentMotorState = _state;
 

@@ -1415,10 +1415,12 @@ void WebInterface::populateStatus(JsonDocument& doc) {
 
     const NetworkConfig& cfg = networkManager.getConfig();
     char ip[18] = "";
+    String stationSsid;
     const char* ssid = cfg.ssid;
     if (networkManager.isConnected()) {
         formatIpAddress(WiFi.localIP(), ip, sizeof(ip));
-        ssid = WiFi.SSID().c_str();
+        stationSsid = WiFi.SSID();
+        ssid = stationSsid.c_str();
     } else if (networkManager.isApActive()) {
         formatIpAddress(WiFi.softAPIP(), ip, sizeof(ip));
         ssid = cfg.apSsid;
@@ -1445,10 +1447,12 @@ void WebInterface::populateStatus(JsonDocument& doc) {
 void WebInterface::streamStatus(Print& out) {
     const NetworkConfig& cfg = networkManager.getConfig();
     char ip[18] = "";
+    String stationSsid;
     const char* ssid = cfg.ssid;
     if (networkManager.isConnected()) {
         formatIpAddress(WiFi.localIP(), ip, sizeof(ip));
-        ssid = WiFi.SSID().c_str();
+        stationSsid = WiFi.SSID();
+        ssid = stationSsid.c_str();
     } else if (networkManager.isApActive()) {
         formatIpAddress(WiFi.softAPIP(), ip, sizeof(ip));
         ssid = cfg.apSsid;
@@ -1830,13 +1834,15 @@ void WebInterface::handleNetworkGet() {
     char gateway[18];
     char subnet[18];
     char dns[18];
+    String stationSsid;
     const char* ssid = c.ssid;
 
     if (networkManager.isConnected()) {
         formatIpAddress(WiFi.localIP(), stationIp, sizeof(stationIp));
         strncpy(ip, stationIp, sizeof(ip));
         ip[sizeof(ip) - 1] = 0;
-        ssid = WiFi.SSID().c_str();
+        stationSsid = WiFi.SSID();
+        ssid = stationSsid.c_str();
     }
     if (networkManager.isApActive()) {
         formatIpAddress(WiFi.softAPIP(), apIp, sizeof(apIp));
@@ -2027,12 +2033,14 @@ void WebInterface::handleDiagnosticsGet() {
     char stationIp[18] = "";
     char apIp[18] = "";
     char mac[18] = "";
+    String stationSsid;
     const char* ssid = cfg.ssid;
     if (networkManager.isConnected()) {
         formatIpAddress(WiFi.localIP(), stationIp, sizeof(stationIp));
         strncpy(ip, stationIp, sizeof(ip));
         ip[sizeof(ip) - 1] = 0;
-        ssid = WiFi.SSID().c_str();
+        stationSsid = WiFi.SSID();
+        ssid = stationSsid.c_str();
     }
     if (networkManager.isApActive()) {
         formatIpAddress(WiFi.softAPIP(), apIp, sizeof(apIp));

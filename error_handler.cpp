@@ -39,7 +39,7 @@ void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
         // Critical errors stay longer (10s) vs warnings (3s) -> Now Configurable
         uint32_t duration = settings.get().errorDisplayDuration * 1000;
         if (critical && duration < 10000) duration = 10000; // Force min 10s for critical
-        ui.showError(message, duration);
+        ui.showError(message, duration, critical);
     }
     
     // Note: If critical, the system should ideally stop the motor.

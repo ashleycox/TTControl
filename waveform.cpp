@@ -22,6 +22,7 @@ const float FIR_COEFFS_AGGRESSIVE[8] = {0.1, 0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 0.1};
 WaveformGenerator::WaveformGenerator() {
     _enabled = false;
     _swapPending = false;
+    _stateLock = false;
     _waveformInstance = this;
     
     // Initialize States
@@ -252,11 +253,13 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
 
     // Handle State Swap
     if (_swapPending) {
+        lockState();
         WaveformState* temp = (WaveformState*)_activeState;
         _activeState = _pendingState;
         _pendingState = temp;
         *_pendingState = *((WaveformState*)_activeState);
         _swapPending = false;
+        unlockState();
     }
     
     const volatile WaveformState* state = _activeState;
@@ -300,7 +303,18 @@ void WaveformGenerator::generateLUT() {
     }
 }
 
+void WaveformGenerator::lockState() {
+    while (__atomic_test_and_set(&_stateLock, __ATOMIC_ACQUIRE)) {
+        tight_loop_contents();
+    }
+}
+
+void WaveformGenerator::unlockState() {
+    __atomic_clear(&_stateLock, __ATOMIC_RELEASE);
+}
+
 void WaveformGenerator::configure(const SpeedSettings& s) {
+    lockState();
     _pendingState->filterType = (FilterType)s.filterType;
     _pendingState->iirAlpha = s.iirAlpha;
     _pendingState->firProfile = (FirProfile)s.firProfile;
@@ -310,11 +324,20 @@ void WaveformGenerator::configure(const SpeedSettings& s) {
         _pendingState->phaseOffsets[i] = (uint32_t)(normalized * 4294967296.0);
     }
     _swapPending = true;
+    unlockState();
+}
+
+float WaveformGenerator::getFrequency() {
+    lockState();
+    float freq = _pendingState->frequency;
+    unlockState();
+    return freq;
 }
 
 void WaveformGenerator::setFrequency(float freq) {
     if (freq > MAX_OUTPUT_FREQUENCY_HZ) freq = MAX_OUTPUT_FREQUENCY_HZ;
     if (freq < -MAX_OUTPUT_FREQUENCY_HZ) freq = -MAX_OUTPUT_FREQUENCY_HZ;
+    lockState();
     _pendingState->frequency = freq;
     // Recalculate Phase Increment based on PWM frequency (50kHz)
     // Inc = Freq * (1/50000) * 2^32
@@ -323,18 +346,22 @@ void WaveformGenerator::setFrequency(float freq) {
     double inc = freq * 85899.34592;
     _pendingState->phaseInc = (uint32_t)inc;
     _swapPending = true;
+    unlockState();
 }
 
 void WaveformGenerator::setAmplitude(float amp) {
     if (amp < 0.0) amp = 0.0;
     if (amp > 1.0) amp = 1.0;
+    lockState();
     _pendingState->amplitude = amp;
     _swapPending = true;
+    unlockState();
 }
 
 void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s) {
     if (freq > MAX_OUTPUT_FREQUENCY_HZ) freq = MAX_OUTPUT_FREQUENCY_HZ;
     if (freq < -MAX_OUTPUT_FREQUENCY_HZ) freq = -MAX_OUTPUT_FREQUENCY_HZ;
+    lockState();
     _pendingState->frequency = freq;
     
     // Recalculate Phase Increment
@@ -351,6 +378,7 @@ void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s) {
     }
     
     _swapPending = true;
+    unlockState();
 }
 
 void WaveformGenerator::setEnabled(bool e) {

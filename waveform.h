@@ -44,7 +44,7 @@ public:
     
     // --- Control ---
     void setFrequency(float freq);
-    float getFrequency() { return _pendingState->frequency; }
+    float getFrequency();
     
     void setAmplitude(float amp); // 0.0 to 1.0
     
@@ -84,6 +84,7 @@ private:
     // Flags
     bool _enabled;
     volatile bool _swapPending; // Flag to tell ISR to swap
+    volatile bool _stateLock;
     
     // Internal State (Not buffered, maintained by ISR)
     uint32_t _phaseAcc[4];
@@ -116,6 +117,8 @@ private:
     volatile int _currentBufferIndex; // 0 or 1
     
     void generateLUT();
+    void lockState();
+    void unlockState();
     void fillBuffer(int bufferIndex);
     int16_t generateSample(int channel);
     void setupPWM();

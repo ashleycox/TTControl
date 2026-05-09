@@ -1148,14 +1148,15 @@ void UserInterface::showConfirm(const char* msg, void (*action)()) {
     _showingConfirm = true;
 }
 
-void UserInterface::showError(const char* msg, uint32_t duration) {
+void UserInterface::showError(const char* msg, uint32_t duration, bool muteOutputs) {
     snprintf(_errorBuffer, sizeof(_errorBuffer), "%s", msg ? msg : "");
     _errorMsg = _errorBuffer;
     _errorDuration = duration;
     _errorStartTime = millis();
     _showingError = true;
-    // Safety: Stop motor relays on critical error display
-    motor.setRelays(false);
+    if (muteOutputs) {
+        motor.setRelays(false);
+    }
 }
 
 void UserInterface::injectInput(int delta, bool btn) {

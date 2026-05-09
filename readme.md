@@ -372,7 +372,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Error Reporting:** Error code system to display errors on screen (configurable in menu) and via serial output (configurable in flag).
 - **Error Display Duration:** Error codes should be displayed on OLED or LCD for a configurable duration (default 10s, configurable in menu).
 - **Error Clearing:** Pressing encoder clears the error.
-- **Safety Shutdown:** Error Mode switches off all relays when an error message is displayed.
+- **Safety Shutdown:** Critical error paths stop or mute outputs; warning and informational dialogs do not alter relay state.
 - **Amplifier Thermal Events:** Amplifier temperature warnings, thermal cutout trips, and amplifier over-temperature shutdowns are logged as `ERR_AMP_THERMAL`.
 
 ---

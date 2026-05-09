@@ -24,15 +24,6 @@ bool Settings::loadFromSlot(uint8_t slot, GlobalSettings& target) {
                 f.close();
                 return true;
             }
-
-            const size_t legacyV4Size = sizeof(GlobalSettings) - (sizeof(float) * 2);
-            if (bytesRead == legacyV4Size && target.schemaVersion == 4) {
-                target.schemaVersion = SETTINGS_SCHEMA_VERSION;
-                target.ampTempWarnC = AMP_TEMP_WARN_C;
-                target.ampTempShutdownC = AMP_TEMP_SHUTDOWN_C;
-                f.close();
-                return true;
-            }
             f.close();
         }
     }
