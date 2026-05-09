@@ -10,6 +10,7 @@
 #define TYPES_H
 
 #include <Arduino.h>
+#include "config.h"
 
 // --- Enumerations ---
 
@@ -167,5 +168,8 @@ struct GlobalSettings {
     bool showMemoryDashboard;
     bool showFlashDashboard;
 };
+
+static_assert(sizeof(SpeedSettings) == SPEED_SETTINGS_STORAGE_SIZE, "Update SPEED_SETTINGS_STORAGE_SIZE when SpeedSettings changes.");
+static_assert(sizeof(GlobalSettings) == GLOBAL_SETTINGS_STORAGE_SIZE, "Update GLOBAL_SETTINGS_STORAGE_SIZE and storage handling when GlobalSettings changes.");
 
 #endif // TYPES_H

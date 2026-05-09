@@ -587,19 +587,11 @@ void MotorController::toggleStandby() {
         }
     } else {
         // Going to sleep
-        _isKicking = false;
-        _isKickRamping = false;
-        _isSpeedRamping = false;
-        _isSweepingMode = false;
-        _currentAmp = 0.0;
+        clearMotionState();
         resetPitch();
-        waveform.setAmplitude(0.0);
-        waveform.setEnabled(false);
         _state = STATE_STANDBY;
+        forceDriveOutputsOff();
         setStandbyRelay(false);
-
-        // If linked to standby, mute.
-        setRelays(false);
 
         // Reset Session Runtime
         settings.resetSessionRuntime();
@@ -617,19 +609,12 @@ void MotorController::emergencyStop() {
         _relayTestStage = 0;
     }
 
-    _state = STATE_STOPPED;
+    _state = ENABLE_STANDBY ? STATE_STANDBY : STATE_STOPPED;
     currentMotorState = _state;
 
-    _isKicking = false;
-    _isKickRamping = false;
-    _isSpeedRamping = false;
-    _isSweepingMode = false;
-    _targetAmp = 0.0;
-    _currentAmp = 0.0;
-
-    setRelays(false);
-    waveform.setAmplitude(0.0);
-    waveform.setEnabled(false);
+    clearMotionState();
+    forceDriveOutputsOff();
+    setStandbyRelay(_state != STATE_STANDBY);
     settings.resetSessionRuntime();
 }
 
@@ -744,6 +729,26 @@ void MotorController::applySettings() {
     waveform.updateSettings(_currentFreq, s);
 }
 
+void MotorController::clearMotionState() {
+    _isKicking = false;
+    _isKickRamping = false;
+    _isSpeedRamping = false;
+    _isSweepingMode = false;
+    _isReducedAmp = false;
+    _brakePulseState = false;
+    _targetAmp = 0.0;
+    _currentAmp = 0.0;
+}
+
+void MotorController::forceDriveOutputsOff() {
+    _relayActivationPending = false;
+    _relaysActive = false;
+    _relayStage = 0;
+    setRelays(false);
+    waveform.setAmplitude(0.0);
+    waveform.setEnabled(false);
+}
+
 void MotorController::setRelays(bool active) {
     if (!ENABLE_MUTE_RELAYS) return;
     if (_relayTestMode) return;
@@ -819,15 +824,12 @@ bool MotorController::beginRelayTest() {
         return false;
     }
 
+    clearMotionState();
+    forceDriveOutputsOff();
     _relayTestMode = true;
-    _relayActivationPending = false;
-    _relaysActive = false;
-    _relayStage = 0;
     _state = STATE_STOPPED;
     currentMotorState = _state;
 
-    waveform.setAmplitude(0.0);
-    waveform.setEnabled(false);
     setRelayTestStage(0);
     return true;
 }

@@ -136,6 +136,8 @@ private:
     void handleBraking(uint32_t now);
     void setStandbyRelay(bool active);
     void writeRelayOutput(int pin, bool active);
+    void clearMotionState();
+    void forceDriveOutputsOff();
     
     // Diagnostic Sweep State
     bool _isSweepingMode;

@@ -9,6 +9,7 @@
 #include "error_handler.h"
 #include "ui.h"
 #include "settings.h"
+#include "motor.h"
 
 extern UserInterface ui;
 
@@ -23,7 +24,10 @@ void ErrorHandler::begin() {
 }
 
 void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
-    if (critical) _criticalError = true;
+    if (critical) {
+        _criticalError = true;
+        motor.emergencyStop();
+    }
     
     // 1. Log to Serial Console for debugging
     Serial.print("ERROR ");
@@ -41,10 +45,6 @@ void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
         if (critical && duration < 10000) duration = 10000; // Force min 10s for critical
         ui.showError(message, duration, critical);
     }
-    
-    // Note: If critical, the system should ideally stop the motor.
-    // This is currently handled by the UI or main loop checking `hasCriticalError()`
-    // or by the caller of `report()`.
 }
 
 void ErrorHandler::logToFile(ErrorCode code, const char* message) {

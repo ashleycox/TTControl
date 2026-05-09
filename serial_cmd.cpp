@@ -73,6 +73,7 @@ static void handlePresetCommand(const String& input);
 static void handleRelayTestCommand(const String& input);
 static void handleWifiCommand(const String& input);
 static void updateWifiSerialTasks();
+static void printSafetyDiagnostic();
 
 static int clampInt(int value, int minValue, int maxValue) {
     if (value < minValue) return minValue;
@@ -92,6 +93,12 @@ static const char* onOffText(bool value) {
 
 static const char* yesNoText(bool value) {
     return value ? "YES" : "NO";
+}
+
+static void printDiagCheck(const char* label, bool pass, bool& ok) {
+    Serial.print(pass ? "PASS: " : "FAIL: ");
+    Serial.println(label);
+    if (!pass) ok = false;
 }
 
 static const char* networkModeName(uint8_t mode) {
@@ -1178,6 +1185,9 @@ void handleSerialCommands() {
             errorHandler.clearLogs();
             Serial.println("Error Log Cleared");
         }
+        else if (input == "diag safety") {
+            printSafetyDiagnostic();
+        }
         
         // --- Registry Commands ---
         else if (input == "list") {
@@ -1347,6 +1357,84 @@ void printStatus() {
     Serial.println("-------------------------");
 }
 
+static void printSafetyDiagnostic() {
+    bool ok = true;
+    GlobalSettings& g = settings.get();
+
+    Serial.println("--- Safety Diagnostic (Dry Run) ---");
+    Serial.println("No motor, relay, or PWM outputs changed.");
+
+    printDiagCheck("settings schema matches firmware", g.schemaVersion == SETTINGS_SCHEMA_VERSION, ok);
+    printDiagCheck("phase mode is within compiled support", g.phaseMode >= PHASE_1 && g.phaseMode <= MAX_PHASE_MODE, ok);
+    printDiagCheck("maximum amplitude is within 0-100%", g.maxAmplitude <= 100, ok);
+    printDiagCheck("relay power-on delay is within 0-10 seconds", g.powerOnRelayDelay <= 10, ok);
+    printDiagCheck("brake mode is valid", g.brakeMode <= BRAKE_SOFT_STOP, ok);
+    printDiagCheck("brake duration is within 0-10 seconds", g.brakeDuration >= 0.0 && g.brakeDuration <= 10.0, ok);
+    printDiagCheck("amplifier thermal thresholds are ordered",
+        g.ampTempWarnC >= AMP_TEMP_MIN_C &&
+        g.ampTempShutdownC <= AMP_TEMP_MAX_C &&
+        g.ampTempShutdownC >= g.ampTempWarnC + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C,
+        ok);
+
+    for (uint8_t i = 0; i < 3; i++) {
+        SpeedSettings& s = g.speeds[i];
+        bool speedOk =
+            s.minFrequency >= MIN_OUTPUT_FREQUENCY_HZ &&
+            s.maxFrequency <= MAX_OUTPUT_FREQUENCY_HZ &&
+            s.minFrequency <= s.maxFrequency &&
+            s.frequency >= s.minFrequency &&
+            s.frequency <= s.maxFrequency &&
+            s.reducedAmplitude >= 10 &&
+            s.reducedAmplitude <= 100 &&
+            s.startupKick >= 1 &&
+            s.startupKick <= 4 &&
+            s.filterType <= FILTER_FIR &&
+            s.firProfile <= FIR_AGGRESSIVE;
+        Serial.print("Speed ");
+        Serial.print(i + 1);
+        Serial.print(": ");
+        printDiagCheck(speedName((SpeedMode)i), speedOk, ok);
+    }
+
+    Serial.println("Simulated command outcomes:");
+    Serial.print("start: ");
+    if (motor.isRelayTestMode()) {
+        Serial.println("blocked until relay test exits");
+    } else if (motor.isRunning()) {
+        Serial.println("no-op; motor is already running or starting");
+    } else {
+        Serial.print("would enter STARTING");
+        if (motor.isStandby()) Serial.print(" after waking standby relay");
+        if (g.muteRelayLinkStartStop) Serial.print(", then request staggered unmute");
+        Serial.println();
+    }
+
+    Serial.print("stop: ");
+    if (motor.isRelayTestMode()) {
+        Serial.println("blocked until relay test exits");
+    } else if (motor.getState() == STATE_STOPPED || motor.getState() == STATE_STANDBY) {
+        Serial.println("no-op; motor is not running");
+    } else {
+        Serial.print("would enter BRAKING using ");
+        Serial.println(brakeModeName(g.brakeMode));
+    }
+
+    Serial.print("emergencyStop: would clear relay test, mute relays, disable waveform, enter ");
+    Serial.println(ENABLE_STANDBY ? "STANDBY" : "STOPPED");
+    if (ENABLE_STANDBY) {
+        Serial.println("standby: would mute relays, disable waveform, drop standby relay, enter STANDBY");
+    } else {
+        Serial.println("standby: disabled at compile time");
+    }
+
+    Serial.print("Critical error latch: ");
+    Serial.println(errorHandler.hasCriticalError() ? "SET" : "clear");
+
+    Serial.print("Overall: ");
+    Serial.println(ok ? "PASS" : "FAIL");
+    Serial.println("-------------------------------");
+}
+
 void printHelp() {
     if (!cliInitialized) initCLI();
     
@@ -1363,6 +1451,7 @@ void printHelp() {
     Serial.println("import preset <1-5> <json> - Load JSON");
     Serial.println("brake test start|stop");
     Serial.println("relay test <0-N|off>");
+    Serial.println("diag safety - Dry-run safety diagnostic");
     Serial.println("wifi help|status|wizard|scan|connect");
     Serial.println("error dump, error clear");
     Serial.println("f - Factory Reset");

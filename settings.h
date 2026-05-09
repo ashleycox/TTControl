@@ -68,7 +68,6 @@ private:
     
     void validate();
     void setDefaults();
-    bool migrate(uint32_t oldVersion, File& f);
     
     // Internal helpers
     void saveToSlot(uint8_t slot); // Legacy wrapper

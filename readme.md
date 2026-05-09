@@ -255,7 +255,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Interactive CLI:** Full command-line interface for control and configuration.
 - **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, and diagnostics.
 - **Serial Wi-Fi Setup:** Wi-Fi builds add `wifi wizard` for guided Serial Monitor network setup, `wifi scan` for nearby SSIDs, `wifi connect <ssid> [password]` for quick DHCP station setup, and `wifi set ...` commands for hostname, mode, standby mode, hidden SSIDs, DHCP/static IP, setup AP, fallback, and web access options.
-- **Diagnostics:** Serial commands include `brake test start`, `brake test stop`, and `relay test <stage|off>` for bench checks.
+- **Diagnostics:** Serial commands include `diag safety` for a non-actuating safety check, plus `brake test start`, `brake test stop`, and `relay test <stage|off>` for bench checks.
 - **JSON Preset Export/Import:** Advanced configuration sharing.
   - `export preset <1-5>`: Dumps the entire layout of the requested preset, along with all global constraints and brake configurations, into a single minified JSON string.
   - `import preset <1-5> <json>`: Instantly parses and injects a shared JSON configuration string directly into the specified preset slot.
@@ -315,8 +315,8 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Critical Confirmations:** Confirmations for critical settings, such as phase mode and max amplitude changes.
 - **Settings File Schema:**
   - **Storage Location:** Stored on LittleFS.
-  - **Schema Versioning:** Each file includes `"schema_version"` to ensure forward compatibility.
-  - **Migration Strategy:** On schema mismatch or corruption, data is compared, old values are matched, new values are loaded to preserve user settings on firmware upgrade.
+  - **File Integrity:** Settings and preset files include a firmware-specific magic value, file format version, settings schema version, payload size, and CRC32 before the binary settings payload.
+  - **Strict First-Release Format:** Schema, size, or CRC mismatch causes settings to reset to defaults rather than attempting to migrate older binary layouts.
 
 ---
 
@@ -346,7 +346,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Temperature Sensor:** `PIN_AMP_TEMP` reads a TMP36-style analogue heatsink sensor on ADC GP26. The firmware samples it every 500 ms and converts voltage to degrees Celsius.
 - **Thermal Cutout Input:** `PIN_AMP_THERM_OK` reads the amplifier thermal cutout/status line on GP27 using an input pulldown. HIGH means the amplifier thermal chain is healthy; LOW triggers an immediate critical shutdown.
 - **Warning Threshold:** At the configured warning threshold, defaulting to `AMP_TEMP_WARN_C` (`65.0C`), the firmware logs a non-critical `ERR_AMP_THERMAL` warning. The warning re-arms once temperature falls at least 5C below the warning threshold.
-- **Shutdown Threshold:** At the configured shutdown threshold, defaulting to `AMP_TEMP_SHUTDOWN_C` (`75.0C`), or when the thermal OK input goes LOW, the firmware calls `motor.emergencyStop()`, logs a critical `ERR_AMP_THERMAL`, mutes/stops outputs, and latches shutdown behavior until reboot.
+- **Shutdown Threshold:** At the configured shutdown threshold, defaulting to `AMP_TEMP_SHUTDOWN_C` (`75.0C`), or when the thermal OK input goes LOW, the firmware reports a critical `ERR_AMP_THERMAL`; the critical error path calls `motor.emergencyStop()`, mutes/stops outputs, drops standby power when available, and latches shutdown behavior until reboot.
 - **Status Reporting:** The serial `status` / `i` command reports amplifier temperature and thermal state. The web API and Stats dashboard also expose these readings when the feature is compiled in.
 - **Configuration:** When `AMP_MONITOR_ENABLE` is `1`, warning and shutdown thresholds are configurable from the OLED System menu and the web Settings page. Pins remain compile-time hardware assignments in `config.h`.
 
@@ -372,7 +372,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Error Reporting:** Error code system to display errors on screen (configurable in menu) and via serial output (configurable in flag).
 - **Error Display Duration:** Error codes should be displayed on OLED or LCD for a configurable duration (default 10s, configurable in menu).
 - **Error Clearing:** Pressing encoder clears the error.
-- **Safety Shutdown:** Critical error paths stop or mute outputs; warning and informational dialogs do not alter relay state.
+- **Safety Shutdown:** Critical error paths call emergency stop, mute relays, disable waveform output, and drop standby power when standby support is enabled; warning and informational dialogs do not alter relay state.
 - **Amplifier Thermal Events:** Amplifier temperature warnings, thermal cutout trips, and amplifier over-temperature shutdowns are logged as `ERR_AMP_THERMAL`.
 
 ---
@@ -420,6 +420,7 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `brake test stop` | Stop motor using the configured brake mode |
 | `relay test <0-N>` | Enter relay test and activate a relay output stage |
 | `relay test off` | Exit relay test and restore normal relay handling |
+| `diag safety` | Run a non-actuating safety diagnostic covering settings ranges, thermal thresholds, and expected start/stop/emergency/standby outcomes |
 | `wifi help` | List Serial Monitor Wi-Fi setup commands when network support is enabled |
 | `wifi status` | Show current network state, active IP address, SSID, AP status, MAC, and RSSI |
 | `wifi config` | Show saved network configuration without printing passwords |
@@ -649,7 +650,7 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Monitor Pins**| `PIN_AMP_TEMP` | Amplifier heatsink temperature ADC input. | `26` | TMP36-style analogue sensor. |
 | **Monitor Pins**| `PIN_AMP_THERM_OK` | Amplifier thermal cutout/status input. | `27` | HIGH means healthy; LOW triggers critical shutdown. |
 | **Thermal Limits**| `AMP_TEMP_WARN_C` | Factory default amplifier warning temperature. | `65.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; logs non-critical `ERR_AMP_THERMAL`. |
-| **Thermal Limits**| `AMP_TEMP_SHUTDOWN_C` | Factory default amplifier shutdown temperature. | `75.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; calls emergency stop, disables waveform output, and mutes relays. |
+| **Thermal Limits**| `AMP_TEMP_SHUTDOWN_C` | Factory default amplifier shutdown temperature. | `75.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; reports a critical error, which calls emergency stop, disables waveform output, mutes relays, and drops standby power when available. |
 | **Thermal Limits**| `AMP_TEMP_MIN_C` | Lowest configurable amplifier threshold. | `30.0` | Used to constrain saved settings. |
 | **Thermal Limits**| `AMP_TEMP_MAX_C` | Highest configurable amplifier threshold. | `120.0` | Used to constrain saved settings. |
 | **Thermal Limits**| `AMP_TEMP_MIN_SHUTDOWN_MARGIN_C` | Minimum gap between warning and shutdown thresholds. | `1.0` | Keeps warning below shutdown. |
@@ -657,5 +658,7 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Display Msg** | `STANDBY_MESSAGE` | Sets the message displayed while the system is in standby, if enabled in the menu. | `message` | Controls message display logic. |
 | **Display Msg** | `WELCOME_MESSAGE` | Sets the message displayed on boot. | `"Welcome to TT Control"` | |
 | **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `5` | Use for compatibility checks when firmware is updated. |
+| **Storage** | `SETTINGS_FILE_FORMAT_VERSION` | Tag for the binary settings/preset file wrapper. | `1` | Change only when the on-flash header format changes. |
+| **Storage** | `SETTINGS_FILE_MAGIC` / `PRESET_FILE_MAGIC` | Magic values for settings and preset files. | `TTCS` / `TTCP` | Prevents a preset file from being loaded as global settings, or vice versa. |
 | **Defaults** | `DEFAULT_PHASE_MODE` | Default phase mode. | `3` (3-phase) | |
 | **Defaults** | `DEFAULT_SPEED_INDEX` | Default speed index. | `0` (33.3 RPM) | |

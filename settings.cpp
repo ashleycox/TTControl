@@ -9,6 +9,131 @@
 #include "settings.h"
 #include <ArduinoJson.h>
 
+namespace {
+struct SettingsFileHeader {
+    uint32_t magic;
+    uint16_t formatVersion;
+    uint16_t headerSize;
+    uint32_t schemaVersion;
+    uint32_t payloadSize;
+    uint32_t crc32;
+};
+
+uint32_t settingsCrc32(const uint8_t* data, size_t length) {
+    uint32_t crc = 0xFFFFFFFFUL;
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            if (crc & 1) {
+                crc = (crc >> 1) ^ 0xEDB88320UL;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    return ~crc;
+}
+
+bool makeSidecarPath(const char* path, const char* suffix, char* out, size_t outSize) {
+    int written = snprintf(out, outSize, "%s%s", path, suffix);
+    return written > 0 && written < (int)outSize;
+}
+
+bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target) {
+    File f = LittleFS.open(path, "r");
+    if (!f) return false;
+
+    const size_t expectedSize = sizeof(SettingsFileHeader) + sizeof(GlobalSettings);
+    if (f.size() != expectedSize) {
+        f.close();
+        return false;
+    }
+
+    SettingsFileHeader header;
+    if (f.read((uint8_t*)&header, sizeof(header)) != sizeof(header)) {
+        f.close();
+        return false;
+    }
+
+    if (header.magic != magic ||
+        header.formatVersion != SETTINGS_FILE_FORMAT_VERSION ||
+        header.headerSize != sizeof(SettingsFileHeader) ||
+        header.schemaVersion != SETTINGS_SCHEMA_VERSION ||
+        header.payloadSize != sizeof(GlobalSettings)) {
+        f.close();
+        return false;
+    }
+
+    GlobalSettings candidate;
+    if (f.read((uint8_t*)&candidate, sizeof(candidate)) != sizeof(candidate)) {
+        f.close();
+        return false;
+    }
+    f.close();
+
+    uint32_t crc = settingsCrc32((const uint8_t*)&candidate, sizeof(candidate));
+    if (crc != header.crc32) return false;
+
+    target = candidate;
+    return true;
+}
+
+bool loadSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target) {
+    if (readSettingsBlob(path, magic, target)) return true;
+
+    char backupPath[40];
+    if (makeSidecarPath(path, ".bak", backupPath, sizeof(backupPath))) {
+        return readSettingsBlob(backupPath, magic, target);
+    }
+    return false;
+}
+
+bool writeSettingsBlob(const char* path, uint32_t magic, const GlobalSettings& source) {
+    char tmpPath[40];
+    char backupPath[40];
+    if (!makeSidecarPath(path, ".tmp", tmpPath, sizeof(tmpPath))) return false;
+    if (!makeSidecarPath(path, ".bak", backupPath, sizeof(backupPath))) return false;
+
+    LittleFS.remove(tmpPath);
+
+    File f = LittleFS.open(tmpPath, "w");
+    if (!f) return false;
+
+    SettingsFileHeader header;
+    header.magic = magic;
+    header.formatVersion = SETTINGS_FILE_FORMAT_VERSION;
+    header.headerSize = sizeof(SettingsFileHeader);
+    header.schemaVersion = SETTINGS_SCHEMA_VERSION;
+    header.payloadSize = sizeof(GlobalSettings);
+    header.crc32 = settingsCrc32((const uint8_t*)&source, sizeof(source));
+
+    bool ok = f.write((const uint8_t*)&header, sizeof(header)) == sizeof(header);
+    ok = ok && f.write((const uint8_t*)&source, sizeof(source)) == sizeof(source);
+    f.close();
+
+    if (!ok) {
+        LittleFS.remove(tmpPath);
+        return false;
+    }
+
+    LittleFS.remove(backupPath);
+    bool hadOriginal = LittleFS.exists(path);
+    if (hadOriginal && !LittleFS.rename(path, backupPath)) {
+        LittleFS.remove(tmpPath);
+        return false;
+    }
+
+    if (!LittleFS.rename(tmpPath, path)) {
+        if (hadOriginal) LittleFS.rename(backupPath, path);
+        LittleFS.remove(tmpPath);
+        return false;
+    }
+
+    if (hadOriginal) LittleFS.remove(backupPath);
+    return true;
+}
+}
+
 // --- Helper Functions for Preset Management ---
 
 // Loads a preset from a specific slot file into a target struct
@@ -16,29 +141,14 @@
 bool Settings::loadFromSlot(uint8_t slot, GlobalSettings& target) {
     char path[32];
     snprintf(path, sizeof(path), "/preset_%d.bin", slot);
-    if (LittleFS.exists(path)) {
-        File f = LittleFS.open(path, "r");
-        if (f) {
-            size_t bytesRead = f.read((uint8_t*)&target, sizeof(GlobalSettings));
-            if (bytesRead == sizeof(GlobalSettings)) {
-                f.close();
-                return true;
-            }
-            f.close();
-        }
-    }
-    return false;
+    return loadSettingsBlob(path, PRESET_FILE_MAGIC, target);
 }
 
 // Saves a specific settings struct to a preset slot file
 void Settings::saveToSlot(uint8_t slot, const GlobalSettings& source) {
     char path[32];
     snprintf(path, sizeof(path), "/preset_%d.bin", slot);
-    File f = LittleFS.open(path, "w");
-    if (f) {
-        f.write((uint8_t*)&source, sizeof(GlobalSettings));
-        f.close();
-    }
+    writeSettingsBlob(path, PRESET_FILE_MAGIC, source);
 }
 
 void Settings::renamePreset(uint8_t slot, const char* name) {
@@ -111,335 +221,20 @@ void Settings::begin() {
 }
 
 void Settings::load() {
-    if (LittleFS.exists(_filename)) {
-        File f = LittleFS.open(_filename, "r");
-        if (f) {
-            uint32_t version;
-            if (f.read((uint8_t*)&version, sizeof(version)) == sizeof(version)) {
-                // Rewind to start
-                f.seek(0);
-
-                if (version < SETTINGS_SCHEMA_VERSION) {
-                    Serial.print("Migrating settings from v");
-                    Serial.print(version);
-                    Serial.print(" to v");
-                    Serial.println(SETTINGS_SCHEMA_VERSION);
-
-                    if (migrate(version, f)) {
-                        Serial.println("Migration successful.");
-                        f.close();
-                        return;
-                    } else {
-                        Serial.println("Migration failed. Resetting defaults.");
-                    }
-                } else if (version > SETTINGS_SCHEMA_VERSION) {
-                    Serial.println("Newer schema version detected. Resetting defaults.");
-                } else {
-                    // Current version
-                    if (f.read((uint8_t*)&_data, sizeof(GlobalSettings)) == sizeof(GlobalSettings)) {
-                        Serial.println("Settings loaded.");
-                        validate();
-                        f.close();
-                        return;
-                    }
-                }
-            }
-            f.close();
-        }
+    GlobalSettings loaded;
+    if (loadSettingsBlob(_filename, SETTINGS_FILE_MAGIC, loaded)) {
+        _data = loaded;
+        Serial.println("Settings loaded.");
+        validate();
+        return;
     }
 
     Serial.println("Settings not found or invalid. Using defaults.");
     resetDefaults();
 }
 
-// --- Legacy Structures for Migration ---
-
-// V2: Before FDA and Boot Speed
-struct GlobalSettingsV2 {
-    uint32_t schemaVersion;
-    uint8_t phaseMode;
-    uint8_t maxAmplitude;
-    uint8_t softStartCurve;
-    bool smoothSwitching;
-    uint8_t switchRampDuration;
-    uint8_t brakeMode;
-    float brakeDuration;
-    float brakePulseGap;
-    float brakeStartFreq;
-    float brakeStopFreq;
-    bool relayActiveHigh;
-    bool muteRelayLinkStandby;
-    bool muteRelayLinkStartStop;
-    uint8_t powerOnRelayDelay;
-    uint8_t displayBrightness;
-    uint8_t displaySleepDelay;
-    bool screensaverEnabled;
-    uint8_t autoDimDelay;
-    bool showRuntime;
-    bool errorDisplayEnabled;
-    uint8_t errorDisplayDuration;
-    uint8_t autoStandbyDelay;
-    bool autoStart;
-    bool autoBoot;
-    bool pitchResetOnStop;
-    SpeedSettings speeds[3];
-    char presetNames[5][17];
-    uint32_t totalRuntime;
-    bool reverseEncoder;
-    float pitchStepSize;
-    uint8_t rampType;
-    uint8_t screensaverMode;
-    bool enable78rpm;
-    // NO FDA
-    // NO Boot Speed
-    SpeedMode currentSpeed;
-};
-
-// V3: With FDA, Before Boot Speed
-struct GlobalSettingsV3 {
-    uint32_t schemaVersion;
-    uint8_t phaseMode;
-    uint8_t maxAmplitude;
-    uint8_t softStartCurve;
-    bool smoothSwitching;
-    uint8_t switchRampDuration;
-    uint8_t brakeMode;
-    float brakeDuration;
-    float brakePulseGap;
-    float brakeStartFreq;
-    float brakeStopFreq;
-    bool relayActiveHigh;
-    bool muteRelayLinkStandby;
-    bool muteRelayLinkStartStop;
-    uint8_t powerOnRelayDelay;
-    uint8_t displayBrightness;
-    uint8_t displaySleepDelay;
-    bool screensaverEnabled;
-    uint8_t autoDimDelay;
-    bool showRuntime;
-    bool errorDisplayEnabled;
-    uint8_t errorDisplayDuration;
-    uint8_t autoStandbyDelay;
-    bool autoStart;
-    bool autoBoot;
-    bool pitchResetOnStop;
-    SpeedSettings speeds[3];
-    char presetNames[5][17];
-    uint32_t totalRuntime;
-    bool reverseEncoder;
-    float pitchStepSize;
-    uint8_t rampType;
-    uint8_t screensaverMode;
-    bool enable78rpm;
-    uint8_t freqDependentAmplitude;
-    // NO Boot Speed
-    SpeedMode currentSpeed;
-};
-
-// V4: Before configurable amplifier temperature thresholds
-struct GlobalSettingsV4 {
-    uint32_t schemaVersion;
-    uint8_t phaseMode;
-    uint8_t maxAmplitude;
-    uint8_t softStartCurve;
-    bool smoothSwitching;
-    uint8_t switchRampDuration;
-    uint8_t brakeMode;
-    float brakeDuration;
-    float brakePulseGap;
-    float brakeStartFreq;
-    float brakeStopFreq;
-    float softStopCutoff;
-    bool relayActiveHigh;
-    bool muteRelayLinkStandby;
-    bool muteRelayLinkStartStop;
-    uint8_t powerOnRelayDelay;
-    uint8_t displayBrightness;
-    uint8_t displaySleepDelay;
-    bool screensaverEnabled;
-    uint8_t autoDimDelay;
-    bool showRuntime;
-    bool errorDisplayEnabled;
-    uint8_t errorDisplayDuration;
-    uint8_t autoStandbyDelay;
-    bool autoStart;
-    bool autoBoot;
-    bool pitchResetOnStop;
-    SpeedSettings speeds[3];
-    char presetNames[5][17];
-    uint32_t totalRuntime;
-    bool reverseEncoder;
-    float pitchStepSize;
-    uint8_t rampType;
-    uint8_t screensaverMode;
-    bool enable78rpm;
-    uint8_t freqDependentAmplitude;
-    float vfLowFreq;
-    uint8_t vfLowBoost;
-    float vfMidFreq;
-    uint8_t vfMidBoost;
-    uint8_t bootSpeed;
-    SpeedMode currentSpeed;
-};
-
-bool Settings::migrate(uint32_t oldVersion, File& f) {
-    GlobalSettings newSettings;
-    GlobalSettings backup = _data;
-
-    // Temporarily use _data to populate defaults including new fields,
-    // then move them into newSettings.
-    setDefaults();
-    newSettings = _data;
-    _data = backup; // Restore live state
-
-    if (oldVersion == 2) {
-        GlobalSettingsV2 v2;
-        if (f.read((uint8_t*)&v2, sizeof(GlobalSettingsV2)) != sizeof(GlobalSettingsV2)) return false;
-
-        // Copy common fields
-        newSettings.phaseMode = v2.phaseMode;
-        newSettings.maxAmplitude = v2.maxAmplitude;
-        newSettings.softStartCurve = v2.softStartCurve;
-        newSettings.smoothSwitching = v2.smoothSwitching;
-        newSettings.switchRampDuration = v2.switchRampDuration;
-        newSettings.brakeMode = v2.brakeMode;
-        newSettings.brakeDuration = v2.brakeDuration;
-        newSettings.brakePulseGap = v2.brakePulseGap;
-        newSettings.brakeStartFreq = v2.brakeStartFreq;
-        newSettings.brakeStopFreq = v2.brakeStopFreq;
-        newSettings.relayActiveHigh = v2.relayActiveHigh;
-        newSettings.muteRelayLinkStandby = v2.muteRelayLinkStandby;
-        newSettings.muteRelayLinkStartStop = v2.muteRelayLinkStartStop;
-        newSettings.powerOnRelayDelay = v2.powerOnRelayDelay;
-        newSettings.displayBrightness = v2.displayBrightness;
-        newSettings.displaySleepDelay = v2.displaySleepDelay;
-        newSettings.screensaverEnabled = v2.screensaverEnabled;
-        newSettings.autoDimDelay = v2.autoDimDelay;
-        newSettings.showRuntime = v2.showRuntime;
-        newSettings.errorDisplayEnabled = v2.errorDisplayEnabled;
-        newSettings.errorDisplayDuration = v2.errorDisplayDuration;
-        newSettings.autoStandbyDelay = v2.autoStandbyDelay;
-        newSettings.autoStart = v2.autoStart;
-        newSettings.autoBoot = v2.autoBoot;
-        newSettings.pitchResetOnStop = v2.pitchResetOnStop;
-        memcpy(newSettings.speeds, v2.speeds, sizeof(v2.speeds));
-        memcpy(newSettings.presetNames, v2.presetNames, sizeof(v2.presetNames));
-        newSettings.totalRuntime = v2.totalRuntime;
-        newSettings.reverseEncoder = v2.reverseEncoder;
-        newSettings.pitchStepSize = v2.pitchStepSize;
-        newSettings.rampType = v2.rampType;
-        newSettings.screensaverMode = v2.screensaverMode;
-        newSettings.enable78rpm = v2.enable78rpm;
-        newSettings.currentSpeed = v2.currentSpeed;
-
-        _data = newSettings;
-        save();
-        return true;
-    }
-    else if (oldVersion == 3) {
-        GlobalSettingsV3 v3;
-        if (f.read((uint8_t*)&v3, sizeof(GlobalSettingsV3)) != sizeof(GlobalSettingsV3)) return false;
-
-        // Copy common fields (V3 is V2 + FDA)
-        newSettings.phaseMode = v3.phaseMode;
-        newSettings.maxAmplitude = v3.maxAmplitude;
-        newSettings.softStartCurve = v3.softStartCurve;
-        newSettings.smoothSwitching = v3.smoothSwitching;
-        newSettings.switchRampDuration = v3.switchRampDuration;
-        newSettings.brakeMode = v3.brakeMode;
-        newSettings.brakeDuration = v3.brakeDuration;
-        newSettings.brakePulseGap = v3.brakePulseGap;
-        newSettings.brakeStartFreq = v3.brakeStartFreq;
-        newSettings.brakeStopFreq = v3.brakeStopFreq;
-        newSettings.relayActiveHigh = v3.relayActiveHigh;
-        newSettings.muteRelayLinkStandby = v3.muteRelayLinkStandby;
-        newSettings.muteRelayLinkStartStop = v3.muteRelayLinkStartStop;
-        newSettings.powerOnRelayDelay = v3.powerOnRelayDelay;
-        newSettings.displayBrightness = v3.displayBrightness;
-        newSettings.displaySleepDelay = v3.displaySleepDelay;
-        newSettings.screensaverEnabled = v3.screensaverEnabled;
-        newSettings.autoDimDelay = v3.autoDimDelay;
-        newSettings.showRuntime = v3.showRuntime;
-        newSettings.errorDisplayEnabled = v3.errorDisplayEnabled;
-        newSettings.errorDisplayDuration = v3.errorDisplayDuration;
-        newSettings.autoStandbyDelay = v3.autoStandbyDelay;
-        newSettings.autoStart = v3.autoStart;
-        newSettings.autoBoot = v3.autoBoot;
-        newSettings.pitchResetOnStop = v3.pitchResetOnStop;
-        memcpy(newSettings.speeds, v3.speeds, sizeof(v3.speeds));
-        memcpy(newSettings.presetNames, v3.presetNames, sizeof(v3.presetNames));
-        newSettings.totalRuntime = v3.totalRuntime;
-        newSettings.reverseEncoder = v3.reverseEncoder;
-        newSettings.pitchStepSize = v3.pitchStepSize;
-        newSettings.rampType = v3.rampType;
-        newSettings.screensaverMode = v3.screensaverMode;
-        newSettings.enable78rpm = v3.enable78rpm;
-        newSettings.freqDependentAmplitude = v3.freqDependentAmplitude;
-        newSettings.currentSpeed = v3.currentSpeed;
-
-        _data = newSettings;
-        save();
-        return true;
-    }
-    else if (oldVersion == 4) {
-        GlobalSettingsV4 v4;
-        if (f.read((uint8_t*)&v4, sizeof(GlobalSettingsV4)) != sizeof(GlobalSettingsV4)) return false;
-
-        newSettings.phaseMode = v4.phaseMode;
-        newSettings.maxAmplitude = v4.maxAmplitude;
-        newSettings.softStartCurve = v4.softStartCurve;
-        newSettings.smoothSwitching = v4.smoothSwitching;
-        newSettings.switchRampDuration = v4.switchRampDuration;
-        newSettings.brakeMode = v4.brakeMode;
-        newSettings.brakeDuration = v4.brakeDuration;
-        newSettings.brakePulseGap = v4.brakePulseGap;
-        newSettings.brakeStartFreq = v4.brakeStartFreq;
-        newSettings.brakeStopFreq = v4.brakeStopFreq;
-        newSettings.softStopCutoff = v4.softStopCutoff;
-        newSettings.relayActiveHigh = v4.relayActiveHigh;
-        newSettings.muteRelayLinkStandby = v4.muteRelayLinkStandby;
-        newSettings.muteRelayLinkStartStop = v4.muteRelayLinkStartStop;
-        newSettings.powerOnRelayDelay = v4.powerOnRelayDelay;
-        newSettings.displayBrightness = v4.displayBrightness;
-        newSettings.displaySleepDelay = v4.displaySleepDelay;
-        newSettings.screensaverEnabled = v4.screensaverEnabled;
-        newSettings.autoDimDelay = v4.autoDimDelay;
-        newSettings.showRuntime = v4.showRuntime;
-        newSettings.errorDisplayEnabled = v4.errorDisplayEnabled;
-        newSettings.errorDisplayDuration = v4.errorDisplayDuration;
-        newSettings.autoStandbyDelay = v4.autoStandbyDelay;
-        newSettings.autoStart = v4.autoStart;
-        newSettings.autoBoot = v4.autoBoot;
-        newSettings.pitchResetOnStop = v4.pitchResetOnStop;
-        memcpy(newSettings.speeds, v4.speeds, sizeof(v4.speeds));
-        memcpy(newSettings.presetNames, v4.presetNames, sizeof(v4.presetNames));
-        newSettings.totalRuntime = v4.totalRuntime;
-        newSettings.reverseEncoder = v4.reverseEncoder;
-        newSettings.pitchStepSize = v4.pitchStepSize;
-        newSettings.rampType = v4.rampType;
-        newSettings.screensaverMode = v4.screensaverMode;
-        newSettings.enable78rpm = v4.enable78rpm;
-        newSettings.freqDependentAmplitude = v4.freqDependentAmplitude;
-        newSettings.vfLowFreq = v4.vfLowFreq;
-        newSettings.vfLowBoost = v4.vfLowBoost;
-        newSettings.vfMidFreq = v4.vfMidFreq;
-        newSettings.vfMidBoost = v4.vfMidBoost;
-        newSettings.bootSpeed = v4.bootSpeed;
-        newSettings.currentSpeed = v4.currentSpeed;
-
-        _data = newSettings;
-        save();
-        return true;
-    }
-
-    return false;
-}
-
 void Settings::save(bool verbose) {
-    File f = LittleFS.open(_filename, "w");
-    if (f) {
-        f.write((uint8_t*)&_data, sizeof(GlobalSettings));
-        f.close();
+    if (writeSettingsBlob(_filename, SETTINGS_FILE_MAGIC, _data)) {
         if (verbose) Serial.println("Settings saved.");
     } else {
         if (verbose) Serial.println("Failed to save settings.");
@@ -466,10 +261,9 @@ void Settings::normalize() {
 }
 
 void Settings::validate() {
-    // Check schema version to handle data migration if needed
+    // Current first-release storage is strict: mismatches reset to defaults.
     if (_data.schemaVersion != SETTINGS_SCHEMA_VERSION) {
         Serial.println("Schema mismatch. Resetting defaults.");
-        // In the future, migration logic would go here
         resetDefaults();
     }
 

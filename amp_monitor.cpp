@@ -82,6 +82,5 @@ void AmplifierMonitor::shutdownOutputs(const char* message) {
     if (_shutdown) return;
     _shutdown = true;
 
-    motor.emergencyStop();
     errorHandler.report(ERR_AMP_THERMAL, message, true);
 }
