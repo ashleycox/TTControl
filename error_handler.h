@@ -21,7 +21,8 @@ enum ErrorCode {
     ERR_SETTINGS_CORRUPT = 3,
     ERR_I2C_FAILURE = 4,
     ERR_OUT_OF_MEMORY = 5,
-    ERR_AMP_THERMAL = 6
+    ERR_AMP_THERMAL = 6,
+    ERR_SPEED_FEEDBACK = 7
 };
 
 /**

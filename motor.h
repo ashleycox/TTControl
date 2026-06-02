@@ -56,11 +56,15 @@ public:
     bool isSweepingMode() { return _isSweepingMode; }
     bool isSpeedRamping() { return _isSpeedRamping; }
     bool isRelayTestMode() { return _relayTestMode; }
+    bool isClosedLoopActive() { return _closedLoopActive; }
     MotorState getState() { return _state; }
     SpeedMode getSpeed() { return _currentSpeedMode; }
     float getCurrentFrequency() { return _currentFreq; }
     float getPitchPercent() { return currentPitchPercent; }
+    float getClosedLoopTargetRpm() { return _closedLoopTargetRpm; }
+    float getClosedLoopCorrectionHz() { return _closedLoopCorrectionHz; }
     float getMotionProgress();
+    void resetClosedLoop();
     
     // --- Relay Control ---
     void setRelays(bool active);
@@ -130,10 +134,26 @@ private:
     float _kickRampStartFreq;
     uint32_t _kickRampStartTime;
     float _kickRampDuration;
+
+    // Closed-loop speed correction
+    bool _closedLoopActive;
+    float _closedLoopTargetRpm;
+    float _closedLoopCorrectionHz;
+    float _closedLoopIntegralHz;
+    float _closedLoopLastErrorRpm;
+    uint32_t _closedLoopLastUpdate;
+    uint32_t _closedLoopEngageTime;
+    bool _closedLoopDirectionFaultLatched;
+    bool _closedLoopDropoutLatched;
     
     void updateState();
     float calculateSoftStartAmp(float elapsed, float duration);
     void handleBraking(uint32_t now);
+    float calculateClosedLoopTargetRpm() const;
+    float applyClosedLoopCorrection(uint32_t now, float openLoopFreq);
+    void scheduleClosedLoopEngage(uint32_t now);
+    void resetClosedLoopControl(bool resetFeedback);
+    float clampToCurrentSpeedRange(float freq) const;
     void setStandbyRelay(bool active);
     void writeRelayOutput(int pin, bool active);
     void clearMotionState();
