@@ -83,7 +83,7 @@ void setClosedLoopDefaults(GlobalSettings& data) {
     data.closedLoopReverseDirection = false;
     data.closedLoopDirectionFaultAction = CLOSED_LOOP_FAULT_WARN;
     data.closedLoopDebounceUs = 100;
-    data.closedLoopTimeoutMs = 1500;
+    data.closedLoopTimeoutMs = 3000;
     data.closedLoopEngageDelayMs = 2000;
     data.closedLoopUpdateIntervalMs = 100;
     data.closedLoopFilterAlpha = 0.25f;
