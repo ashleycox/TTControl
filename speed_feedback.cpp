@@ -9,6 +9,7 @@
 #include "speed_feedback.h"
 #include "settings.h"
 #include "hal.h"
+#include "globals.h"
 
 SpeedFeedback speedFeedback;
 SpeedFeedback* SpeedFeedback::_instance = nullptr;
@@ -85,10 +86,10 @@ void SpeedFeedback::configure() {
     _lockTimeMs = g.closedLoopLockTimeMs;
     _filterAlpha = g.closedLoopFilterAlpha;
     _lockToleranceRpm = g.closedLoopLockToleranceRpm;
-    resetMeasurements();
+    reset();
 #else
     _configured = false;
-    resetMeasurements();
+    reset();
 #endif
 }
 

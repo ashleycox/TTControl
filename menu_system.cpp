@@ -228,6 +228,24 @@ void MenuByte::setChangeCallback(ChangeCallback callback) {
     _changeCallback = callback;
 }
 
+// --- MenuUInt16 (Unsigned 16-bit Editor) ---
+MenuUInt16::MenuUInt16(const char* label, uint16_t* target, uint16_t step, uint16_t min, uint16_t max)
+    : MenuSetting<uint16_t>(label, target, min, max), _step(step) {}
+
+void MenuUInt16::onInput(int delta) {
+    if (_editing) {
+        int32_t value = (int32_t)_temp + ((int32_t)delta * (int32_t)_step);
+        if (value < (int32_t)_min) value = _min;
+        if (value > (int32_t)_max) value = _max;
+        _temp = (uint16_t)value;
+        *_target = _temp;
+    }
+}
+
+void MenuUInt16::getValueString(char* buffer, size_t size) const {
+    snprintf(buffer, size, "%u", (unsigned)(_editing ? _temp : *_target));
+}
+
 // --- MenuFloat (Float Editor) ---
 MenuFloat::MenuFloat(const char* label, float* target, float step, float min, float max)
     : MenuSetting<float>(label, target, min, max), _step(step) {}

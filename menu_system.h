@@ -203,6 +203,15 @@ private:
     ChangeCallback _changeCallback;
 };
 
+class MenuUInt16 : public MenuSetting<uint16_t> {
+public:
+    MenuUInt16(const char* label, uint16_t* target, uint16_t step, uint16_t min, uint16_t max);
+    void onInput(int delta) override;
+    void getValueString(char* buffer, size_t size) const override;
+private:
+    uint16_t _step;
+};
+
 class MenuFloat : public MenuSetting<float> {
 public:
     MenuFloat(const char* label, float* target, float step, float min, float max);
