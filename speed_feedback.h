@@ -22,15 +22,35 @@ struct SpeedFeedbackStatus {
     bool configured;
     bool signalValid;
     bool locked;
+    bool pinAHigh;
+    bool pinBHigh;
     float targetRpm;
     float measuredRpm;
     float filteredRpm;
     float rpmError;
     int8_t direction;
+    int8_t rawDirection;
     int32_t count;
     int32_t countDelta;
     uint32_t invalidTransitions;
+    uint32_t debouncedTransitions;
     uint32_t lastPulseAgeMs;
+};
+
+struct SpeedFeedbackSetupStatus {
+    bool active;
+    bool pinAHigh;
+    bool pinBHigh;
+    uint32_t elapsedMs;
+    int32_t countDelta;
+    uint32_t invalidDelta;
+    uint32_t debouncedDelta;
+    int8_t rawDirection;
+    int8_t correctedDirection;
+    uint16_t suggestedCountsPerRev;
+    bool suggestedReverseDirection;
+    uint8_t suggestedSensorMode;
+    uint8_t suggestedQuadratureMode;
 };
 
 class SpeedFeedback {
@@ -41,8 +61,11 @@ public:
     void configure();
     void reset();
     void update(float targetRpm);
+    void beginSetupCapture();
+    void cancelSetupCapture();
 
     SpeedFeedbackStatus getStatus();
+    SpeedFeedbackSetupStatus getSetupStatus();
 
 private:
     static SpeedFeedback* _instance;
@@ -65,10 +88,12 @@ private:
     volatile uint32_t _lastPulseUs;
     volatile uint32_t _lastAcceptedEdgeUs;
     volatile uint32_t _invalidTransitions;
+    volatile uint32_t _debouncedTransitions;
     volatile bool _lastAState;
     volatile bool _lastBState;
     volatile uint8_t _lastQuadState;
     volatile int8_t _lastDirection;
+    volatile int8_t _lastRawDirection;
 
     uint16_t _countsPerRev;
     uint16_t _timeoutMs;
@@ -87,6 +112,12 @@ private:
     int32_t _lastCountDelta;
     bool _signalValid;
     bool _locked;
+
+    bool _setupActive;
+    int32_t _setupStartCount;
+    uint32_t _setupStartInvalidTransitions;
+    uint32_t _setupStartDebouncedTransitions;
+    uint32_t _setupStartMs;
 };
 
 extern SpeedFeedback speedFeedback;

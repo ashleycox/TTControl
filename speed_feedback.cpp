@@ -26,10 +26,12 @@ SpeedFeedback::SpeedFeedback() {
     _lastPulseUs = 0;
     _lastAcceptedEdgeUs = 0;
     _invalidTransitions = 0;
+    _debouncedTransitions = 0;
     _lastAState = false;
     _lastBState = false;
     _lastQuadState = 0;
     _lastDirection = SPEED_FEEDBACK_DIR_UNKNOWN;
+    _lastRawDirection = SPEED_FEEDBACK_DIR_UNKNOWN;
 
     _countsPerRev = 1;
     _timeoutMs = 3000;
@@ -48,6 +50,11 @@ SpeedFeedback::SpeedFeedback() {
     _lastCountDelta = 0;
     _signalValid = false;
     _locked = false;
+    _setupActive = false;
+    _setupStartCount = 0;
+    _setupStartInvalidTransitions = 0;
+    _setupStartDebouncedTransitions = 0;
+    _setupStartMs = 0;
 }
 
 void SpeedFeedback::begin() {
@@ -104,7 +111,9 @@ void SpeedFeedback::resetCounters() {
     _lastPulseUs = 0;
     _lastAcceptedEdgeUs = 0;
     _invalidTransitions = 0;
+    _debouncedTransitions = 0;
     _lastDirection = SPEED_FEEDBACK_DIR_UNKNOWN;
+    _lastRawDirection = SPEED_FEEDBACK_DIR_UNKNOWN;
     interrupts();
 }
 
@@ -119,6 +128,21 @@ void SpeedFeedback::resetMeasurements() {
     _lastCountDelta = 0;
     _signalValid = false;
     _locked = false;
+}
+
+void SpeedFeedback::beginSetupCapture() {
+    reset();
+    noInterrupts();
+    _setupStartCount = _count;
+    _setupStartInvalidTransitions = _invalidTransitions;
+    _setupStartDebouncedTransitions = _debouncedTransitions;
+    interrupts();
+    _setupStartMs = hal.getMillis();
+    _setupActive = true;
+}
+
+void SpeedFeedback::cancelSetupCapture() {
+    _setupActive = false;
 }
 
 void SpeedFeedback::update(float targetRpm) {
@@ -193,7 +217,11 @@ SpeedFeedbackStatus SpeedFeedback::getStatus() {
     status.configured = _configured;
     status.count = _count;
     status.invalidTransitions = _invalidTransitions;
+    status.debouncedTransitions = _debouncedTransitions;
     status.direction = _lastDirection;
+    status.rawDirection = _lastRawDirection;
+    status.pinAHigh = _lastAState;
+    status.pinBHigh = _lastBState;
     uint32_t lastPulseUs = _lastPulseUs;
     interrupts();
 
@@ -208,6 +236,35 @@ SpeedFeedbackStatus SpeedFeedback::getStatus() {
     return status;
 }
 
+SpeedFeedbackSetupStatus SpeedFeedback::getSetupStatus() {
+    SpeedFeedbackSetupStatus status;
+    int32_t count;
+    uint32_t invalidTransitions;
+    uint32_t debouncedTransitions;
+
+    noInterrupts();
+    count = _count;
+    invalidTransitions = _invalidTransitions;
+    debouncedTransitions = _debouncedTransitions;
+    status.pinAHigh = _lastAState;
+    status.pinBHigh = _lastBState;
+    status.rawDirection = _lastRawDirection;
+    status.correctedDirection = _lastDirection;
+    status.suggestedSensorMode = _sensorMode;
+    status.suggestedQuadratureMode = _quadratureMode;
+    interrupts();
+
+    status.active = _setupActive;
+    status.elapsedMs = _setupActive ? hal.getMillis() - _setupStartMs : 0;
+    status.countDelta = count - _setupStartCount;
+    status.invalidDelta = invalidTransitions - _setupStartInvalidTransitions;
+    status.debouncedDelta = debouncedTransitions - _setupStartDebouncedTransitions;
+    int32_t absDelta = abs(status.countDelta);
+    status.suggestedCountsPerRev = absDelta > 0 && absDelta <= 20000 ? (uint16_t)absDelta : 0;
+    status.suggestedReverseDirection = status.rawDirection == SPEED_FEEDBACK_DIR_REVERSE;
+    return status;
+}
+
 void SpeedFeedback::isrHandler() {
     if (_instance) _instance->handleInterrupt();
 }
@@ -218,6 +275,7 @@ void SpeedFeedback::handleInterrupt() {
 
     uint32_t nowUs = micros();
     if (_debounceUs > 0 && (nowUs - _lastAcceptedEdgeUs) < _debounceUs) {
+        _debouncedTransitions++;
         return;
     }
 
@@ -231,6 +289,7 @@ void SpeedFeedback::handleInterrupt() {
 
         _lastAcceptedEdgeUs = nowUs;
         _lastPulseUs = nowUs;
+        _lastRawDirection = SPEED_FEEDBACK_DIR_FORWARD;
         _lastDirection = SPEED_FEEDBACK_DIR_FORWARD;
         _count++;
         return;
@@ -256,9 +315,10 @@ void SpeedFeedback::handleInterrupt() {
         return;
     }
 
-    if (_reverseDirection) delta = -delta;
-    _count += delta;
-    _lastDirection = delta >= 0 ? SPEED_FEEDBACK_DIR_FORWARD : SPEED_FEEDBACK_DIR_REVERSE;
+    _lastRawDirection = delta >= 0 ? SPEED_FEEDBACK_DIR_FORWARD : SPEED_FEEDBACK_DIR_REVERSE;
+    int8_t correctedDelta = _reverseDirection ? -delta : delta;
+    _count += correctedDelta;
+    _lastDirection = correctedDelta >= 0 ? SPEED_FEEDBACK_DIR_FORWARD : SPEED_FEEDBACK_DIR_REVERSE;
     _lastPulseUs = nowUs;
     _lastAcceptedEdgeUs = nowUs;
     _lastQuadState = currentState;
