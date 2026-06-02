@@ -26,6 +26,17 @@ enum ClosedLoopTuneStep : uint8_t {
     CLOSED_LOOP_TUNE_VERIFY
 };
 
+enum ClosedLoopTuneSuggestionAction : uint8_t {
+    CLOSED_LOOP_SUGGEST_NONE = 0,
+    CLOSED_LOOP_SUGGEST_APPLY_SETUP,
+    CLOSED_LOOP_SUGGEST_INCREASE_DEBOUNCE,
+    CLOSED_LOOP_SUGGEST_INCREASE_TIMEOUT,
+    CLOSED_LOOP_SUGGEST_INCREASE_CORRECTION_LIMIT,
+    CLOSED_LOOP_SUGGEST_REDUCE_KP,
+    CLOSED_LOOP_SUGGEST_INCREASE_KI,
+    CLOSED_LOOP_SUGGEST_INCREASE_KP
+};
+
 struct ClosedLoopMetrics {
     uint32_t sampleCount;
     uint32_t validSamples;
@@ -46,9 +57,21 @@ struct ClosedLoopMetrics {
     float lastErrorRpm;
 };
 
+struct ClosedLoopTrendPoint {
+    uint32_t sampleTimeMs;
+    float targetRpm;
+    float measuredRpm;
+    float errorRpm;
+    float correctionHz;
+    bool signalValid;
+    bool locked;
+};
+
 struct ClosedLoopTuningStatus {
     bool active;
     uint8_t step;
+    uint8_t recommendationAction;
+    bool canApplyRecommendation;
     const char* stepName;
     char instruction[96];
     char recommendation[120];
@@ -108,12 +131,17 @@ public:
     float getClosedLoopRequestedTargetRpm() { return _closedLoopRequestedTargetRpm; }
     float getClosedLoopRampTargetRpm() { return _closedLoopRampTargetRpm; }
     float getClosedLoopCorrectionHz() { return _closedLoopCorrectionHz; }
+    float getClosedLoopReferenceTargetRpm();
+    float getClosedLoopPitchOffsetRpm();
     ClosedLoopMetrics getClosedLoopMetrics() { return _closedLoopMetrics; }
     ClosedLoopTuningStatus getClosedLoopTuningStatus();
+    uint8_t getClosedLoopTrendCount() const { return _closedLoopTrendCount; }
+    bool getClosedLoopTrendPoint(uint8_t index, ClosedLoopTrendPoint& out) const;
     float getMotionProgress();
     void resetClosedLoop();
     void beginClosedLoopTuning();
     void advanceClosedLoopTuning();
+    bool applyClosedLoopTuningSuggestion(char* out, size_t outSize);
     void cancelClosedLoopTuning();
     
     // --- Relay Control ---
@@ -217,10 +245,14 @@ private:
     bool _closedLoopMetricsLastSignalValid;
     bool _closedLoopMetricsWasSaturated;
     uint8_t _closedLoopTuneStep;
+    ClosedLoopTrendPoint _closedLoopTrend[CLOSED_LOOP_TREND_SIZE];
+    uint8_t _closedLoopTrendNext;
+    uint8_t _closedLoopTrendCount;
     
     void updateState();
     float calculateSoftStartAmp(float elapsed, float duration);
     void handleBraking(uint32_t now);
+    float calculatePitchAdjustedFrequencyForSpeed(SpeedMode speed) const;
     float calculateClosedLoopTargetRpm() const;
     float calculateClosedLoopTargetRpmForSpeed(SpeedMode speed) const;
     float updateClosedLoopTarget(uint32_t now, float requestedRpm);
@@ -234,7 +266,8 @@ private:
     void recordClosedLoopMetrics(uint32_t now, const SpeedFeedbackStatus& feedback);
     const char* closedLoopTuneStepName(uint8_t step) const;
     const char* closedLoopTuneInstruction(uint8_t step) const;
-    void buildClosedLoopRecommendation(char* out, size_t outSize);
+    void recordClosedLoopTrend(const SpeedFeedbackStatus& feedback);
+    uint8_t buildClosedLoopRecommendation(char* out, size_t outSize);
     void updateClosedLoopAmpRecovery(uint32_t now, const SpeedFeedbackStatus& feedback);
     float applyClosedLoopCorrection(uint32_t now, float openLoopFreq);
     void scheduleClosedLoopEngage(uint32_t now);

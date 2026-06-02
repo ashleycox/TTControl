@@ -239,6 +239,13 @@ struct GlobalSettingsV7 {
 
 static_assert(sizeof(GlobalSettingsV7) == 456, "GlobalSettingsV7 must match schema 7 storage size.");
 
+struct GlobalSettingsV8 {
+    GlobalSettingsV7 base;
+    ClosedLoopSpeedTuning closedLoopTuning[3];
+};
+
+static_assert(sizeof(GlobalSettingsV8) == 588, "GlobalSettingsV8 must match schema 8 storage size.");
+
 void copyGlobalClosedLoopTuningToSpeed(const GlobalSettings& source, ClosedLoopSpeedTuning& target) {
     target.deadbandRpm = source.closedLoopDeadbandRpm;
     target.lockToleranceRpm = source.closedLoopLockToleranceRpm;
@@ -269,6 +276,7 @@ void setClosedLoopAdvancedDefaults(GlobalSettings& data) {
     data.closedLoopRampCorrectionLimitHz = 1.0f;
     data.closedLoopPitchSlewRpmPerSec = 0.0f;
     data.closedLoopPitchResetThresholdRpm = 0.25f;
+    data.closedLoopPitchTargetMode = CLOSED_LOOP_PITCH_TARGET_FOLLOW;
     data.closedLoopSaturationTimeMs = 5000;
     data.closedLoopSaturationAction = CLOSED_LOOP_FAULT_WARN;
     data.closedLoopPlausibilityMinRpm = 1.0f;
@@ -548,6 +556,14 @@ void copyFromV7(const GlobalSettingsV7& source, GlobalSettings& target) {
     copyGlobalClosedLoopTuningToSpeeds(target);
 }
 
+void copyFromV8(const GlobalSettingsV8& source, GlobalSettings& target) {
+    copyFromV7(source.base, target);
+    for (int i = 0; i < 3; i++) {
+        target.closedLoopTuning[i] = source.closedLoopTuning[i];
+    }
+    target.closedLoopPitchTargetMode = CLOSED_LOOP_PITCH_TARGET_FOLLOW;
+}
+
 uint32_t settingsCrc32(const uint8_t* data, size_t length) {
     uint32_t crc = 0xFFFFFFFFUL;
     for (size_t i = 0; i < length; i++) {
@@ -653,6 +669,22 @@ bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, 
         if (crc != header.crc32) return false;
 
         copyFromV7(legacy, target);
+        if (migrated) *migrated = true;
+        return true;
+    }
+
+    if (header.schemaVersion == 8 && header.payloadSize == sizeof(GlobalSettingsV8)) {
+        GlobalSettingsV8 legacy;
+        if (f.read((uint8_t*)&legacy, sizeof(legacy)) != sizeof(legacy)) {
+            f.close();
+            return false;
+        }
+        f.close();
+
+        uint32_t crc = settingsCrc32((const uint8_t*)&legacy, sizeof(legacy));
+        if (crc != header.crc32) return false;
+
+        copyFromV8(legacy, target);
         if (migrated) *migrated = true;
         return true;
     }
@@ -970,6 +1002,9 @@ void Settings::validate() {
     if (_data.closedLoopPitchSlewRpmPerSec > 200.0f) _data.closedLoopPitchSlewRpmPerSec = 200.0f;
     if (_data.closedLoopPitchResetThresholdRpm < 0.0f) _data.closedLoopPitchResetThresholdRpm = 0.0f;
     if (_data.closedLoopPitchResetThresholdRpm > 20.0f) _data.closedLoopPitchResetThresholdRpm = 20.0f;
+    if (_data.closedLoopPitchTargetMode > CLOSED_LOOP_PITCH_TARGET_FOLLOW) {
+        _data.closedLoopPitchTargetMode = CLOSED_LOOP_PITCH_TARGET_FOLLOW;
+    }
     if (_data.closedLoopSaturationTimeMs > 60000) _data.closedLoopSaturationTimeMs = 60000;
     if (_data.closedLoopSaturationAction > CLOSED_LOOP_FAULT_STOP) {
         _data.closedLoopSaturationAction = CLOSED_LOOP_FAULT_WARN;
@@ -1273,6 +1308,7 @@ bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
     doc["clRamp"] = target.closedLoopRampMode;
     doc["clRampKp"] = target.closedLoopTuning[SPEED_33].rampKp;
     doc["clRampLim"] = target.closedLoopTuning[SPEED_33].rampCorrectionLimitHz;
+    doc["clPitchMode"] = target.closedLoopPitchTargetMode;
     doc["clPitchSlew"] = target.closedLoopPitchSlewRpmPerSec;
     doc["clPitchReset"] = target.closedLoopPitchResetThresholdRpm;
     doc["clSatMs"] = target.closedLoopSaturationTimeMs;
@@ -1398,6 +1434,7 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
     if (doc["clRamp"].is<uint8_t>()) target.closedLoopRampMode = doc["clRamp"].as<uint8_t>();
     if (doc["clRampKp"].is<float>()) { target.closedLoopRampKp = doc["clRampKp"].as<float>(); oldClosedLoopTuningImported = true; }
     if (doc["clRampLim"].is<float>()) { target.closedLoopRampCorrectionLimitHz = doc["clRampLim"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clPitchMode"].is<uint8_t>()) target.closedLoopPitchTargetMode = doc["clPitchMode"].as<uint8_t>();
     if (doc["clPitchSlew"].is<float>()) target.closedLoopPitchSlewRpmPerSec = doc["clPitchSlew"].as<float>();
     if (doc["clPitchReset"].is<float>()) target.closedLoopPitchResetThresholdRpm = doc["clPitchReset"].as<float>();
     if (doc["clSatMs"].is<uint16_t>()) target.closedLoopSaturationTimeMs = doc["clSatMs"].as<uint16_t>();

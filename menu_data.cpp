@@ -52,6 +52,7 @@ static const char* const closedLoopFaultLabels[] = {"Ignore", "Warn", "Stop"};
 static const char* const closedLoopDropLabels[] = {"Open", "Hold", "Stop"};
 static const char* const closedLoopRampLabels[] = {"Off", "Track"};
 static const char* const closedLoopAmpRecoveryLabels[] = {"Off", "Warn", "Restore"};
+static const char* const closedLoopPitchTargetLabels[] = {"Fixed", "Follow"};
 #endif
 
 #if ENABLE_STANDBY && ENABLE_MUTE_RELAYS && ENABLE_DPDT_RELAYS
@@ -503,6 +504,12 @@ void actionClosedLoopTuneStatus() {
     ui.showMessage(tuning.recommendation, 2500);
 }
 
+void actionClosedLoopTuneApply() {
+    char msg[120];
+    motor.applyClosedLoopTuningSuggestion(msg, sizeof(msg));
+    ui.showMessage(msg, 2500);
+}
+
 void actionClosedLoopTuneStop() {
     motor.cancelClosedLoopTuning();
     ui.showMessage("Tune Stopped", 1200);
@@ -660,6 +667,11 @@ void actionEnterClosedLoop() {
     });
     pageClosedLoop->addItem(rampLimit);
 
+    MenuItem* pitchMode = new MenuByte("Pitch Mode", &settings.get().closedLoopPitchTargetMode,
+        CLOSED_LOOP_PITCH_TARGET_FIXED, CLOSED_LOOP_PITCH_TARGET_FOLLOW, closedLoopPitchTargetLabels, 2);
+    pitchMode->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
+    pageClosedLoop->addItem(pitchMode);
+
     MenuItem* pitchSlew = new MenuFloat("Pitch Slew", &settings.get().closedLoopPitchSlewRpmPerSec, 0.1, 0.0, 200.0);
     pitchSlew->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(pitchSlew);
@@ -730,6 +742,7 @@ void actionEnterClosedLoop() {
     pageClosedLoop->addItem(new MenuAction("Tune Start", actionClosedLoopTuneStart));
     pageClosedLoop->addItem(new MenuAction("Tune Next", actionClosedLoopTuneNext));
     pageClosedLoop->addItem(new MenuAction("Tune Stat", actionClosedLoopTuneStatus));
+    pageClosedLoop->addItem(new MenuAction("Tune Apply", actionClosedLoopTuneApply));
     pageClosedLoop->addItem(new MenuAction("Tune Stop", actionClosedLoopTuneStop));
     pageClosedLoop->addItem(new MenuAction("Back", [](){ ui.back(); }));
     ui.navigateTo(pageClosedLoop);

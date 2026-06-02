@@ -27,6 +27,15 @@ SpeedFeedback::SpeedFeedback() {
     _lastAcceptedEdgeUs = 0;
     _invalidTransitions = 0;
     _debouncedTransitions = 0;
+    _acceptedTransitions = 0;
+    _intervalSamples = 0;
+    _intervalJitterSamples = 0;
+    _lastIntervalUs = 0;
+    _minIntervalUs = 0;
+    _maxIntervalUs = 0;
+    _previousIntervalUs = 0;
+    _intervalSumUs = 0;
+    _intervalJitterSumUs = 0;
     _lastAState = false;
     _lastBState = false;
     _lastQuadState = 0;
@@ -114,6 +123,15 @@ void SpeedFeedback::resetCounters() {
     _lastAcceptedEdgeUs = 0;
     _invalidTransitions = 0;
     _debouncedTransitions = 0;
+    _acceptedTransitions = 0;
+    _intervalSamples = 0;
+    _intervalJitterSamples = 0;
+    _lastIntervalUs = 0;
+    _minIntervalUs = 0;
+    _maxIntervalUs = 0;
+    _previousIntervalUs = 0;
+    _intervalSumUs = 0;
+    _intervalJitterSumUs = 0;
     _lastDirection = SPEED_FEEDBACK_DIR_UNKNOWN;
     _lastRawDirection = SPEED_FEEDBACK_DIR_UNKNOWN;
     interrupts();
@@ -219,12 +237,28 @@ void SpeedFeedback::update(float targetRpm) {
 SpeedFeedbackStatus SpeedFeedback::getStatus() {
     SpeedFeedbackStatus status;
     uint32_t nowUs = hal.getMicros();
+    uint32_t acceptedTransitions;
+    uint32_t intervalSamples;
+    uint32_t intervalJitterSamples;
+    uint32_t lastIntervalUs;
+    uint32_t minIntervalUs;
+    uint32_t maxIntervalUs;
+    uint64_t intervalSumUs;
+    uint64_t intervalJitterSumUs;
 
     noInterrupts();
     status.configured = _configured;
     status.count = _count;
     status.invalidTransitions = _invalidTransitions;
     status.debouncedTransitions = _debouncedTransitions;
+    acceptedTransitions = _acceptedTransitions;
+    intervalSamples = _intervalSamples;
+    intervalJitterSamples = _intervalJitterSamples;
+    lastIntervalUs = _lastIntervalUs;
+    minIntervalUs = _minIntervalUs;
+    maxIntervalUs = _maxIntervalUs;
+    intervalSumUs = _intervalSumUs;
+    intervalJitterSumUs = _intervalJitterSumUs;
     status.direction = _lastDirection;
     status.rawDirection = _lastRawDirection;
     status.pinAHigh = _lastAState;
@@ -239,6 +273,20 @@ SpeedFeedbackStatus SpeedFeedback::getStatus() {
     status.filteredRpm = _filteredRpm;
     status.rpmError = _rpmError;
     status.countDelta = _lastCountDelta;
+    status.acceptedTransitions = acceptedTransitions;
+    status.totalTransitions = acceptedTransitions + status.invalidTransitions + status.debouncedTransitions;
+    status.intervalSamples = intervalSamples;
+    status.lastIntervalUs = lastIntervalUs;
+    status.minIntervalUs = minIntervalUs;
+    status.maxIntervalUs = maxIntervalUs;
+    status.averageIntervalUs = intervalSamples > 0 ? (uint32_t)(intervalSumUs / intervalSamples) : 0;
+    status.averageJitterUs = intervalJitterSamples > 0 ? (uint32_t)(intervalJitterSumUs / intervalJitterSamples) : 0;
+    status.averageJitterPercent = status.averageIntervalUs > 0 ?
+        ((float)status.averageJitterUs * 100.0f) / (float)status.averageIntervalUs : 0.0f;
+    status.invalidTransitionPercent = status.totalTransitions > 0 ?
+        ((float)status.invalidTransitions * 100.0f) / (float)status.totalTransitions : 0.0f;
+    status.debouncedTransitionPercent = status.totalTransitions > 0 ?
+        ((float)status.debouncedTransitions * 100.0f) / (float)status.totalTransitions : 0.0f;
     status.lastPulseAgeMs = lastPulseUs == 0 ? UINT32_MAX : (nowUs - lastPulseUs) / 1000UL;
     status.sampleTimeMs = _lastSampleMs;
     status.sampleSequence = _sampleSequence;
@@ -296,10 +344,9 @@ void SpeedFeedback::handleInterrupt() {
         _lastAState = a;
         if (!acceptsPulseEdge(previousA, a)) return;
 
-        _lastAcceptedEdgeUs = nowUs;
-        _lastPulseUs = nowUs;
         _lastRawDirection = SPEED_FEEDBACK_DIR_FORWARD;
         _lastDirection = SPEED_FEEDBACK_DIR_FORWARD;
+        recordAcceptedTransition(nowUs);
         _count++;
         return;
     }
@@ -328,11 +375,37 @@ void SpeedFeedback::handleInterrupt() {
     int8_t correctedDelta = _reverseDirection ? -delta : delta;
     _count += correctedDelta;
     _lastDirection = correctedDelta >= 0 ? SPEED_FEEDBACK_DIR_FORWARD : SPEED_FEEDBACK_DIR_REVERSE;
-    _lastPulseUs = nowUs;
-    _lastAcceptedEdgeUs = nowUs;
+    recordAcceptedTransition(nowUs);
     _lastQuadState = currentState;
     _lastAState = a;
     _lastBState = b;
+#endif
+}
+
+void SpeedFeedback::recordAcceptedTransition(uint32_t nowUs) {
+#if CLOSED_LOOP_SPEED_ENABLE
+    if (_lastPulseUs != 0) {
+        uint32_t intervalUs = nowUs - _lastPulseUs;
+        _lastIntervalUs = intervalUs;
+        if (_minIntervalUs == 0 || intervalUs < _minIntervalUs) _minIntervalUs = intervalUs;
+        if (intervalUs > _maxIntervalUs) _maxIntervalUs = intervalUs;
+        _intervalSumUs += intervalUs;
+        _intervalSamples++;
+
+        if (_previousIntervalUs != 0) {
+            uint32_t jitterUs = intervalUs > _previousIntervalUs ?
+                intervalUs - _previousIntervalUs : _previousIntervalUs - intervalUs;
+            _intervalJitterSumUs += jitterUs;
+            _intervalJitterSamples++;
+        }
+        _previousIntervalUs = intervalUs;
+    }
+
+    _acceptedTransitions++;
+    _lastPulseUs = nowUs;
+    _lastAcceptedEdgeUs = nowUs;
+#else
+    (void)nowUs;
 #endif
 }
 

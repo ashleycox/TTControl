@@ -34,6 +34,17 @@ struct SpeedFeedbackStatus {
     int32_t countDelta;
     uint32_t invalidTransitions;
     uint32_t debouncedTransitions;
+    uint32_t acceptedTransitions;
+    uint32_t totalTransitions;
+    uint32_t intervalSamples;
+    uint32_t lastIntervalUs;
+    uint32_t minIntervalUs;
+    uint32_t maxIntervalUs;
+    uint32_t averageIntervalUs;
+    uint32_t averageJitterUs;
+    float averageJitterPercent;
+    float invalidTransitionPercent;
+    float debouncedTransitionPercent;
     uint32_t lastPulseAgeMs;
     uint32_t sampleTimeMs;
     uint32_t sampleSequence;
@@ -76,6 +87,7 @@ private:
 
     void resetCounters();
     void resetMeasurements();
+    void recordAcceptedTransition(uint32_t nowUs);
     bool acceptsPulseEdge(bool previousA, bool currentA) const;
     int8_t quadratureDelta(uint8_t previousState, uint8_t currentState) const;
     bool shouldCountQuadratureStep(uint8_t previousState, uint8_t currentState) const;
@@ -91,6 +103,15 @@ private:
     volatile uint32_t _lastAcceptedEdgeUs;
     volatile uint32_t _invalidTransitions;
     volatile uint32_t _debouncedTransitions;
+    volatile uint32_t _acceptedTransitions;
+    volatile uint32_t _intervalSamples;
+    volatile uint32_t _intervalJitterSamples;
+    volatile uint32_t _lastIntervalUs;
+    volatile uint32_t _minIntervalUs;
+    volatile uint32_t _maxIntervalUs;
+    volatile uint32_t _previousIntervalUs;
+    volatile uint64_t _intervalSumUs;
+    volatile uint64_t _intervalJitterSumUs;
     volatile bool _lastAState;
     volatile bool _lastBState;
     volatile uint8_t _lastQuadState;

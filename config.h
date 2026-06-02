@@ -83,6 +83,9 @@
 #ifndef CLOSED_LOOP_SPEED_ENABLE
 #define CLOSED_LOOP_SPEED_ENABLE 0 // Enable optional tachometer/quadrature speed feedback
 #endif
+#ifndef CLOSED_LOOP_TREND_SIZE
+#define CLOSED_LOOP_TREND_SIZE 24  // Rolling runtime samples retained for closed-loop trend diagnostics
+#endif
 
 #if ENABLE_4_CHANNEL_SUPPORT
 #define MAX_PHASE_MODE 4
@@ -158,13 +161,13 @@
 #define WELCOME_MESSAGE "Welcome to TT Control"
 
 // --- Storage Schema ---
-#define SETTINGS_SCHEMA_VERSION 8
+#define SETTINGS_SCHEMA_VERSION 9
 #define SETTINGS_FILE_FORMAT_VERSION 1
 #define SETTINGS_FILE_MAGIC 0x54544353UL // "TTCS"
 #define PRESET_FILE_MAGIC 0x54544350UL   // "TTCP"
 #define SPEED_SETTINGS_STORAGE_SIZE 52
 #define CLOSED_LOOP_TUNING_STORAGE_SIZE 44
-#define GLOBAL_SETTINGS_STORAGE_SIZE 588
+#define GLOBAL_SETTINGS_STORAGE_SIZE 592
 
 // --- Default Values ---
 #define DEFAULT_PHASE_MODE 3 // 3-phase
@@ -213,6 +216,7 @@ static_assert(AMP_TEMP_SHUTDOWN_C <= AMP_TEMP_MAX_C, "Amplifier shutdown tempera
 static_assert(AMP_TEMP_MIN_SHUTDOWN_MARGIN_C > 0.0f, "Amplifier thermal shutdown margin must be positive.");
 static_assert(SETTINGS_SCHEMA_VERSION > 0, "Settings schema version must be positive.");
 static_assert(SETTINGS_FILE_FORMAT_VERSION == 1, "Update settings file load/save code when changing the file format.");
+static_assert(CLOSED_LOOP_TREND_SIZE > 0 && CLOSED_LOOP_TREND_SIZE <= 64, "Closed-loop trend size must stay small and non-zero.");
 
 #define TT_PIN_ASSERT_DISTINCT(a, b) static_assert((a) != (b), #a " must not share a GPIO with " #b)
 

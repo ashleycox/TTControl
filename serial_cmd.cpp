@@ -98,6 +98,10 @@ static const char* closedLoopAmpRecoveryName(uint8_t mode) {
     return "Off";
 }
 
+static const char* closedLoopPitchTargetName(uint8_t mode) {
+    return mode == CLOSED_LOOP_PITCH_TARGET_FIXED ? "Fixed" : "Follow pitch";
+}
+
 static const char* closedLoopDirectionName(int8_t direction) {
     if (direction == SPEED_FEEDBACK_DIR_FORWARD) return "Forward";
     if (direction == SPEED_FEEDBACK_DIR_REVERSE) return "Reverse";
@@ -114,6 +118,8 @@ static void printSafetyDiagnostic();
 static void printClosedLoopStatus();
 static void handleClosedLoopCommand(const String& input);
 static void printClosedLoopSetupStatus();
+static void printClosedLoopHealth();
+static void printClosedLoopTrend();
 
 static int clampInt(int value, int minValue, int maxValue) {
     if (value < minValue) return minValue;
@@ -1175,6 +1181,14 @@ void initCLI() {
         }
     });
 
+    registry.push_back({ "cl_pitch_mode",
+        []() { return String(settings.get().closedLoopPitchTargetMode); },
+        [](String v) {
+            settings.get().closedLoopPitchTargetMode = (uint8_t)clampInt(v.toInt(), CLOSED_LOOP_PITCH_TARGET_FIXED, CLOSED_LOOP_PITCH_TARGET_FOLLOW);
+            motor.resetClosedLoop();
+        }
+    });
+
     registry.push_back({ "cl_pitch_reset",
         []() { return String(settings.get().closedLoopPitchResetThresholdRpm); },
         [](String v) { settings.get().closedLoopPitchResetThresholdRpm = clampFloat(v.toFloat(), 0.0, 20.0); }
@@ -1713,6 +1727,14 @@ static void printClosedLoopStatus() {
     Serial.print(motor.getClosedLoopRampTargetRpm(), 4);
     Serial.println(" RPM");
 
+    Serial.print("CL Pitch Target: ");
+    Serial.print(closedLoopPitchTargetName(settings.get().closedLoopPitchTargetMode));
+    Serial.print(", reference ");
+    Serial.print(motor.getClosedLoopReferenceTargetRpm(), 4);
+    Serial.print(" RPM, pitch offset ");
+    Serial.print(motor.getClosedLoopPitchOffsetRpm(), 4);
+    Serial.println(" RPM");
+
     Serial.print("CL Measured/Error: ");
     Serial.print(feedback.filteredRpm, 4);
     Serial.print(" / ");
@@ -1777,6 +1799,72 @@ static void printClosedLoopStatus() {
     Serial.print(tuning.stepName);
     Serial.print(" - ");
     Serial.println(tuning.recommendation);
+    Serial.print("CL Tune Apply: ");
+    Serial.println(tuning.canApplyRecommendation ? "available" : "none");
+    printClosedLoopHealth();
+#endif
+}
+
+static void printClosedLoopHealth() {
+#if CLOSED_LOOP_SPEED_ENABLE
+    SpeedFeedbackStatus feedback = speedFeedback.getStatus();
+
+    Serial.print("CL Health: accepted ");
+    Serial.print(feedback.acceptedTransitions);
+    Serial.print(", total ");
+    Serial.print(feedback.totalTransitions);
+    Serial.print(", invalid ");
+    Serial.print(feedback.invalidTransitionPercent, 2);
+    Serial.print("%, debounced ");
+    Serial.print(feedback.debouncedTransitionPercent, 2);
+    Serial.println("%");
+
+    Serial.print("CL Intervals: last ");
+    Serial.print(feedback.lastIntervalUs);
+    Serial.print(" us, avg ");
+    Serial.print(feedback.averageIntervalUs);
+    Serial.print(" us, min/max ");
+    Serial.print(feedback.minIntervalUs);
+    Serial.print("/");
+    Serial.print(feedback.maxIntervalUs);
+    Serial.print(" us, jitter ");
+    Serial.print(feedback.averageJitterUs);
+    Serial.print(" us (");
+    Serial.print(feedback.averageJitterPercent, 2);
+    Serial.println("%)");
+#endif
+}
+
+static void printClosedLoopTrend() {
+#if CLOSED_LOOP_SPEED_ENABLE
+    Serial.println("--- Closed-Loop Trend ---");
+    uint8_t count = motor.getClosedLoopTrendCount();
+    if (count == 0) {
+        Serial.println("No trend samples yet.");
+        Serial.println("-------------------------");
+        return;
+    }
+
+    for (uint8_t i = 0; i < count; i++) {
+        ClosedLoopTrendPoint point;
+        if (!motor.getClosedLoopTrendPoint(i, point)) continue;
+        Serial.print(i);
+        Serial.print(": t=");
+        Serial.print(point.sampleTimeMs);
+        Serial.print(" target=");
+        Serial.print(point.targetRpm, 4);
+        Serial.print(" rpm measured=");
+        Serial.print(point.measuredRpm, 4);
+        Serial.print(" error=");
+        Serial.print(point.errorRpm, 4);
+        Serial.print(" corr=");
+        Serial.print(point.correctionHz, 4);
+        Serial.print(" Hz ");
+        Serial.print(point.signalValid ? "valid" : "lost");
+        Serial.print(" ");
+        Serial.println(point.locked ? "locked" : "unlocked");
+    }
+    Serial.println("-------------------------");
 #endif
 }
 
@@ -1828,6 +1916,8 @@ static void handleClosedLoopCommand(const String& input) {
     if (args.empty() || args[0] == "help") {
         Serial.println("Closed-loop commands:");
         Serial.println("cl status - Show live feedback state");
+        Serial.println("cl health - Show sensor transition and jitter health");
+        Serial.println("cl trend - Show recent RPM and correction trend samples");
         Serial.println("cl reset - Reset controller and feedback counters");
         Serial.println("cl setup start - Capture one manual platter revolution");
         Serial.println("cl setup status - Show captured count and direction");
@@ -1835,6 +1925,7 @@ static void handleClosedLoopCommand(const String& input) {
         Serial.println("cl setup stop - Cancel setup capture");
         Serial.println("cl tune start - Start guided closed-loop tuning");
         Serial.println("cl tune next - Advance tuning step");
+        Serial.println("cl tune apply - Apply the current safe tuning suggestion");
         Serial.println("cl tune status - Show tuning guidance and stability metrics");
         Serial.println("cl tune suggest - Show current tuning recommendation");
         Serial.println("cl tune stop - Stop guided tuning");
@@ -1846,6 +1937,16 @@ static void handleClosedLoopCommand(const String& input) {
 
     if (command == "status") {
         printClosedLoopStatus();
+        return;
+    }
+
+    if (command == "health") {
+        printClosedLoopHealth();
+        return;
+    }
+
+    if (command == "trend") {
+        printClosedLoopTrend();
         return;
     }
 
@@ -1865,11 +1966,18 @@ static void handleClosedLoopCommand(const String& input) {
         } else if (tuneCommand == "next") {
             motor.advanceClosedLoopTuning();
             Serial.println("Closed-loop tuning advanced.");
+        } else if (tuneCommand == "apply") {
+            char applied[120];
+            bool changed = motor.applyClosedLoopTuningSuggestion(applied, sizeof(applied));
+            Serial.println(applied);
+            if (!changed) {
+                return;
+            }
         } else if (tuneCommand == "stop" || tuneCommand == "cancel") {
             motor.cancelClosedLoopTuning();
             Serial.println("Closed-loop tuning stopped.");
         } else if (tuneCommand != "status" && tuneCommand != "suggest") {
-            Serial.println("Unknown tune command. Use start, next, status, suggest, or stop.");
+            Serial.println("Unknown tune command. Use start, next, apply, status, suggest, or stop.");
             return;
         }
 
@@ -1982,6 +2090,9 @@ static void printSafetyDiagnostic() {
     printDiagCheck("closed-loop ramp tracking settings are valid",
         g.closedLoopRampMode <= CLOSED_LOOP_RAMP_TRACK,
         ok);
+    printDiagCheck("closed-loop pitch target mode is valid",
+        g.closedLoopPitchTargetMode <= CLOSED_LOOP_PITCH_TARGET_FOLLOW,
+        ok);
     for (uint8_t i = 0; i < 3; i++) {
         ClosedLoopSpeedTuning& t = g.closedLoopTuning[i];
         char label[48];
@@ -2090,7 +2201,8 @@ void printHelp() {
 #if CLOSED_LOOP_SPEED_ENABLE
     Serial.println("cl status|reset|help");
     Serial.println("cl setup start|status|apply|stop");
-    Serial.println("cl tune start|next|status|suggest|stop");
+    Serial.println("cl health|trend");
+    Serial.println("cl tune start|next|apply|status|suggest|stop");
 #endif
     Serial.println("diag safety - Dry-run safety diagnostic");
     Serial.println("wifi help|status|wizard|scan|connect");
@@ -2518,6 +2630,8 @@ static void printSettingsDump() {
     Serial.print(" RPM/s, reset ");
     Serial.print(g.closedLoopPitchResetThresholdRpm);
     Serial.println(" RPM");
+    Serial.print("Closed Loop Pitch Mode: ");
+    Serial.println(closedLoopPitchTargetName(g.closedLoopPitchTargetMode));
     Serial.print("Closed Loop Faults: dropout ");
     Serial.print(closedLoopDropoutName(g.closedLoopDropoutAction));
     Serial.print(", saturation ");

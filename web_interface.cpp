@@ -167,7 +167,7 @@ const telemetrySeries={frequency:true,pitch:true,amp:true,rpm:true};
 const telemetry=[],events=[],MAX_TELEMETRY=180,MAX_EVENTS=60;
 const homeTabs=["dashboard","control","settings","calibrate","network","presets","bench","diagnostics","errors"];
 const tabNames={dashboard:"Dashboard",control:"Control",settings:"Settings",calibrate:"Calibrate",network:"Network",presets:"Presets",bench:"Bench",diagnostics:"Diagnostics",errors:"Errors"};
-const presetGlobalMap={pm:"phaseMode",maxAmp:"maxAmplitude",ssCurve:"softStartCurve",fda:"freqDependentAmplitude",vfLF:"vfLowFreq",vfLB:"vfLowBoost",vfMF:"vfMidFreq",vfMB:"vfMidBoost",clEn:"closedLoopEnabled",clCtrl:"closedLoopControlMode",clMd:"closedLoopSensorMode",clCpr:"closedLoopCountsPerRev",clEdge:"closedLoopPulseEdge",clQuad:"closedLoopQuadratureMode",clRev:"closedLoopReverseDirection",clDir:"closedLoopDirectionFaultAction",clDb:"closedLoopDebounceUs",clTo:"closedLoopTimeoutMs",clEng:"closedLoopEngageDelayMs",clUpd:"closedLoopUpdateIntervalMs",clAlpha:"closedLoopFilterAlpha",clDbnd:"closedLoopDeadbandRpm",clLock:"closedLoopLockToleranceRpm",clLockMs:"closedLoopLockTimeMs",clKp:"closedLoopKp",clKi:"closedLoopKi",clKd:"closedLoopKd",clILim:"closedLoopIntegralLimitHz",clCLim:"closedLoopCorrectionLimitHz",clSlew:"closedLoopSlewLimitHzPerSec",clDrop:"closedLoopDropoutAction",clReqSig:"closedLoopRequireSignalBeforeEngage",clReqNear:"closedLoopRequireNearTargetBeforeEngage",clEngTol:"closedLoopEngageToleranceRpm",clRamp:"closedLoopRampMode",clRampKp:"closedLoopRampKp",clRampLim:"closedLoopRampCorrectionLimitHz",clPitchSlew:"closedLoopPitchSlewRpmPerSec",clPitchReset:"closedLoopPitchResetThresholdRpm",clSatMs:"closedLoopSaturationTimeMs",clSatAct:"closedLoopSaturationAction",clMinRpm:"closedLoopPlausibilityMinRpm",clMaxRpm:"closedLoopPlausibilityMaxRpm",clPlausAct:"closedLoopPlausibilityAction",clLockTo:"closedLoopLockTimeoutMs",clLockAct:"closedLoopLockTimeoutAction",clAmpRec:"closedLoopAmpRecoveryMode",clAmpRecMs:"closedLoopAmpRecoveryDelayMs",brkMd:"brakeMode",brkDur:"brakeDuration",brkPG:"brakePulseGap",brkSF:"brakeStartFreq",brkStF:"brakeStopFreq",brkCut:"softStopCutoff"};
+const presetGlobalMap={pm:"phaseMode",maxAmp:"maxAmplitude",ssCurve:"softStartCurve",fda:"freqDependentAmplitude",vfLF:"vfLowFreq",vfLB:"vfLowBoost",vfMF:"vfMidFreq",vfMB:"vfMidBoost",clEn:"closedLoopEnabled",clCtrl:"closedLoopControlMode",clMd:"closedLoopSensorMode",clCpr:"closedLoopCountsPerRev",clEdge:"closedLoopPulseEdge",clQuad:"closedLoopQuadratureMode",clRev:"closedLoopReverseDirection",clDir:"closedLoopDirectionFaultAction",clDb:"closedLoopDebounceUs",clTo:"closedLoopTimeoutMs",clEng:"closedLoopEngageDelayMs",clUpd:"closedLoopUpdateIntervalMs",clAlpha:"closedLoopFilterAlpha",clDbnd:"closedLoopDeadbandRpm",clLock:"closedLoopLockToleranceRpm",clLockMs:"closedLoopLockTimeMs",clKp:"closedLoopKp",clKi:"closedLoopKi",clKd:"closedLoopKd",clILim:"closedLoopIntegralLimitHz",clCLim:"closedLoopCorrectionLimitHz",clSlew:"closedLoopSlewLimitHzPerSec",clDrop:"closedLoopDropoutAction",clReqSig:"closedLoopRequireSignalBeforeEngage",clReqNear:"closedLoopRequireNearTargetBeforeEngage",clEngTol:"closedLoopEngageToleranceRpm",clRamp:"closedLoopRampMode",clRampKp:"closedLoopRampKp",clRampLim:"closedLoopRampCorrectionLimitHz",clPitchMode:"closedLoopPitchTargetMode",clPitchSlew:"closedLoopPitchSlewRpmPerSec",clPitchReset:"closedLoopPitchResetThresholdRpm",clSatMs:"closedLoopSaturationTimeMs",clSatAct:"closedLoopSaturationAction",clMinRpm:"closedLoopPlausibilityMinRpm",clMaxRpm:"closedLoopPlausibilityMaxRpm",clPlausAct:"closedLoopPlausibilityAction",clLockTo:"closedLoopLockTimeoutMs",clLockAct:"closedLoopLockTimeoutAction",clAmpRec:"closedLoopAmpRecoveryMode",clAmpRecMs:"closedLoopAmpRecoveryDelayMs",brkMd:"brakeMode",brkDur:"brakeDuration",brkPG:"brakePulseGap",brkSF:"brakeStartFreq",brkStF:"brakeStopFreq",brkCut:"softStopCutoff"};
 const presetSpeedMap={f:"frequency",minF:"minFrequency",maxF:"maxFrequency",ssD:"softStartDuration",rAmp:"reducedAmplitude",aDly:"amplitudeDelay",kick:"startupKick",kDur:"startupKickDuration",kRmp:"startupKickRampDuration",fTyp:"filterType",iir:"iirAlpha",fir:"firProfile"};
 const $=id=>document.getElementById(id);
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -246,7 +246,14 @@ function gatherNetwork(){const out={};for(const f of networkFields){const v=fiel
 async function saveNetwork(){if(!validateNetworkForm(true)){setLive("Fix network errors before saving");return}const body=gatherNetwork(),before=Number(networkData?.config?.standbyMode??0),after=Number(body.standbyMode??before),ecoStandbyNow=after===1&&isStandbyActive();if(before!==after){const msg=after===1?"Switch to Eco standby? Wi-Fi will turn off whenever the controller enters standby, so the web UI cannot wake it until you use the device controls.":"Switch to Network standby? Wi-Fi will stay connected while the controller is in standby.";if(!confirm(msg))return}networkData=await api("/api/network",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});baselineNetwork=networkComparableFromConfig(networkData.config);renderNetwork();addEvent("Network saved");if(ecoStandbyNow){setLive("Eco standby saved. Wake from the device controls to reconnect Wi-Fi.");return}await loadAuth();setLive("Network saved")}
 async function scanNetworks(start=true){const box=$("scanResults");box.textContent="Scanning";let data=await api(`/api/network/scan${start?"?start=1":""}`);if(data.scanning){setTimeout(()=>scanNetworks(false),1200);return}box.innerHTML=`<h2>Networks</h2>${data.networks.map(n=>`<button data-ssid="${esc(n.ssid)}">${esc(n.ssid||"(hidden)")} (${n.rssi} dBm, channel ${n.channel})</button>`).join(" ")||"No networks found"}`;box.querySelectorAll("[data-ssid]").forEach(b=>b.onclick=()=>{if(!b.dataset.ssid)return;$(inputId("network","ssid")).value=b.dataset.ssid;const hidden=$(inputId("network","hiddenSsid"));if(hidden)hidden.checked=false;updateNetworkDirty()})}
 function pushTelemetry(){if(!statusData)return;const m=statusData.motor,cl=m.closedLoop||{};telemetry.push({t:Date.now(),f:m.frequency,p:m.pitch,a:statusData.amp.enabled?statusData.amp.temperatureC:null,rpm:cl.compiled&&cl.signalValid?cl.filteredRpm:null,mp:m.motionProgress*100});if(telemetry.length>MAX_TELEMETRY)telemetry.shift()}
-function closedLoopStatusText(cl){if(!cl||!cl.compiled)return "not compiled";if(!cl.enabled)return "off";const mode=optionLabel("closedLoopControlMode",cl.controlMode),rpm=cl.signalValid?`${Number(cl.filteredRpm||0).toFixed(3)} RPM`:"no signal",state=cl.active?(cl.locked?"locked":"active"):"idle",flags=[cl.saturated?"saturated":"",cl.ampRecoveryActive?"amplitude recovery":"",cl.setup&&cl.setup.active?"setup active":"",cl.tuning&&cl.tuning.active?`tune ${cl.tuning.stepName}`:""].filter(Boolean).join(", ");return `${mode}: ${rpm}, ${state}, correction ${Number(cl.correctionHz||0).toFixed(3)} Hz${flags?`, ${flags}`:""}`}
+function closedLoopStatusText(cl){
+if(!cl||!cl.compiled)return "not compiled";
+if(!cl.enabled)return "off";
+const mode=optionLabel("closedLoopControlMode",cl.controlMode),pitchMode=optionLabel("closedLoopPitchTargetMode",cl.pitchTargetMode),rpm=cl.signalValid?`${Number(cl.filteredRpm||0).toFixed(3)} RPM`:"no signal",state=cl.active?(cl.locked?"locked":"active"):"idle";
+const target=`target ${Number(cl.targetRpm||0).toFixed(3)} RPM (${pitchMode})`;
+const pitchOffset=Number(cl.pitchOffsetRpm||0);
+const flags=[Math.abs(pitchOffset)>0.0005?`pitch ${pitchOffset>=0?"+":""}${pitchOffset.toFixed(3)} RPM`:"",cl.saturated?"saturated":"",cl.ampRecoveryActive?"amplitude recovery":"",cl.setup&&cl.setup.active?"setup active":"",cl.tuning&&cl.tuning.active?`tune ${cl.tuning.stepName}`:""].filter(Boolean).join(", ");
+return `${mode}: ${rpm}, ${target}, ${state}, correction ${Number(cl.correctionHz||0).toFixed(3)} Hz${flags?`, ${flags}`:""}`}
 function closedLoopTileHtml(cl){if(!cl||!cl.compiled)return "";const main=!cl.enabled?"Off":cl.signalValid?`${Number(cl.filteredRpm||0).toFixed(3)} RPM`:"No signal",mode=optionLabel("closedLoopControlMode",cl.controlMode),detail=!cl.enabled?"feedback disabled":`${mode}, ${cl.active?(cl.locked?"locked":"active"):"idle"}, ${Number(cl.correctionHz||0).toFixed(3)} Hz`;return `<div class="dash-tile"><span>Closed loop</span><strong>${esc(main)}</strong><span>${esc(detail)}</span></div>`}
 function telemetryHtml(){const a=statusData.amp.enabled?`${statusData.amp.temperatureC.toFixed(1)} C, ${statusData.amp.state}`:"not enabled",clText=closedLoopStatusText(statusData.motor.closedLoop);return `<div class="telemetry-grid"><div><div class="legend" aria-label="Telemetry series"><label><input type="checkbox" data-series="frequency"${telemetrySeries.frequency?" checked":""}> Frequency</label><label><input type="checkbox" data-series="pitch"${telemetrySeries.pitch?" checked":""}> Pitch</label><label><input type="checkbox" data-series="amp"${telemetrySeries.amp?" checked":""}> Amp temp</label><label><input type="checkbox" data-series="rpm"${telemetrySeries.rpm?" checked":""}> Measured RPM</label></div><canvas class="chart" id="telemetryChart" width="720" height="240" role="img" aria-label="Live telemetry chart"></canvas></div><div id="telemetryReadout"><h3>Live telemetry</h3><p>Frequency: ${statusData.motor.frequency.toFixed(2)} Hz</p><p>Pitch: ${statusData.motor.pitch.toFixed(2)} percent</p><p>Motion progress: ${Math.round(statusData.motor.motionProgress*100)} percent</p><p>Closed loop: ${esc(clText)}</p><p>Amplifier: ${esc(a)}</p></div></div>`}
 function drawSeries(ctx,vals,color,min,max){if(vals.length<2)return;const w=720,h=220,pad=28,range=Math.max(max-min,0.001);ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();vals.forEach((v,i)=>{const x=pad+i*(w-pad*2)/(vals.length-1),y=h-pad-((v-min)/range)*(h-pad*2);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.stroke()}
@@ -262,8 +269,8 @@ async function loadStatus(){statusData=await api("/api/status");renderStatus()}
 function startStatusStream(){if(!("EventSource" in window)){setInterval(loadStatus,1000);return}let fallback=false;const es=new EventSource("/api/events");es.addEventListener("status",e=>{try{statusData=JSON.parse(e.data);renderStatus()}catch(err){}});es.onerror=()=>{if(!fallback&&!telemetry.length){fallback=true;es.close();setInterval(loadStatus,1000)}}}
 async function setSpeedControl(speed){if(Number(speed)===2&&!is78Enabled()){const msg=disabled78Message();alert(msg);setLive(msg);return}await control("setSpeed",{speed:Number(speed)})}
 async function control(action,extra={}){const enteringEcoStandby=action==="toggleStandby"&&isEcoStandbyMode()&&!isStandbyActive();await api("/api/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action},extra))});addEvent(`Command ${action}`);if(enteringEcoStandby){if(statusData&&statusData.motor){statusData.motor.standby=true;statusData.motor.state="STANDBY";statusData.motor.running=false}setLive("Eco standby active. Wake from the device controls to reconnect Wi-Fi.");renderStatus();return}await loadStatus()}
-function currentPresetShape(){const g=settingsComparable(currentSettings(false)).global,out={pm:g.phaseMode,maxAmp:g.maxAmplitude,ssCurve:g.softStartCurve,fda:g.freqDependentAmplitude,vfLF:g.vfLowFreq,vfLB:g.vfLowBoost,vfMF:g.vfMidFreq,vfMB:g.vfMidBoost,brkMd:g.brakeMode,brkDur:g.brakeDuration,brkPG:g.brakePulseGap,brkSF:g.brakeStartFreq,brkStF:g.brakeStopFreq,brkCut:g.softStopCutoff,speeds:settingsData.speeds.map(s=>({f:s.frequency,minF:s.minFrequency,maxF:s.maxFrequency,ph:[...s.phaseOffset],ssD:s.softStartDuration,rAmp:s.reducedAmplitude,aDly:s.amplitudeDelay,kick:s.startupKick,kDur:s.startupKickDuration,kRmp:s.startupKickRampDuration,fTyp:s.filterType,iir:s.iirAlpha,fir:s.firProfile}))};if(g.closedLoopEnabled!==undefined){const tune=settingsData.speeds.map(s=>({db:s.closedLoopDeadbandRpm,lock:s.closedLoopLockToleranceRpm,lockMs:s.closedLoopLockTimeMs,kp:s.closedLoopKp,ki:s.closedLoopKi,kd:s.closedLoopKd,iLim:s.closedLoopIntegralLimitHz,cLim:s.closedLoopCorrectionLimitHz,slew:s.closedLoopSlewLimitHzPerSec,rKp:s.closedLoopRampKp,rLim:s.closedLoopRampCorrectionLimitHz}));Object.assign(out,{clEn:g.closedLoopEnabled,clCtrl:g.closedLoopControlMode,clMd:g.closedLoopSensorMode,clT:[g.closedLoopTargetRpm33,g.closedLoopTargetRpm45,g.closedLoopTargetRpm78],clCpr:g.closedLoopCountsPerRev,clEdge:g.closedLoopPulseEdge,clQuad:g.closedLoopQuadratureMode,clRev:g.closedLoopReverseDirection,clDir:g.closedLoopDirectionFaultAction,clDb:g.closedLoopDebounceUs,clTo:g.closedLoopTimeoutMs,clEng:g.closedLoopEngageDelayMs,clUpd:g.closedLoopUpdateIntervalMs,clAlpha:g.closedLoopFilterAlpha,clDbnd:tune[0].db,clLock:tune[0].lock,clLockMs:tune[0].lockMs,clKp:tune[0].kp,clKi:tune[0].ki,clKd:tune[0].kd,clILim:tune[0].iLim,clCLim:tune[0].cLim,clSlew:tune[0].slew,clDrop:g.closedLoopDropoutAction,clReqSig:g.closedLoopRequireSignalBeforeEngage,clReqNear:g.closedLoopRequireNearTargetBeforeEngage,clEngTol:g.closedLoopEngageToleranceRpm,clRamp:g.closedLoopRampMode,clRampKp:tune[0].rKp,clRampLim:tune[0].rLim,clTune:tune,clPitchSlew:g.closedLoopPitchSlewRpmPerSec,clPitchReset:g.closedLoopPitchResetThresholdRpm,clSatMs:g.closedLoopSaturationTimeMs,clSatAct:g.closedLoopSaturationAction,clMinRpm:g.closedLoopPlausibilityMinRpm,clMaxRpm:g.closedLoopPlausibilityMaxRpm,clPlausAct:g.closedLoopPlausibilityAction,clLockTo:g.closedLoopLockTimeoutMs,clLockAct:g.closedLoopLockTimeoutAction,clAmpRec:g.closedLoopAmpRecoveryMode,clAmpRecMs:g.closedLoopAmpRecoveryDelayMs})}return out}
-function presetPathLabel(path){const names={pm:"Phase mode",maxAmp:"Maximum amplitude",ssCurve:"Soft start curve",fda:"V/f blend",vfLF:"V/f low frequency",vfLB:"V/f low boost",vfMF:"V/f mid frequency",vfMB:"V/f mid boost",clEn:"Closed-loop enabled",clCtrl:"Closed-loop control mode",clMd:"Closed-loop sensor mode",clCpr:"Closed-loop counts per revolution",clEdge:"Closed-loop pulse edge",clQuad:"Closed-loop quadrature decode",clRev:"Closed-loop reverse direction",clDir:"Closed-loop direction fault",clDb:"Closed-loop debounce",clTo:"Closed-loop timeout",clEng:"Closed-loop engage delay",clUpd:"Closed-loop update interval",clAlpha:"Closed-loop filter alpha",clDbnd:"Closed-loop deadband",clLock:"Closed-loop lock tolerance",clLockMs:"Closed-loop lock time",clKp:"Closed-loop Kp",clKi:"Closed-loop Ki",clKd:"Closed-loop Kd",clILim:"Closed-loop integral limit",clCLim:"Closed-loop correction limit",clSlew:"Closed-loop slew limit",clDrop:"Closed-loop dropout action",clReqSig:"Closed-loop require signal",clReqNear:"Closed-loop require near target",clEngTol:"Closed-loop engage tolerance",clRamp:"Closed-loop ramp correction",clRampKp:"Closed-loop ramp Kp",clRampLim:"Closed-loop ramp correction limit",clPitchSlew:"Closed-loop pitch target slew",clPitchReset:"Closed-loop pitch reset threshold",clSatMs:"Closed-loop saturation time",clSatAct:"Closed-loop saturation action",clMinRpm:"Closed-loop minimum plausible RPM",clMaxRpm:"Closed-loop maximum plausible RPM",clPlausAct:"Closed-loop plausibility action",clLockTo:"Closed-loop lock timeout",clLockAct:"Closed-loop lock timeout action",clAmpRec:"Closed-loop amplitude recovery",clAmpRecMs:"Closed-loop amplitude recovery delay",brkMd:"Brake mode",brkDur:"Brake duration",brkPG:"Brake pulse gap",brkSF:"Brake start frequency",brkStF:"Brake stop frequency",brkCut:"Soft stop cutoff",f:"Frequency",minF:"Minimum frequency",maxF:"Maximum frequency",ssD:"Soft start duration",rAmp:"Reduced amplitude",aDly:"Amplitude delay",kick:"Startup kick",kDur:"Startup kick duration",kRmp:"Startup kick ramp",fTyp:"Filter type",iir:"IIR alpha",fir:"FIR profile"};const p=path.split(".");if(p[0]==="clT")return `${speedNames[Number(p[1])]} target RPM`;if(p[0]==="speeds"){if(p[2]==="ph")return `${speedNames[Number(p[1])]} phase ${Number(p[3])+1} offset`;return `${speedNames[Number(p[1])]} ${names[p[2]]||p[2]}`}return names[path]||path}
+function currentPresetShape(){const g=settingsComparable(currentSettings(false)).global,out={pm:g.phaseMode,maxAmp:g.maxAmplitude,ssCurve:g.softStartCurve,fda:g.freqDependentAmplitude,vfLF:g.vfLowFreq,vfLB:g.vfLowBoost,vfMF:g.vfMidFreq,vfMB:g.vfMidBoost,brkMd:g.brakeMode,brkDur:g.brakeDuration,brkPG:g.brakePulseGap,brkSF:g.brakeStartFreq,brkStF:g.brakeStopFreq,brkCut:g.softStopCutoff,speeds:settingsData.speeds.map(s=>({f:s.frequency,minF:s.minFrequency,maxF:s.maxFrequency,ph:[...s.phaseOffset],ssD:s.softStartDuration,rAmp:s.reducedAmplitude,aDly:s.amplitudeDelay,kick:s.startupKick,kDur:s.startupKickDuration,kRmp:s.startupKickRampDuration,fTyp:s.filterType,iir:s.iirAlpha,fir:s.firProfile}))};if(g.closedLoopEnabled!==undefined){const tune=settingsData.speeds.map(s=>({db:s.closedLoopDeadbandRpm,lock:s.closedLoopLockToleranceRpm,lockMs:s.closedLoopLockTimeMs,kp:s.closedLoopKp,ki:s.closedLoopKi,kd:s.closedLoopKd,iLim:s.closedLoopIntegralLimitHz,cLim:s.closedLoopCorrectionLimitHz,slew:s.closedLoopSlewLimitHzPerSec,rKp:s.closedLoopRampKp,rLim:s.closedLoopRampCorrectionLimitHz}));Object.assign(out,{clEn:g.closedLoopEnabled,clCtrl:g.closedLoopControlMode,clMd:g.closedLoopSensorMode,clT:[g.closedLoopTargetRpm33,g.closedLoopTargetRpm45,g.closedLoopTargetRpm78],clCpr:g.closedLoopCountsPerRev,clEdge:g.closedLoopPulseEdge,clQuad:g.closedLoopQuadratureMode,clRev:g.closedLoopReverseDirection,clDir:g.closedLoopDirectionFaultAction,clDb:g.closedLoopDebounceUs,clTo:g.closedLoopTimeoutMs,clEng:g.closedLoopEngageDelayMs,clUpd:g.closedLoopUpdateIntervalMs,clAlpha:g.closedLoopFilterAlpha,clDbnd:tune[0].db,clLock:tune[0].lock,clLockMs:tune[0].lockMs,clKp:tune[0].kp,clKi:tune[0].ki,clKd:tune[0].kd,clILim:tune[0].iLim,clCLim:tune[0].cLim,clSlew:tune[0].slew,clDrop:g.closedLoopDropoutAction,clReqSig:g.closedLoopRequireSignalBeforeEngage,clReqNear:g.closedLoopRequireNearTargetBeforeEngage,clEngTol:g.closedLoopEngageToleranceRpm,clRamp:g.closedLoopRampMode,clRampKp:tune[0].rKp,clRampLim:tune[0].rLim,clPitchMode:g.closedLoopPitchTargetMode,clTune:tune,clPitchSlew:g.closedLoopPitchSlewRpmPerSec,clPitchReset:g.closedLoopPitchResetThresholdRpm,clSatMs:g.closedLoopSaturationTimeMs,clSatAct:g.closedLoopSaturationAction,clMinRpm:g.closedLoopPlausibilityMinRpm,clMaxRpm:g.closedLoopPlausibilityMaxRpm,clPlausAct:g.closedLoopPlausibilityAction,clLockTo:g.closedLoopLockTimeoutMs,clLockAct:g.closedLoopLockTimeoutAction,clAmpRec:g.closedLoopAmpRecoveryMode,clAmpRecMs:g.closedLoopAmpRecoveryDelayMs})}return out}
+function presetPathLabel(path){const names={pm:"Phase mode",maxAmp:"Maximum amplitude",ssCurve:"Soft start curve",fda:"V/f blend",vfLF:"V/f low frequency",vfLB:"V/f low boost",vfMF:"V/f mid frequency",vfMB:"V/f mid boost",clEn:"Closed-loop enabled",clCtrl:"Closed-loop control mode",clMd:"Closed-loop sensor mode",clCpr:"Closed-loop counts per revolution",clEdge:"Closed-loop pulse edge",clQuad:"Closed-loop quadrature decode",clRev:"Closed-loop reverse direction",clDir:"Closed-loop direction fault",clDb:"Closed-loop debounce",clTo:"Closed-loop timeout",clEng:"Closed-loop engage delay",clUpd:"Closed-loop update interval",clAlpha:"Closed-loop filter alpha",clDbnd:"Closed-loop deadband",clLock:"Closed-loop lock tolerance",clLockMs:"Closed-loop lock time",clKp:"Closed-loop Kp",clKi:"Closed-loop Ki",clKd:"Closed-loop Kd",clILim:"Closed-loop integral limit",clCLim:"Closed-loop correction limit",clSlew:"Closed-loop slew limit",clDrop:"Closed-loop dropout action",clReqSig:"Closed-loop require signal",clReqNear:"Closed-loop require near target",clEngTol:"Closed-loop engage tolerance",clRamp:"Closed-loop ramp correction",clRampKp:"Closed-loop ramp Kp",clRampLim:"Closed-loop ramp correction limit",clPitchMode:"Closed-loop pitch target mode",clPitchSlew:"Closed-loop pitch target slew",clPitchReset:"Closed-loop pitch reset threshold",clSatMs:"Closed-loop saturation time",clSatAct:"Closed-loop saturation action",clMinRpm:"Closed-loop minimum plausible RPM",clMaxRpm:"Closed-loop maximum plausible RPM",clPlausAct:"Closed-loop plausibility action",clLockTo:"Closed-loop lock timeout",clLockAct:"Closed-loop lock timeout action",clAmpRec:"Closed-loop amplitude recovery",clAmpRecMs:"Closed-loop amplitude recovery delay",brkMd:"Brake mode",brkDur:"Brake duration",brkPG:"Brake pulse gap",brkSF:"Brake start frequency",brkStF:"Brake stop frequency",brkCut:"Soft stop cutoff",f:"Frequency",minF:"Minimum frequency",maxF:"Maximum frequency",ssD:"Soft start duration",rAmp:"Reduced amplitude",aDly:"Amplitude delay",kick:"Startup kick",kDur:"Startup kick duration",kRmp:"Startup kick ramp",fTyp:"Filter type",iir:"IIR alpha",fir:"FIR profile"};const p=path.split(".");if(p[0]==="clT")return `${speedNames[Number(p[1])]} target RPM`;if(p[0]==="speeds"){if(p[2]==="ph")return `${speedNames[Number(p[1])]} phase ${Number(p[3])+1} offset`;return `${speedNames[Number(p[1])]} ${names[p[2]]||p[2]}`}return names[path]||path}
 function renderPresetDiff(slot,title,d,report=null){const box=$(`presetPreview${slot}`);if(!box)return;box.classList.remove("hide");const diffText=d&&d.length?d.slice(0,36).map(x=>`${presetPathLabel(x.path)}: ${displayValue(x.path,x.from)} -> ${displayValue(x.path,x.to)}`).join("\n")+(d.length>36?`\n${d.length-36} more changes.`:""):"No differences from current motor settings.";if(report){renderReport(box,title,report,`<h4>Previewed changes</h4><pre>${esc(diffText)}</pre>`);return}box.textContent=`${title}\n${diffText}`}
 function mergePresetShape(base,patch){const out=clone(base);function merge(a,b){Object.keys(b||{}).forEach(k=>{if(b[k]&&typeof b[k]==="object"&&!Array.isArray(b[k])){a[k]=a[k]||{};merge(a[k],b[k])}else a[k]=b[k]})}merge(out,patch);return out}
 async function previewPreset(slot,sourceText=null,title="Preset load preview"){const box=$(`presetPreview${slot}`);let json=sourceText;if(!json){try{const res=await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot,action:"export"})});json=res.json}catch(e){if(box){box.classList.remove("hide");box.textContent=e.message}setLive(e.message);return null}}let parsed;try{parsed=JSON.parse(json)}catch(e){if(box){box.classList.remove("hide");box.innerHTML=`<h3>${esc(title)}</h3><div class="report-item report-error"><strong>Error:</strong> Preset JSON is not valid.</div>`}return null}const report=validatePresetImportObject(parsed),current=currentPresetShape(),target=sourceText?mergePresetShape(current,parsed):parsed,d=diffs(current,target);renderPresetDiff(slot,title,d,report);return{diff:d,report}}
@@ -273,14 +280,16 @@ function fillPresetCompare(){["compareA","compareB"].forEach(id=>{const el=$(id)
 async function comparePresetSlots(){const a=Number($("compareA").value),b=Number($("compareB").value),box=$("presetCompare");try{const ja=JSON.parse((await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot:a,action:"export"})})).json),jb=JSON.parse((await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot:b,action:"export"})})).json),d=diffs(ja,jb);box.classList.remove("hide");box.textContent=d.length?d.map(x=>`${presetPathLabel(x.path)}: ${displayValue(x.path,x.from)} -> ${displayValue(x.path,x.to)}`).join("\n"):"Preset slots match."}catch(e){box.classList.remove("hide");box.textContent=e.message}}
 async function loadDiagnostics(){const d=await api("/api/diagnostics");diagnosticsData=d;const sys=d.system||{},cpu=sys.cpu||{},mem=sys.memory||{},flash=sys.flash||{},body=$("diagnosticsBody");body.innerHTML=`<h2>Diagnostics</h2><div class="tool-grid"><div><h3>Build</h3><p>Firmware: ${esc(d.firmware)}</p><p>Build: ${esc(d.buildDate)}</p><p>Safe mode: ${d.safeMode?"yes":"no"}</p></div><div><h3>System</h3><p>CPU: core 0 ${Number(cpu.core0Percent||0).toFixed(0)}%, waveform ${Number(cpu.waveformPercent||0).toFixed(0)}%</p><p>Heap: ${bytesText(mem.heapUsedBytes)} used, ${bytesText(mem.heapFreeBytes)} free</p><p>Sketch: ${bytesText(flash.sketchUsedBytes)} / ${bytesText(flash.sketchCapacityBytes)}</p><p>Filesystem: ${flash.filesystemMounted?`${bytesText(flash.filesystemUsedBytes)} / ${bytesText(flash.filesystemTotalBytes)}`:"not mounted"}</p></div><div><h3>Network</h3><p>${esc(d.network.status)} ${esc(d.network.ip||"")}</p><p>RSSI: ${d.network.rssi} dBm</p><p>Clients: ${d.network.clients}</p><p>Standby: ${esc(d.network.standbyModeText||optionLabel("standbyMode",d.network.standbyMode??0))}${d.network.ecoStandbySuspended?" (Wi-Fi suspended)":""}</p><p>Read-only mode: ${d.network.readOnlyMode?"on":"off"}</p></div><div><h3>Amplifier</h3><p>${d.amp.enabled?`${Number(d.amp.temperatureC).toFixed(1)} C, thermal ${d.amp.thermalOk?"OK":"TRIPPED"}, warn ${Number(d.amp.warnC).toFixed(0)} C, shutdown ${Number(d.amp.shutdownC).toFixed(0)} C`:"not enabled"}</p></div></div><h3>Feature flags</h3><div class="log">${Object.keys(d.flags).map(k=>`${k}: ${d.flags[k]}`).join("\n")}</div><h3>Pins</h3><div class="log">${Object.keys(d.pins).map(k=>`${k}: GP${d.pins[k]}`).join("\n")}</div><h3>Files</h3><div class="log">settings: ${d.files.settings}\nnetwork: ${d.files.network}\nerrors: ${d.files.errors}\npresets: ${d.files.presets.map(p=>`slot ${p.slot+1}=${p.stored}`).join(", ")}</div>`;renderEventFeed();renderBench()}
 function relayStageOptions(){const count=statusData?.motor?.relayStageCount||1;let out="";for(let i=0;i<count;i++)out+=`<option value="${i}">Stage ${i}</option>`;return out}
-function benchReportText(){const m=statusData?.motor||{},n=statusData?.network||{},a=statusData?.amp||{},d=diagnosticsData,clObj=m.closedLoop||{},cl=closedLoopStatusText(clObj),met=clObj.metrics||{},tune=clObj.tuning||{},lockPct=met.validSamples?Math.round((met.lockedSamples||0)*100/met.validSamples):0;return[`TT Control bench report`,new Date().toISOString(),`State: ${m.state||"-"}`,`Speed: ${speedNames[m.speed]||m.speedName||"-"}`,`Frequency: ${m.frequency!==undefined?m.frequency.toFixed(2):"-"} Hz`,`Pitch: ${m.pitch!==undefined?m.pitch.toFixed(2):"-"}%`,`Closed loop: ${cl}`,`Closed-loop tuning: ${tune.stepName||"Idle"} - ${tune.recommendation||"-"}`,`Closed-loop stability: lock ${lockPct}%, avg abs ${Number(met.averageAbsErrorRpm||0).toFixed(3)} RPM, peak ${Number(met.peakAbsErrorRpm||0).toFixed(3)} RPM`,`Closed-loop events: ${Number(met.dropoutEvents||0)} dropouts, ${Number(met.saturationEvents||0)} saturation, ${Number(met.directionFaultEvents||0)} direction, ${Number(met.plausibilityEvents||0)} plausibility`,`Relay test: ${m.relayTest?"on":"off"} stage ${m.relayStage??"-"}`,`Amp: ${a.enabled?(Number(a.temperatureC).toFixed(1)+" C, thermal "+(a.thermalOk?"OK":"TRIPPED")):"not enabled"}`,`Network: ${n.status||"-"} ${n.ip||""}`,d?`Firmware: ${d.firmware} ${d.buildDate}`:"Firmware: not loaded",d?`Pins: ${Object.keys(d.pins).map(k=>`${k}=GP${d.pins[k]}`).join(", ")}`:"Pins: not loaded"].join("\n")}
+function benchReportText(){
+const m=statusData?.motor||{},n=statusData?.network||{},a=statusData?.amp||{},d=diagnosticsData,clObj=m.closedLoop||{},cl=closedLoopStatusText(clObj),met=clObj.metrics||{},tune=clObj.tuning||{},health=clObj.health||{},trend=clObj.trend||[],lastTrend=trend[trend.length-1]||{},lockPct=met.validSamples?Math.round((met.lockedSamples||0)*100/met.validSamples):0;
+return[`TT Control bench report`,new Date().toISOString(),`State: ${m.state||"-"}`,`Speed: ${speedNames[m.speed]||m.speedName||"-"}`,`Frequency: ${m.frequency!==undefined?m.frequency.toFixed(2):"-"} Hz`,`Pitch: ${m.pitch!==undefined?m.pitch.toFixed(2):"-"}%`,`Closed loop: ${cl}`,`Closed-loop pitch target: ${optionLabel("closedLoopPitchTargetMode",clObj.pitchTargetMode)} reference ${Number(clObj.referenceTargetRpm||0).toFixed(3)} RPM, offset ${Number(clObj.pitchOffsetRpm||0).toFixed(3)} RPM`,`Closed-loop tuning: ${tune.stepName||"Idle"} - ${tune.recommendation||"-"}`,`Closed-loop stability: lock ${lockPct}%, avg abs ${Number(met.averageAbsErrorRpm||0).toFixed(3)} RPM, peak ${Number(met.peakAbsErrorRpm||0).toFixed(3)} RPM`,`Closed-loop events: ${Number(met.dropoutEvents||0)} dropouts, ${Number(met.saturationEvents||0)} saturation, ${Number(met.directionFaultEvents||0)} direction, ${Number(met.plausibilityEvents||0)} plausibility`,`Sensor health: accepted ${Number(health.acceptedTransitions||0)} of ${Number(health.totalTransitions||0)}, invalid ${Number(health.invalidTransitionPercent||0).toFixed(1)}%, debounced ${Number(health.debouncedTransitionPercent||0).toFixed(1)}%, jitter ${Number(health.averageJitterPercent||0).toFixed(2)}%`,`Trend: ${trend.length} samples${trend.length?`, latest error ${Number(lastTrend.errorRpm||0).toFixed(3)} RPM, correction ${Number(lastTrend.correctionHz||0).toFixed(3)} Hz`:""}`,`Relay test: ${m.relayTest?"on":"off"} stage ${m.relayStage??"-"}`,`Amp: ${a.enabled?(Number(a.temperatureC).toFixed(1)+" C, thermal "+(a.thermalOk?"OK":"TRIPPED")):"not enabled"}`,`Network: ${n.status||"-"} ${n.ip||""}`,d?`Firmware: ${d.firmware} ${d.buildDate}`:"Firmware: not loaded",d?`Pins: ${Object.keys(d.pins).map(k=>`${k}=GP${d.pins[k]}`).join(", ")}`:"Pins: not loaded"].join("\n")}
 function renderBench(){
 const root=$("benchBody");
 if(!root||currentTab!=="bench")return;
 if(root.contains(document.activeElement)&&["INPUT","SELECT","TEXTAREA"].includes(document.activeElement.tagName))return;
 const m=statusData?.motor||{},a=statusData?.amp||{},ampText=a.enabled?`${Number(a.temperatureC).toFixed(1)} C, ${a.thermalOk?"OK":"TRIPPED"}`:"not enabled",cl=m.closedLoop||{},setup=cl.setup||{},clTile=closedLoopTileHtml(cl);
-const metrics=cl.metrics||{},tune=cl.tuning||{},lockPct=metrics.validSamples?Math.round((metrics.lockedSamples||0)*100/metrics.validSamples):0;
-const clSetupCard=cl.compiled?`<div class="bench-card"><h3>Closed-loop setup</h3><p>Status: ${esc(cl.enabled?closedLoopStatusText(cl):"off")}</p><p>Setup: ${setup.active?`${Number(setup.countDelta||0)} counts, ${Number(setup.invalidDelta||0)} invalid, ${Number(setup.debouncedDelta||0)} debounced`:"idle"}</p><p>Suggested counts/rev: ${Number(setup.suggestedCountsPerRev||0)}</p><p>Pins: A ${setup.pinAHigh?"high":"low"}, B ${setup.pinBHigh?"high":"low"}</p><p>Tune: ${esc(tune.stepName||"Idle")} - ${esc(tune.recommendation||"-")}</p><p>Stability: lock ${lockPct}%, avg ${Number(metrics.averageAbsErrorRpm||0).toFixed(3)} RPM, peak ${Number(metrics.peakAbsErrorRpm||0).toFixed(3)} RPM</p><p>Events: ${Number(metrics.dropoutEvents||0)} dropouts, ${Number(metrics.saturationEvents||0)} saturation</p><div class="button-row"><button data-bench="closedLoopReset">Reset controller</button><button data-bench="closedLoopSetupStart">Start setup</button><button data-bench="closedLoopSetupApply">Apply setup</button><button data-bench="closedLoopSetupStop">Stop setup</button><button data-bench="closedLoopTuneStart">Tune start</button><button data-bench="closedLoopTuneNext">Tune next</button><button data-bench="closedLoopTuneStop">Tune stop</button></div></div>`:"";
+const metrics=cl.metrics||{},tune=cl.tuning||{},health=cl.health||{},trend=cl.trend||[],lastTrend=trend[trend.length-1]||{},lockPct=metrics.validSamples?Math.round((metrics.lockedSamples||0)*100/metrics.validSamples):0;
+const clSetupCard=cl.compiled?`<div class="bench-card"><h3>Closed-loop setup</h3><p>Status: ${esc(cl.enabled?closedLoopStatusText(cl):"off")}</p><p>Pitch target: ${esc(optionLabel("closedLoopPitchTargetMode",cl.pitchTargetMode))}, reference ${Number(cl.referenceTargetRpm||0).toFixed(3)} RPM, offset ${Number(cl.pitchOffsetRpm||0).toFixed(3)} RPM</p><p>Setup: ${setup.active?`${Number(setup.countDelta||0)} counts, ${Number(setup.invalidDelta||0)} invalid, ${Number(setup.debouncedDelta||0)} debounced`:"idle"}</p><p>Suggested counts/rev: ${Number(setup.suggestedCountsPerRev||0)}</p><p>Pins: A ${setup.pinAHigh?"high":"low"}, B ${setup.pinBHigh?"high":"low"}</p><p>Tune: ${esc(tune.stepName||"Idle")} - ${esc(tune.recommendation||"-")}</p><p>Stability: lock ${lockPct}%, avg ${Number(metrics.averageAbsErrorRpm||0).toFixed(3)} RPM, peak ${Number(metrics.peakAbsErrorRpm||0).toFixed(3)} RPM</p><p>Events: ${Number(metrics.dropoutEvents||0)} dropouts, ${Number(metrics.saturationEvents||0)} saturation</p><p>Sensor: ${Number(health.acceptedTransitions||0)} accepted, invalid ${Number(health.invalidTransitionPercent||0).toFixed(1)}%, debounced ${Number(health.debouncedTransitionPercent||0).toFixed(1)}%, jitter ${Number(health.averageJitterPercent||0).toFixed(2)}%</p><p>Trend: ${trend.length} samples${trend.length?`, error ${Number(lastTrend.errorRpm||0).toFixed(3)} RPM, correction ${Number(lastTrend.correctionHz||0).toFixed(3)} Hz`:""}</p><div class="button-row"><button data-bench="closedLoopReset">Reset controller</button><button data-bench="closedLoopSetupStart">Start setup</button><button data-bench="closedLoopSetupApply">Apply setup</button><button data-bench="closedLoopSetupStop">Stop setup</button><button data-bench="closedLoopTuneStart">Tune start</button><button data-bench="closedLoopTuneNext">Tune next</button><button data-bench="closedLoopTuneApply"${tune.canApplyRecommendation?"":" disabled"}>Tune apply</button><button data-bench="closedLoopTuneStop">Tune stop</button></div></div>`:"";
 root.innerHTML=`<div class="panel section-head"><h2>Bench test</h2><div class="dash-grid"><div class="dash-tile"><span>Motor state</span><strong>${esc(m.state||"-")}</strong></div><div class="dash-tile"><span>Relay test</span><strong>${m.relayTest?"On":"Off"}</strong></div><div class="dash-tile"><span>Amplifier</span><strong>${esc(ampText)}</strong></div>${clTile}</div></div><div class="bench-grid"><div class="bench-card"><h3>Pre-check</h3><div class="button-row"><button id="benchRefresh">Refresh diagnostics</button><button class="danger" data-bench="emergencyStop">Emergency stop</button><button data-bench="stop">Stop</button></div><p>Safe mode: ${diagnosticsData?.safeMode?"yes":"no"}</p><p>Network: ${esc(statusData?.network?.status||"-")} ${esc(statusData?.network?.ip||"")}</p></div><div class="bench-card"><h3>Relay outputs</h3><div class="field"><label for="benchRelayStage">Relay output</label><select id="benchRelayStage">${relayStageOptions()}</select></div><div class="button-row"><button data-bench="relayTest">Set output</button><button data-bench="relayOff">All off</button></div></div><div class="bench-card"><h3>Brake test</h3><div class="button-row"><button class="good" data-bench="start">Start motor</button><button class="danger" data-bench="stop">Brake stop</button><button class="danger" data-bench="emergencyStop">Emergency stop</button></div></div><div class="bench-card"><h3>Speed and pitch</h3><div class="button-row"><button data-bench-speed="0">33 RPM</button><button data-bench-speed="1">45 RPM</button><button data-bench-speed="2">78 RPM</button><button data-bench="resetPitch">Reset pitch</button></div><div class="field"><label for="benchPitch">Pitch percent</label><input id="benchPitch" type="number" min="-50" max="50" step="0.1" value="${m.pitch!==undefined?Number(m.pitch).toFixed(1):"0"}"></div><button id="benchSetPitch">Set pitch</button></div>${clSetupCard}<div class="bench-card"><h3>Report</h3><div class="button-row"><button id="benchMakeReport">Generate report</button></div><textarea id="benchReport" aria-label="Bench test report">${esc(benchReportText())}</textarea></div></div>`;
 $("benchRelayStage").value=String(m.relayStage||0);
 $("benchRefresh").onclick=()=>loadDiagnostics().catch(e=>setLive(e.message));
@@ -831,6 +840,12 @@ static void streamOptions(Print& out) {
     streamOptionPair(out, first, CLOSED_LOOP_RAMP_TRACK, "Track ramp");
     out.write(']');
 
+    beginArrayProp(out, firstOptionSet, "closedLoopPitchTargetMode");
+    first = true;
+    streamOptionPair(out, first, CLOSED_LOOP_PITCH_TARGET_FIXED, "Fixed target");
+    streamOptionPair(out, first, CLOSED_LOOP_PITCH_TARGET_FOLLOW, "Follow pitch");
+    out.write(']');
+
     beginArrayProp(out, firstOptionSet, "closedLoopAmpRecoveryMode");
     first = true;
     streamOptionPair(out, first, CLOSED_LOOP_AMP_RECOVERY_OFF, "Off");
@@ -1048,6 +1063,7 @@ static void streamGlobalGroups(Print& out) {
     streamNumberField(out, firstField, "closedLoopFilterAlpha", "RPM filter alpha", 0.01f, 1, 0.01f, "Smoothing factor for measured RPM.", nullptr, true);
     streamSelectField(out, firstField, "closedLoopDropoutAction", "Dropout action", "closedLoopDropoutAction", "Action when the feedback signal is lost after engagement.", true);
     streamSelectField(out, firstField, "closedLoopRampMode", "Ramp correction", "closedLoopRampMode", "Optional light proportional correction during smooth speed changes.", true);
+    streamSelectField(out, firstField, "closedLoopPitchTargetMode", "Pitch target mode", "closedLoopPitchTargetMode", "Fixed holds the configured RPM target. Follow pitch applies the effective current pitch ratio after frequency limits.", true);
     streamNumberField(out, firstField, "closedLoopPitchSlewRpmPerSec", "Pitch target slew", 0, 200, 0.1f, "Maximum closed-loop target change rate when pitch changes.", "RPM/s", true);
     streamNumberField(out, firstField, "closedLoopPitchResetThresholdRpm", "Pitch reset threshold", 0, 20, 0.1f, "RPM target jump that resets the controller state.", "RPM", true);
     streamNumberField(out, firstField, "closedLoopSaturationTimeMs", "Saturation time", 0, 60000, 100, "Time at correction limit before the saturation action runs. Zero disables it.", "ms", true);
@@ -1532,6 +1548,9 @@ void WebInterface::populateStatus(JsonDocument& doc) {
     closedLoop["targetRpm"] = motor.getClosedLoopTargetRpm();
     closedLoop["requestedTargetRpm"] = motor.getClosedLoopRequestedTargetRpm();
     closedLoop["rampTargetRpm"] = motor.getClosedLoopRampTargetRpm();
+    closedLoop["referenceTargetRpm"] = motor.getClosedLoopReferenceTargetRpm();
+    closedLoop["pitchOffsetRpm"] = motor.getClosedLoopPitchOffsetRpm();
+    closedLoop["pitchTargetMode"] = settings.get().closedLoopPitchTargetMode;
     closedLoop["measuredRpm"] = feedback.measuredRpm;
     closedLoop["filteredRpm"] = feedback.filteredRpm;
     closedLoop["rpmError"] = feedback.rpmError;
@@ -1547,6 +1566,20 @@ void WebInterface::populateStatus(JsonDocument& doc) {
     closedLoop["invalidTransitions"] = feedback.invalidTransitions;
     closedLoop["debouncedTransitions"] = feedback.debouncedTransitions;
     closedLoop["lastPulseAgeMs"] = feedback.lastPulseAgeMs;
+    JsonObject healthJson = closedLoop["health"].to<JsonObject>();
+    healthJson["acceptedTransitions"] = feedback.acceptedTransitions;
+    healthJson["totalTransitions"] = feedback.totalTransitions;
+    healthJson["invalidTransitions"] = feedback.invalidTransitions;
+    healthJson["debouncedTransitions"] = feedback.debouncedTransitions;
+    healthJson["invalidTransitionPercent"] = feedback.invalidTransitionPercent;
+    healthJson["debouncedTransitionPercent"] = feedback.debouncedTransitionPercent;
+    healthJson["intervalSamples"] = feedback.intervalSamples;
+    healthJson["lastIntervalUs"] = feedback.lastIntervalUs;
+    healthJson["minIntervalUs"] = feedback.minIntervalUs;
+    healthJson["maxIntervalUs"] = feedback.maxIntervalUs;
+    healthJson["averageIntervalUs"] = feedback.averageIntervalUs;
+    healthJson["averageJitterUs"] = feedback.averageJitterUs;
+    healthJson["averageJitterPercent"] = feedback.averageJitterPercent;
     JsonObject setupJson = closedLoop["setup"].to<JsonObject>();
     setupJson["active"] = setup.active;
     setupJson["pinAHigh"] = setup.pinAHigh;
@@ -1585,6 +1618,22 @@ void WebInterface::populateStatus(JsonDocument& doc) {
     tuneJson["stepName"] = tuning.stepName;
     tuneJson["instruction"] = tuning.instruction;
     tuneJson["recommendation"] = tuning.recommendation;
+    tuneJson["recommendationAction"] = tuning.recommendationAction;
+    tuneJson["canApplyRecommendation"] = tuning.canApplyRecommendation;
+    JsonArray trendJson = closedLoop["trend"].to<JsonArray>();
+    uint8_t trendCount = motor.getClosedLoopTrendCount();
+    for (uint8_t i = 0; i < trendCount; i++) {
+        ClosedLoopTrendPoint point;
+        if (!motor.getClosedLoopTrendPoint(i, point)) continue;
+        JsonObject pointJson = trendJson.add<JsonObject>();
+        pointJson["sampleTimeMs"] = point.sampleTimeMs;
+        pointJson["targetRpm"] = point.targetRpm;
+        pointJson["measuredRpm"] = point.measuredRpm;
+        pointJson["errorRpm"] = point.errorRpm;
+        pointJson["correctionHz"] = point.correctionHz;
+        pointJson["signalValid"] = point.signalValid;
+        pointJson["locked"] = point.locked;
+    }
 #else
     JsonObject closedLoop = motorJson["closedLoop"].to<JsonObject>();
     closedLoop["compiled"] = false;
@@ -1695,6 +1744,9 @@ void WebInterface::streamStatus(Print& out) {
     writeFloatProp(out, nestedFirst, "targetRpm", motor.getClosedLoopTargetRpm());
     writeFloatProp(out, nestedFirst, "requestedTargetRpm", motor.getClosedLoopRequestedTargetRpm());
     writeFloatProp(out, nestedFirst, "rampTargetRpm", motor.getClosedLoopRampTargetRpm());
+    writeFloatProp(out, nestedFirst, "referenceTargetRpm", motor.getClosedLoopReferenceTargetRpm());
+    writeFloatProp(out, nestedFirst, "pitchOffsetRpm", motor.getClosedLoopPitchOffsetRpm());
+    writeIntProp(out, nestedFirst, "pitchTargetMode", settings.get().closedLoopPitchTargetMode);
     writeFloatProp(out, nestedFirst, "measuredRpm", feedback.measuredRpm);
     writeFloatProp(out, nestedFirst, "filteredRpm", feedback.filteredRpm);
     writeFloatProp(out, nestedFirst, "rpmError", feedback.rpmError);
@@ -1710,6 +1762,22 @@ void WebInterface::streamStatus(Print& out) {
     writeUIntProp(out, nestedFirst, "invalidTransitions", feedback.invalidTransitions);
     writeUIntProp(out, nestedFirst, "debouncedTransitions", feedback.debouncedTransitions);
     writeUIntProp(out, nestedFirst, "lastPulseAgeMs", feedback.lastPulseAgeMs);
+    beginObjectProp(out, nestedFirst, "health");
+    bool healthFirst = true;
+    writeUIntProp(out, healthFirst, "acceptedTransitions", feedback.acceptedTransitions);
+    writeUIntProp(out, healthFirst, "totalTransitions", feedback.totalTransitions);
+    writeUIntProp(out, healthFirst, "invalidTransitions", feedback.invalidTransitions);
+    writeUIntProp(out, healthFirst, "debouncedTransitions", feedback.debouncedTransitions);
+    writeFloatProp(out, healthFirst, "invalidTransitionPercent", feedback.invalidTransitionPercent);
+    writeFloatProp(out, healthFirst, "debouncedTransitionPercent", feedback.debouncedTransitionPercent);
+    writeUIntProp(out, healthFirst, "intervalSamples", feedback.intervalSamples);
+    writeUIntProp(out, healthFirst, "lastIntervalUs", feedback.lastIntervalUs);
+    writeUIntProp(out, healthFirst, "minIntervalUs", feedback.minIntervalUs);
+    writeUIntProp(out, healthFirst, "maxIntervalUs", feedback.maxIntervalUs);
+    writeUIntProp(out, healthFirst, "averageIntervalUs", feedback.averageIntervalUs);
+    writeUIntProp(out, healthFirst, "averageJitterUs", feedback.averageJitterUs);
+    writeFloatProp(out, healthFirst, "averageJitterPercent", feedback.averageJitterPercent);
+    out.write('}');
     beginObjectProp(out, nestedFirst, "setup");
     bool setupFirst = true;
     writeBoolProp(out, setupFirst, "active", setup.active);
@@ -1724,6 +1792,60 @@ void WebInterface::streamStatus(Print& out) {
     writeUIntProp(out, setupFirst, "suggestedCountsPerRev", setup.suggestedCountsPerRev);
     writeBoolProp(out, setupFirst, "suggestedReverseDirection", setup.suggestedReverseDirection);
     out.write('}');
+
+    ClosedLoopTuningStatus tuning = motor.getClosedLoopTuningStatus();
+    ClosedLoopMetrics metrics = tuning.metrics;
+    beginObjectProp(out, nestedFirst, "metrics");
+    bool metricsFirst = true;
+    writeUIntProp(out, metricsFirst, "sampleCount", metrics.sampleCount);
+    writeUIntProp(out, metricsFirst, "validSamples", metrics.validSamples);
+    writeUIntProp(out, metricsFirst, "lockedSamples", metrics.lockedSamples);
+    writeUIntProp(out, metricsFirst, "validMs", metrics.validMs);
+    writeUIntProp(out, metricsFirst, "lockedMs", metrics.lockedMs);
+    writeUIntProp(out, metricsFirst, "saturatedMs", metrics.saturatedMs);
+    writeUIntProp(out, metricsFirst, "dropoutEvents", metrics.dropoutEvents);
+    writeUIntProp(out, metricsFirst, "saturationEvents", metrics.saturationEvents);
+    writeUIntProp(out, metricsFirst, "directionFaultEvents", metrics.directionFaultEvents);
+    writeUIntProp(out, metricsFirst, "plausibilityEvents", metrics.plausibilityEvents);
+    writeUIntProp(out, metricsFirst, "lockTimeoutEvents", metrics.lockTimeoutEvents);
+    writeUIntProp(out, metricsFirst, "ampRecoveryEvents", metrics.ampRecoveryEvents);
+    writeUIntProp(out, metricsFirst, "errorSignChanges", metrics.errorSignChanges);
+    writeFloatProp(out, metricsFirst, "averageErrorRpm", metrics.averageErrorRpm);
+    writeFloatProp(out, metricsFirst, "averageAbsErrorRpm", metrics.averageAbsErrorRpm);
+    writeFloatProp(out, metricsFirst, "peakAbsErrorRpm", metrics.peakAbsErrorRpm);
+    writeFloatProp(out, metricsFirst, "lastErrorRpm", metrics.lastErrorRpm);
+    out.write('}');
+
+    beginObjectProp(out, nestedFirst, "tuning");
+    bool tuneFirst = true;
+    writeBoolProp(out, tuneFirst, "active", tuning.active);
+    writeIntProp(out, tuneFirst, "step", tuning.step);
+    writeStringProp(out, tuneFirst, "stepName", tuning.stepName);
+    writeStringProp(out, tuneFirst, "instruction", tuning.instruction);
+    writeStringProp(out, tuneFirst, "recommendation", tuning.recommendation);
+    writeIntProp(out, tuneFirst, "recommendationAction", tuning.recommendationAction);
+    writeBoolProp(out, tuneFirst, "canApplyRecommendation", tuning.canApplyRecommendation);
+    out.write('}');
+
+    beginArrayProp(out, nestedFirst, "trend");
+    bool trendFirst = true;
+    uint8_t trendCount = motor.getClosedLoopTrendCount();
+    for (uint8_t i = 0; i < trendCount; i++) {
+        ClosedLoopTrendPoint point;
+        if (!motor.getClosedLoopTrendPoint(i, point)) continue;
+        writeComma(out, trendFirst);
+        out.write('{');
+        bool pointFirst = true;
+        writeUIntProp(out, pointFirst, "sampleTimeMs", point.sampleTimeMs);
+        writeFloatProp(out, pointFirst, "targetRpm", point.targetRpm);
+        writeFloatProp(out, pointFirst, "measuredRpm", point.measuredRpm);
+        writeFloatProp(out, pointFirst, "errorRpm", point.errorRpm);
+        writeFloatProp(out, pointFirst, "correctionHz", point.correctionHz);
+        writeBoolProp(out, pointFirst, "signalValid", point.signalValid);
+        writeBoolProp(out, pointFirst, "locked", point.locked);
+        out.write('}');
+    }
+    out.write(']');
     out.write('}');
 #else
     beginObjectProp(out, objectFirst, "closedLoop");
@@ -1901,6 +2023,7 @@ void WebInterface::handleSettingsGet() {
     global["closedLoopRampMode"] = g.closedLoopRampMode;
     global["closedLoopPitchSlewRpmPerSec"] = g.closedLoopPitchSlewRpmPerSec;
     global["closedLoopPitchResetThresholdRpm"] = g.closedLoopPitchResetThresholdRpm;
+    global["closedLoopPitchTargetMode"] = g.closedLoopPitchTargetMode;
     global["closedLoopSaturationTimeMs"] = g.closedLoopSaturationTimeMs;
     global["closedLoopSaturationAction"] = g.closedLoopSaturationAction;
     global["closedLoopPlausibilityMinRpm"] = g.closedLoopPlausibilityMinRpm;
@@ -2053,6 +2176,7 @@ void WebInterface::handleSettingsPost() {
         }
         setFloat(global, "closedLoopPitchSlewRpmPerSec", g.closedLoopPitchSlewRpmPerSec, 0.0f, 200.0f);
         setFloat(global, "closedLoopPitchResetThresholdRpm", g.closedLoopPitchResetThresholdRpm, 0.0f, 20.0f);
+        setByte(global, "closedLoopPitchTargetMode", g.closedLoopPitchTargetMode, CLOSED_LOOP_PITCH_TARGET_FIXED, CLOSED_LOOP_PITCH_TARGET_FOLLOW);
         setUInt16(global, "closedLoopSaturationTimeMs", g.closedLoopSaturationTimeMs, 0, 60000);
         setByte(global, "closedLoopSaturationAction", g.closedLoopSaturationAction, CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP);
         setFloat(global, "closedLoopPlausibilityMinRpm", g.closedLoopPlausibilityMinRpm, 0.0f, 120.0f);
@@ -2188,6 +2312,12 @@ void WebInterface::handleControl() {
         motor.beginClosedLoopTuning();
     } else if (strcmp(action, "closedLoopTuneNext") == 0) {
         motor.advanceClosedLoopTuning();
+    } else if (strcmp(action, "closedLoopTuneApply") == 0) {
+        char applied[120];
+        if (!motor.applyClosedLoopTuningSuggestion(applied, sizeof(applied))) {
+            sendError(409, applied);
+            return;
+        }
     } else if (strcmp(action, "closedLoopTuneStop") == 0) {
         motor.cancelClosedLoopTuning();
 #endif

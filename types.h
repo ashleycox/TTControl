@@ -110,6 +110,11 @@ enum ClosedLoopAmpRecoveryMode {
     CLOSED_LOOP_AMP_RECOVERY_RESTORE = 2
 };
 
+enum ClosedLoopPitchTargetMode {
+    CLOSED_LOOP_PITCH_TARGET_FIXED = 0,
+    CLOSED_LOOP_PITCH_TARGET_FOLLOW = 1
+};
+
 // --- Data Structures ---
 
 // Settings specific to a single speed (e.g. 33 RPM)
@@ -270,6 +275,7 @@ struct GlobalSettings {
     uint8_t closedLoopAmpRecoveryMode; // 0=Off, 1=Warn, 2=Restore full amplitude
     uint16_t closedLoopAmpRecoveryDelayMs;
     ClosedLoopSpeedTuning closedLoopTuning[3];
+    uint8_t closedLoopPitchTargetMode; // 0=Fixed preset target, 1=Follow effective pitch ratio
 };
 
 static_assert(sizeof(SpeedSettings) == SPEED_SETTINGS_STORAGE_SIZE, "Update SPEED_SETTINGS_STORAGE_SIZE when SpeedSettings changes.");
