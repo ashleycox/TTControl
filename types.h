@@ -70,6 +70,11 @@ enum ClosedLoopSensorMode {
     CLOSED_LOOP_SENSOR_QUADRATURE = 1
 };
 
+enum ClosedLoopControlMode {
+    CLOSED_LOOP_CONTROL_MONITOR = 0,
+    CLOSED_LOOP_CONTROL_CORRECT = 1
+};
+
 enum ClosedLoopPulseEdge {
     CLOSED_LOOP_EDGE_RISING = 0,
     CLOSED_LOOP_EDGE_FALLING = 1,
@@ -92,6 +97,17 @@ enum ClosedLoopDropoutAction {
     CLOSED_LOOP_DROPOUT_OPEN_LOOP = 0,
     CLOSED_LOOP_DROPOUT_HOLD = 1,
     CLOSED_LOOP_DROPOUT_STOP = 2
+};
+
+enum ClosedLoopRampMode {
+    CLOSED_LOOP_RAMP_DISABLED = 0,
+    CLOSED_LOOP_RAMP_TRACK = 1
+};
+
+enum ClosedLoopAmpRecoveryMode {
+    CLOSED_LOOP_AMP_RECOVERY_OFF = 0,
+    CLOSED_LOOP_AMP_RECOVERY_WARN = 1,
+    CLOSED_LOOP_AMP_RECOVERY_RESTORE = 2
 };
 
 // --- Data Structures ---
@@ -199,6 +215,7 @@ struct GlobalSettings {
 
     // Closed-loop speed feedback
     bool closedLoopEnabled;
+    uint8_t closedLoopControlMode; // 0=Monitor only, 1=Correct speed
     uint8_t closedLoopSensorMode; // 0=Pulse tach, 1=Quadrature
     float closedLoopTargetRpm[3]; // 33, 45, 78
     uint16_t closedLoopCountsPerRev;
@@ -221,6 +238,23 @@ struct GlobalSettings {
     float closedLoopCorrectionLimitHz;
     float closedLoopSlewLimitHzPerSec;
     uint8_t closedLoopDropoutAction; // 0=Open loop, 1=Hold, 2=Stop
+    bool closedLoopRequireSignalBeforeEngage;
+    bool closedLoopRequireNearTargetBeforeEngage;
+    float closedLoopEngageToleranceRpm;
+    uint8_t closedLoopRampMode; // 0=Disable correction during ramps, 1=Track ramp lightly
+    float closedLoopRampKp;
+    float closedLoopRampCorrectionLimitHz;
+    float closedLoopPitchSlewRpmPerSec;
+    float closedLoopPitchResetThresholdRpm;
+    uint16_t closedLoopSaturationTimeMs;
+    uint8_t closedLoopSaturationAction; // 0=Ignore, 1=Warn, 2=Stop
+    float closedLoopPlausibilityMinRpm;
+    float closedLoopPlausibilityMaxRpm;
+    uint8_t closedLoopPlausibilityAction; // 0=Ignore, 1=Warn, 2=Stop
+    uint16_t closedLoopLockTimeoutMs;
+    uint8_t closedLoopLockTimeoutAction; // 0=Ignore, 1=Warn, 2=Stop
+    uint8_t closedLoopAmpRecoveryMode; // 0=Off, 1=Warn, 2=Restore full amplitude
+    uint16_t closedLoopAmpRecoveryDelayMs;
 };
 
 static_assert(sizeof(SpeedSettings) == SPEED_SETTINGS_STORAGE_SIZE, "Update SPEED_SETTINGS_STORAGE_SIZE when SpeedSettings changes.");
