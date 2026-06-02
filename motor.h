@@ -14,6 +14,8 @@
 #include "types.h"
 #include "globals.h"
 
+struct SpeedFeedbackStatus;
+
 /**
  * @brief Manages the high-level state of the motor.
  * 
@@ -57,11 +59,15 @@ public:
     bool isSpeedRamping() { return _isSpeedRamping; }
     bool isRelayTestMode() { return _relayTestMode; }
     bool isClosedLoopActive() { return _closedLoopActive; }
+    bool isClosedLoopAmpRecoveryActive() { return _closedLoopAmpRecoveryActive; }
+    bool isClosedLoopSaturated() { return _closedLoopSaturationStart != 0; }
     MotorState getState() { return _state; }
     SpeedMode getSpeed() { return _currentSpeedMode; }
     float getCurrentFrequency() { return _currentFreq; }
     float getPitchPercent() { return currentPitchPercent; }
     float getClosedLoopTargetRpm() { return _closedLoopTargetRpm; }
+    float getClosedLoopRequestedTargetRpm() { return _closedLoopRequestedTargetRpm; }
+    float getClosedLoopRampTargetRpm() { return _closedLoopRampTargetRpm; }
     float getClosedLoopCorrectionHz() { return _closedLoopCorrectionHz; }
     float getMotionProgress();
     void resetClosedLoop();
@@ -138,18 +144,39 @@ private:
     // Closed-loop speed correction
     bool _closedLoopActive;
     float _closedLoopTargetRpm;
+    float _closedLoopRequestedTargetRpm;
+    float _closedLoopRampTargetRpm;
     float _closedLoopCorrectionHz;
     float _closedLoopIntegralHz;
     float _closedLoopLastErrorRpm;
     uint32_t _closedLoopLastUpdate;
+    uint32_t _closedLoopTargetLastUpdate;
     uint32_t _closedLoopEngageTime;
     bool _closedLoopDirectionFaultLatched;
     bool _closedLoopDropoutLatched;
+    uint32_t _closedLoopSaturationStart;
+    bool _closedLoopSaturationLatched;
+    uint32_t _closedLoopLockWaitStart;
+    bool _closedLoopLockTimeoutLatched;
+    bool _closedLoopPlausibilityLatched;
+    uint32_t _closedLoopAmpOutOfLockStart;
+    bool _closedLoopAmpRecoveryActive;
+    bool _closedLoopAmpRecoveryLatched;
+    float _rampStartRpm;
+    float _rampTargetRpm;
     
     void updateState();
     float calculateSoftStartAmp(float elapsed, float duration);
     void handleBraking(uint32_t now);
     float calculateClosedLoopTargetRpm() const;
+    float calculateClosedLoopTargetRpmForSpeed(SpeedMode speed) const;
+    float updateClosedLoopTarget(uint32_t now, float requestedRpm);
+    float applyClosedLoopRampCorrection(uint32_t now, float openLoopFreq, float rampTargetRpm);
+    bool closedLoopControlAllowed() const;
+    bool closedLoopSafetyAllowsCorrection(uint32_t now, const SpeedFeedbackStatus& feedback);
+    void resetClosedLoopPidState();
+    void reportClosedLoopAction(const char* message, uint8_t action, bool& latch);
+    void updateClosedLoopAmpRecovery(uint32_t now, const SpeedFeedbackStatus& feedback);
     float applyClosedLoopCorrection(uint32_t now, float openLoopFreq);
     void scheduleClosedLoopEngage(uint32_t now);
     void resetClosedLoopControl(bool resetFeedback);
