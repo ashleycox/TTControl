@@ -17,6 +17,8 @@
 #include <ArduinoJson.h>
 #endif
 
+// Browser-facing control surface. The class serves the embedded HTML app, setup
+// page, JSON APIs, status event stream, and PIN-gated write actions.
 class WebInterface {
 public:
     WebInterface();
@@ -29,8 +31,14 @@ private:
 #if NETWORK_ENABLE
     WebServer _server;
     bool _started;
+
+    // Single-session write token issued after a valid web PIN. It is intentionally
+    // short-lived and stored only in RAM.
     char _authToken[17];
     uint32_t _authExpiresMs;
+
+    // WebServer's raw-body callback arrives in chunks. POST handlers parse this
+    // buffer once the body is complete, then release it immediately.
     char* _rawBody;
     size_t _rawBodyLength;
     size_t _rawBodyCapacity;

@@ -20,7 +20,8 @@ HardwareAbstraction::HardwareAbstraction() {
 }
 
 void HardwareAbstraction::begin() {
-    // Initialize any global hardware states here if needed
+    // Reserved for board-wide initialization that should happen before module
+    // setup. Pin directions are set in the owning modules.
 }
 
 void HardwareAbstraction::setPinMode(int pin, int mode) {
@@ -48,10 +49,10 @@ void HardwareAbstraction::setPWMRange(int range) {
 }
 
 void HardwareAbstraction::watchdogEnable(int timeoutMs) {
-    // RP2040 Watchdog Max timeout is approx 8.3 seconds
+    // RP2040 watchdog timeout is limited to roughly 8.3 seconds.
     if (timeoutMs > 8300) timeoutMs = 8300;
     
-    // Enable watchdog with pause on debug support
+    // Pause-on-debug keeps breakpoints from forcing a reset during development.
     watchdog_enable(timeoutMs, 1); 
     _watchdogEnabled = true;
 }
@@ -63,11 +64,14 @@ void HardwareAbstraction::watchdogFeed() {
 }
 
 void HardwareAbstraction::watchdogReboot() {
-    // Force immediate reboot
+    // Force immediate reboot. Use only when a controlled firmware reset is safer
+    // than continuing with invalid state.
     watchdog_reboot(0, 0, 0);
 }
 
 ResetCause HardwareAbstraction::getResetCause() {
+    // Arduino-Pico exposes board reset reasons through the global rp2040 helper;
+    // translate them into the firmware's stable enum for logging and APIs.
     switch (rp2040.getResetReason()) {
         case RP2040::PWRON_RESET: return RESET_CAUSE_POWER_ON;
         case RP2040::RUN_PIN_RESET: return RESET_CAUSE_RUN_PIN;
@@ -108,8 +112,8 @@ void HardwareAbstraction::delayMs(uint32_t ms) {
 }
 
 void HardwareAbstraction::setMuteRelay(int index, bool active) {
-    // Helper to map index to physical pin
-    // Note: Polarity and timing are handled by MotorController
+    // Map phase index to relay GPIO. A bad index is ignored rather than toggling
+    // an unintended pin.
     int pin = -1;
     switch(index) {
         case 0: pin = PIN_MUTE_PHASE_A; break;

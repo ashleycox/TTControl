@@ -25,6 +25,8 @@ SystemMonitor::SystemMonitor()
 }
 
 void SystemMonitor::begin() {
+    // Start a fresh utilization window and publish an initial memory snapshot so
+    // dashboards have sensible values before the first one-second update.
     _windowStartUs = micros();
     _core0LoopStartUs = 0;
     _core0WindowBusyUs = 0;
@@ -39,6 +41,7 @@ void SystemMonitor::beginCore0Loop() {
 void SystemMonitor::endCore0Loop() {
     if (_core0LoopStartUs == 0) return;
     uint32_t now = micros();
+    // Unsigned subtraction handles micros() rollover.
     _core0WindowBusyUs += now - _core0LoopStartUs;
     _core0LoopStartUs = 0;
 }
@@ -48,6 +51,7 @@ void SystemMonitor::update() {
     uint32_t elapsedUs = now - _windowStartUs;
     if (elapsedUs < 1000000UL) return;
 
+    // Exchange clears Core 1's accumulator without losing concurrent additions.
     uint32_t core1BusyUs = __atomic_exchange_n(&_core1WindowBusyUs, 0, __ATOMIC_RELAXED);
     _snapshot.core0LoadPercent = min(100.0f, (_core0WindowBusyUs * 100.0f) / elapsedUs);
     _snapshot.core1LoadPercent = min(100.0f, (core1BusyUs * 100.0f) / elapsedUs);
@@ -58,6 +62,7 @@ void SystemMonitor::update() {
 }
 
 void SystemMonitor::recordCore1WorkMicros(uint32_t durationUs) {
+    // Called from Core 1 after a buffer fill; keep it atomic and allocation-free.
     __atomic_fetch_add(&_core1WindowBusyUs, durationUs, __ATOMIC_RELAXED);
 }
 
@@ -66,6 +71,8 @@ SystemMetricsSnapshot SystemMonitor::snapshot() const {
 }
 
 void SystemMonitor::refreshMemoryAndFlash() {
+    // Arduino-Pico reports -1/0 for unavailable heaps on some boards. Clamp
+    // those to zero so JSON and OLED code never display wrapped uint32_t values.
     int heapTotal = rp2040.getTotalHeap();
     int heapUsed = rp2040.getUsedHeap();
     int heapFree = rp2040.getFreeHeap();
@@ -88,6 +95,8 @@ void SystemMonitor::refreshMemoryAndFlash() {
 
     uintptr_t sketchStart = (uintptr_t)&__flash_binary_start;
     uintptr_t sketchEnd = (uintptr_t)&__flash_binary_end;
+    // Linker symbols give the actual image size in flash, which is more useful
+    // than estimating from the filesystem partition.
     _snapshot.sketchUsedBytes = sketchEnd > sketchStart ? (uint32_t)(sketchEnd - sketchStart) : 0;
 
 #ifdef FS_START

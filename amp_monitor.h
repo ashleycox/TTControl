@@ -12,6 +12,9 @@
 #include <Arduino.h>
 #include "config.h"
 
+// Polls the amplifier protection inputs from Core 0. It intentionally reports
+// thermal faults through MotorController rather than touching waveform hardware
+// directly, so output shutdown follows the same emergency path as other faults.
 class AmplifierMonitor {
 public:
     AmplifierMonitor();
@@ -24,6 +27,8 @@ public:
     bool isShutdown() const { return _shutdown; }
 
 private:
+    // Sampling is throttled because temperature and thermal OK do not require
+    // per-loop reads, and analog reads are slow enough to matter in Core 0.
     uint32_t _lastSampleMs;
     float _temperatureC;
     bool _thermalOk;

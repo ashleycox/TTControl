@@ -26,8 +26,9 @@ enum ResetCause {
 /**
  * @brief Hardware Abstraction Layer.
  * 
- * Centralizes all direct hardware interactions to improve portability and testability.
- * Wraps Arduino and RP2040-specific APIs (GPIO, PWM, Watchdog, Timing).
+ * Centralizes non-waveform hardware interactions so most modules do not call
+ * Arduino or RP2040 APIs directly. WaveformGenerator still uses low-level
+ * PWM/DMA APIs because those paths are timing critical.
  */
 class HardwareAbstraction {
 public:
@@ -41,6 +42,8 @@ public:
     int digitalRead(int pin);
     
     // --- PWM Control ---
+    // Generic Arduino PWM wrappers. The DDS output code configures PWM directly
+    // in waveform.cpp and does not rely on these helpers.
     void analogWrite(int pin, int value);
     void setPWMFreq(int freq);
     void setPWMRange(int range);
@@ -58,10 +61,13 @@ public:
     void delayMs(uint32_t ms);
     
     // --- Semantic Hardware Control ---
-    void setMuteRelay(int index, bool active); // Direct pin control (logic handled in MotorController)
+    // These functions perform pin mapping only. Polarity, staggered sequencing,
+    // and safety timing stay in MotorController.
+    void setMuteRelay(int index, bool active);
     void setStandbyRelay(bool active);
     
 private:
+    // Prevent watchdog updates before watchdog_enable() has actually run.
     bool _watchdogEnabled;
 };
 

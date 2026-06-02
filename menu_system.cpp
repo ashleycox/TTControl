@@ -9,6 +9,8 @@
 #include "menu_system.h"
 
 static char* copyMenuString(const char* text) {
+    // Menu items own labels so generated/dynamic labels can outlive the caller's
+    // temporary String.
     if (!text) text = "";
     size_t length = strlen(text);
     char* copy = new char[length + 1];
@@ -49,7 +51,7 @@ void MenuPage::addItem(MenuItem* item) {
 }
 
 void MenuPage::clear() {
-    // Delete all dynamically allocated items to prevent memory leaks
+    // Delete all dynamically allocated items to prevent memory leaks.
     for (auto item : _items) {
         delete item;
     }
@@ -71,7 +73,7 @@ void MenuPage::next() {
     _selection++;
     if (_selection >= count) _selection = 0;
     
-    // Scroll logic: Keep selection within the visible window (assuming 5 lines)
+    // Scroll logic: keep selection within the visible window used by ui.cpp.
     if (_selection >= _offset + 5) _offset = _selection - 4;
     if (_selection < _offset) _offset = _selection;
 }
@@ -94,7 +96,7 @@ void MenuPage::select(MenuPage*& currentPage) {
     clampSelection();
     MenuItem* item = getVisibleItem(_selection);
     if (!item) return;
-    // Trigger the selected item's action
+    // Trigger the selected item's action or page transition.
     item->onSelect(currentPage);
 }
 
@@ -107,6 +109,8 @@ void MenuPage::input(int delta) {
 }
 
 size_t MenuPage::getVisibleItemCount() const {
+    // Visibility can change while the same page is open, so counts are computed
+    // from callbacks instead of cached.
     size_t count = 0;
     for (auto item : _items) {
         if (item && item->isVisible()) count++;
@@ -125,6 +129,8 @@ MenuItem* MenuPage::getVisibleItem(size_t index) const {
 }
 
 void MenuPage::clampSelection() {
+    // Called before navigation/render interaction so hidden items cannot leave
+    // selection pointing past the visible list.
     int count = (int)getVisibleItemCount();
     if (count <= 0) {
         _selection = 0;
@@ -163,10 +169,10 @@ MenuInt::MenuInt(const char* label, int* target, int min, int max)
 void MenuInt::onInput(int delta) {
     if (_editing) {
         _temp += delta;
-        // Clamp value
+        // Clamp value.
         if (_temp < _min) _temp = _min;
         if (_temp > _max) _temp = _max;
-        // Live preview (optional, currently enabled)
+        // Live preview keeps the UI and setting value in sync during editing.
         *_target = _temp; 
     }
 }
@@ -196,6 +202,8 @@ MenuByte::MenuByte(const char* label, uint8_t* target, int min, int max,
       _changeCallback(callback) {}
 
 void MenuByte::onSelect(MenuPage*& currentPage) {
+    // Selecting enters/exits edit mode. Exit commits the last previewed value and
+    // notifies callbacks such as immediate waveform refresh.
     _editing = !_editing;
     if (_editing) {
         _temp = *_target;
@@ -217,6 +225,7 @@ void MenuByte::onInput(int delta) {
 
 bool MenuByte::onBack(MenuPage*& currentPage) {
     if (!_editing) return false;
+    // Same live-preview semantics as MenuSetting: back accepts current temp.
     *_target = (uint8_t)_temp;
     if (_changeCallback) _changeCallback((uint8_t)_temp);
     _editing = false;
@@ -261,7 +270,7 @@ MenuFloat::MenuFloat(const char* label, float* target, float step, float min, fl
 void MenuFloat::onInput(int delta) {
     if (_editing) {
         _temp += (delta * _step);
-        // Clamp value
+        // Clamp value.
         if (_temp < _min) _temp = _min;
         if (_temp > _max) _temp = _max;
         *_target = _temp;
@@ -269,7 +278,7 @@ void MenuFloat::onInput(int delta) {
 }
 
 void MenuFloat::getValueString(char* buffer, size_t size) const {
-    // Format to 2 decimal places
+    // Two decimals fit the OLED and are adequate for current motor settings.
     snprintf(buffer, size, "%.2f", _editing ? _temp : *_target);
 }
 
@@ -290,6 +299,8 @@ void MenuBool::getValueString(char* buffer, size_t size) const {
 }
 
 // --- MenuText (String Editor) ---
+// Internal one-byte tokens are used so the encoder can offer a Shift action and
+// a pound-sign character without making the editable buffer variable-width.
 static const char MENU_TEXT_SHIFT_TOKEN = 1;
 static const char MENU_TEXT_POUND_TOKEN = 2;
 static const char MENU_TEXT_POUND_UTF8[] = "\xC2\xA3";
@@ -309,6 +320,7 @@ static const char* menuTextCharset(bool uppercase) {
 }
 
 static void appendMenuTextDisplayChar(char c, char* buffer, size_t size, size_t& out) {
+    // Translate internal edit tokens into printable OLED/serial text.
     if (!buffer || out >= size) return;
 
     if (c == MENU_TEXT_SHIFT_TOKEN) {
@@ -334,7 +346,7 @@ MenuText::~MenuText() {
 
 void MenuText::onSelect(MenuPage*& currentPage) {
     if (!_editing) {
-        // Enter Edit Mode
+        // Enter edit mode from the start of the temp buffer.
         _editing = true;
         _uppercase = false;
         loadTargetIntoTemp();
@@ -349,7 +361,7 @@ void MenuText::onSelect(MenuPage*& currentPage) {
             return;
         }
 
-        // Advance Cursor or Save
+        // Advance cursor while inside the string; selecting at the end saves.
         if (_cursorPos < strlen(_temp) && _cursorPos < _maxLength - 1) {
             _cursorPos++;
         } else {
@@ -366,7 +378,8 @@ void MenuText::onInput(int delta) {
         if (_cursorPos > tempLen) _cursorPos = tempLen;
         char c = (_cursorPos < tempLen) ? _temp[_cursorPos] : ' ';
         
-        // Find current index in our charset
+        // Find current index in the active charset, then wrap encoder movement
+        // through all available characters.
         const char* charset = menuTextCharset(_uppercase);
         const int charsetLen = strlen(charset);
         int idx = 0;
@@ -380,7 +393,8 @@ void MenuText::onInput(int delta) {
         
         _temp[_cursorPos] = charset[idx];
         
-        // If we just changed the null terminator (end of string), extend string
+        // If we just changed the null terminator, extend the editable string by
+        // one character.
         if (_cursorPos == tempLen && _cursorPos < _maxLength) {
             _temp[_cursorPos + 1] = 0;
         }
@@ -416,6 +430,8 @@ void MenuText::getValueString(char* buffer, size_t size) const {
 }
 
 bool MenuText::isDirty() const {
+    // Compare target text to temp text while treating internal pound token as
+    // either UTF-8 pound or legacy single-byte pound.
     size_t targetIndex = 0;
     size_t tempIndex = 0;
 
@@ -443,6 +459,8 @@ bool MenuText::isDirty() const {
 }
 
 void MenuText::loadTargetIntoTemp() {
+    // Convert target text into the single-byte token representation used while
+    // editing.
     size_t out = 0;
     for (size_t i = 0; _target && _target[i] && out < _maxLength; i++) {
         uint8_t c = (uint8_t)_target[i];
@@ -459,6 +477,7 @@ void MenuText::loadTargetIntoTemp() {
 }
 
 void MenuText::saveTempToTarget() {
+    // Convert temp tokens back into a normal null-terminated target string.
     size_t out = 0;
     for (size_t i = 0; _temp[i] && out < _maxLength; i++) {
         char c = _temp[i];

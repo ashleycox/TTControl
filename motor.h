@@ -26,6 +26,8 @@ enum ClosedLoopTuneStep : uint8_t {
     CLOSED_LOOP_TUNE_VERIFY
 };
 
+// Automatic recommendation codes for the guided closed-loop tuning workflow.
+// They are kept as stable numeric values because the web UI exposes them.
 enum ClosedLoopTuneSuggestionAction : uint8_t {
     CLOSED_LOOP_SUGGEST_NONE = 0,
     CLOSED_LOOP_SUGGEST_APPLY_SETUP,
@@ -37,6 +39,8 @@ enum ClosedLoopTuneSuggestionAction : uint8_t {
     CLOSED_LOOP_SUGGEST_INCREASE_KP
 };
 
+// Accumulated closed-loop health counters. They are reset with closed-loop state
+// and reported through serial/web diagnostics rather than persisted.
 struct ClosedLoopMetrics {
     uint32_t sampleCount;
     uint32_t validSamples;
@@ -57,6 +61,7 @@ struct ClosedLoopMetrics {
     float lastErrorRpm;
 };
 
+// Circular trend sample used by the web dashboard for recent closed-loop motion.
 struct ClosedLoopTrendPoint {
     uint32_t sampleTimeMs;
     float targetRpm;
@@ -67,6 +72,8 @@ struct ClosedLoopTrendPoint {
     bool locked;
 };
 
+// Compact status for the guided tuning UI. The text buffers are fixed-size to
+// avoid heap allocation in repeated dashboard/API calls.
 struct ClosedLoopTuningStatus {
     bool active;
     uint8_t step;
@@ -81,9 +88,9 @@ struct ClosedLoopTuningStatus {
 /**
  * @brief Manages the high-level state of the motor.
  * 
- * Handles state transitions (Standby, Stopped, Starting, Running, Stopping),
- * speed selection, pitch control, and relay management.
- * It coordinates with the WaveformGenerator to produce the correct output.
+ * Handles state transitions, speed selection, pitch control, braking, relay
+ * sequencing, closed-loop correction, and diagnostic sweep modes. Core 0 owns
+ * this controller; waveform.cpp owns the time-critical sample generation.
  */
 class MotorController {
 public:
@@ -157,7 +164,7 @@ public:
 
     // --- Diagnostic Modes ---
     void startSymmetricSweep(float minSep, float maxSep, float speed);
-    void stopSymmetricSweep();
+    void stopSymmetricSweep(bool keepCurrentPhase = false);
 
 private:
     MotorState _state;
@@ -213,7 +220,8 @@ private:
     uint32_t _kickRampStartTime;
     float _kickRampDuration;
 
-    // Closed-loop speed correction
+    // Closed-loop speed correction. These fields track both the requested target
+    // and the slowly slewed target so pitch changes do not shock the controller.
     bool _closedLoopActive;
     float _closedLoopTargetRpm;
     float _closedLoopRequestedTargetRpm;
@@ -245,6 +253,7 @@ private:
     bool _closedLoopMetricsLastSignalValid;
     bool _closedLoopMetricsWasSaturated;
     uint8_t _closedLoopTuneStep;
+    // Ring buffer: _closedLoopTrendNext points to the next write position.
     ClosedLoopTrendPoint _closedLoopTrend[CLOSED_LOOP_TREND_SIZE];
     uint8_t _closedLoopTrendNext;
     uint8_t _closedLoopTrendCount;
@@ -284,10 +293,17 @@ private:
     float _sweepMinSeparation;
     float _sweepMaxSeparation;
     float _sweepSpeed;
+    float _sweepOriginalPhaseOffset[4];
+    SpeedMode _sweepOriginalSpeedMode;
+    bool _sweepHasOriginalPhase;
     
     // Deferred Settings Save
+    // Speed changes defer flash writes so quick encoder/button adjustments do
+    // not repeatedly erase LittleFS sectors.
     bool _settingsDirty;
     uint32_t _lastSettingsChange;
+
+    void restoreSweepPhaseOffsets();
 };
 
 #endif // MOTOR_H

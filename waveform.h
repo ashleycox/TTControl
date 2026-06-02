@@ -24,7 +24,8 @@ extern "C" {
 /**
  * @brief Generates 4-phase sinusoidal waveforms using Direct Digital Synthesis (DDS).
  * 
- * Runs on Core 1 for high-precision timing.
+ * Runs on Core 1 for high-precision timing. Core 0 only publishes pending
+ * settings; Core 1 swaps them into the active state while filling DMA buffers.
  * Supports:
  * - Variable frequency and amplitude
  * - Phase offsets
@@ -65,7 +66,8 @@ public:
     bool isDmaRunning() const;
 
 private:
-    // Double Buffering State
+    // Double-buffered configuration state. Frequency, phase, amplitude, and
+    // filters are copied as a unit so Core 1 never sees a partially changed tune.
     struct WaveformState {
         float frequency;
         uint32_t phaseInc;
@@ -84,12 +86,13 @@ private:
     volatile WaveformState* _activeState;
     WaveformState* _pendingState;
     
-    // Flags
-    bool _enabled;
+    // Flags shared between Core 0 control calls and Core 1 buffer generation.
+    volatile bool _enabled;
     volatile bool _swapPending; // Flag to tell ISR to swap
     volatile bool _stateLock;
     
-    // Internal State (Not buffered, maintained by ISR)
+    // Internal sample history maintained only by Core 1. The master accumulator
+    // is channel 0; other channels derive phase by adding offsets.
     uint32_t _phaseAcc[4];
     float _iirPrev[4];
     float _firBuffer[4][8]; // [Channel][Tap]
@@ -117,7 +120,7 @@ private:
     uint _pwmSlice0;
     uint _pwmSlice1;
     
-    volatile int _currentBufferIndex; // 0 or 1
+    volatile int _currentBufferIndex; // Last buffer freed by DMA IRQ, 0 or 1
     volatile uint32_t _lastBufferFillMs;
     volatile uint32_t _bufferFillCount;
     bool _dmaStarted;

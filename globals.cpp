@@ -11,7 +11,8 @@
 #include "settings.h"
 
 // --- Global Menu Page Pointers ---
-// These are dynamically allocated in buildMenuSystem()
+// The menu tree is built once and then reused. Pointers live here because UI and
+// menu_data both need access without making either module own the other.
 MenuPage* pageMain = nullptr;
 MenuPage* pagePresets = nullptr;
 MenuPage* pageErrorLog = nullptr;
@@ -27,13 +28,16 @@ MenuPage* pageBrakeTune = nullptr;
 MenuPage* pageRelayTest = nullptr;
 
 // --- Shadow Settings State ---
-// Used for temporary storage during menu editing operations
+// Per-speed menu editing works on this copy until the user chooses Save. That
+// prevents accidental flash writes while scrolling through values.
 SpeedSettings menuShadowSettings;
 int menuShadowSpeedIndex = 0;
 
 // --- Core Synchronization ---
-// Set to true when Core 0 has finished initializing shared resources
+// Set to true when Core 0 has finished initializing shared resources. Core 1
+// must not touch waveform settings before this is raised.
 volatile bool systemInitialized = false;
 
-// Safe Mode Boot Flag (Set in setup() if encoder held)
+// Set in setup() when the main encoder button is held during boot. Settings uses
+// this to bypass flash-loaded values for recovery.
 bool safeModeActive = false;

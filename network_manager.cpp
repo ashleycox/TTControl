@@ -17,6 +17,8 @@ static const char* NETWORK_CONFIG_FILE = "/network.bin";
 NetworkManager networkManager;
 
 static void copyBounded(char* target, size_t targetSize, const char* source) {
+    // All config strings are fixed-width fields in NetworkConfig. Always leave a
+    // terminator so older/corrupt files cannot leak into adjacent fields.
     if (!target || targetSize == 0) return;
     if (!source) source = "";
     strncpy(target, source, targetSize - 1);
@@ -25,6 +27,8 @@ static void copyBounded(char* target, size_t targetSize, const char* source) {
 
 #if NETWORK_ENABLE
 static IPAddress ipFromBytes(const uint8_t bytes[4]) {
+    // Store IPs as bytes in flash to keep NetworkConfig independent of Wi-Fi
+    // library object layout.
     return IPAddress(bytes[0], bytes[1], bytes[2], bytes[3]);
 }
 
@@ -55,6 +59,8 @@ NetworkManager::NetworkManager()
 }
 
 void NetworkManager::begin() {
+    // Load config first. The network may stay fully stopped in Eco standby mode
+    // even when networking is enabled.
     load();
 #if NETWORK_ENABLE
     if (_config.enabled) {
@@ -74,6 +80,7 @@ void NetworkManager::begin() {
 
 void NetworkManager::update() {
 #if NETWORK_ENABLE
+    // Eco standby turns Wi-Fi off while the motor controller is in standby.
     if (_config.enabled && shouldSuspendForStandby()) {
         if (!_ecoStandbySuspended || _apActive || _staStarted) {
             stop();
@@ -95,6 +102,7 @@ void NetworkManager::update() {
     if (!_config.enabled) return;
 
     if (_apActive) {
+        // Captive DNS only runs while the setup AP is active.
         _dnsServer.processNextRequest();
     }
 
@@ -106,10 +114,13 @@ void NetworkManager::update() {
     }
 
     if (wantsStation && _staStarted && WiFi.status() != WL_CONNECTED) {
+        // If station connection takes too long, keep the device reachable through
+        // the setup AP when fallback is enabled.
         if (_config.apFallback && !_apActive && now - _connectStartMs > 15000) {
             startAccessPoint();
         }
 
+        // Retry station connection periodically without blocking Core 0.
         if (now - _lastReconnectMs > 30000) {
             startStation();
         }
@@ -118,6 +129,8 @@ void NetworkManager::update() {
 }
 
 void NetworkManager::restart() {
+    // Used after config changes from serial/web. Clear Eco standby state so the
+    // next start decision reflects the new config.
     stop();
     _ecoStandbySuspended = false;
 #if NETWORK_ENABLE
@@ -147,6 +160,8 @@ void NetworkManager::stop() {
 }
 
 void NetworkManager::save() {
+    // Normalize access-control defaults before writing. A locked/read-only web UI
+    // must always have a PIN.
     _config.magic = NETWORK_CONFIG_MAGIC;
     _config.version = NETWORK_CONFIG_VERSION;
     if (_config.webPin[0] != 0) {
@@ -219,6 +234,8 @@ bool NetworkManager::isDeviceLocked() const {
 }
 
 bool NetworkManager::isWebAccessLocked() const {
+    // readOnlyMode protects write APIs; deviceLockEnabled also locks the local
+    // control surface until the PIN is entered.
     return (_config.readOnlyMode || _config.deviceLockEnabled) && _config.webPin[0] != 0;
 }
 
@@ -240,6 +257,8 @@ bool NetworkManager::setWebPin(const char* pin) {
 }
 
 void NetworkManager::setDeviceLockEnabled(bool enabled) {
+    // Enabling the device lock immediately locks access and installs a default
+    // PIN if the user has not set one.
     _config.deviceLockEnabled = enabled;
     if (enabled && _config.webPin[0] == 0) {
         copyBounded(_config.webPin, sizeof(_config.webPin), NETWORK_DEFAULT_WEB_PIN);
@@ -330,6 +349,8 @@ uint8_t NetworkManager::connectedClientCount() const {
 }
 
 void NetworkManager::setDefaults() {
+    // Default to setup AP mode so a fresh board is reachable without existing
+    // station credentials.
     memset(&_config, 0, sizeof(_config));
     _config.magic = NETWORK_CONFIG_MAGIC;
     _config.version = NETWORK_CONFIG_VERSION;
@@ -378,6 +399,8 @@ void NetworkManager::load() {
         return;
     }
 
+    // Older versions were prefixes of the current struct. Migrate by filling the
+    // fields that did not exist in that version, then rewrite the file.
     bool migrated = false;
     if (loaded.version == 1 && readSize >= offsetof(NetworkConfig, readOnlyMode)) {
         loaded.readOnlyMode = false;
@@ -416,6 +439,7 @@ void NetworkManager::load() {
     }
 
     _config = loaded;
+    // Force terminators on every persisted string before any UI/API reads it.
     _config.hostname[NETWORK_HOSTNAME_MAX] = 0;
     _config.ssid[NETWORK_SSID_MAX] = 0;
     _config.password[NETWORK_PASSWORD_MAX] = 0;
@@ -442,12 +466,14 @@ void NetworkManager::start() {
     }
 
     if (_config.mode == NETWORK_MODE_AP) {
+        // AP-only mode is the setup/configuration fallback.
         WiFi.mode(WIFI_AP);
         startAccessPoint();
         return;
     }
 
     if (_config.mode == NETWORK_MODE_STA_AP) {
+        // Keep setup AP available while also attempting station connection.
         WiFi.mode(WIFI_AP_STA);
         startAccessPoint();
         startStation();
@@ -464,6 +490,8 @@ void NetworkManager::start() {
 void NetworkManager::startStation() {
 #if NETWORK_ENABLE
     if (_config.ssid[0] == 0) {
+        // No station credentials: optionally expose the setup AP instead of
+        // leaving the device unreachable.
         setStatus("No station SSID");
         if (_config.apFallback && !_apActive) {
             startAccessPoint();
@@ -473,6 +501,7 @@ void NetworkManager::startStation() {
 
     WiFi.setHostname(_config.hostname);
     if (!_config.dhcp) {
+        // Arduino-Pico WiFi.config order is local IP, DNS, gateway, subnet.
         WiFi.config(ipFromBytes(_config.staticIp), ipFromBytes(_config.dns),
                     ipFromBytes(_config.gateway), ipFromBytes(_config.subnet));
     }
@@ -492,6 +521,8 @@ void NetworkManager::startStation() {
 
 void NetworkManager::startAccessPoint() {
 #if NETWORK_ENABLE
+    // The setup AP always uses a fixed private address so captive DNS can point
+    // all names to the web UI.
     IPAddress apIP(192, 168, 4, 1);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
 
@@ -521,6 +552,8 @@ void NetworkManager::stopAccessPoint() {
 }
 
 bool NetworkManager::shouldSuspendForStandby() const {
+    // Eco standby only cares about the high-level motor state mirror; it avoids
+    // reaching into MotorController from the network module.
     return _config.standbyMode == NETWORK_STANDBY_ECO &&
            currentMotorState == STATE_STANDBY;
 }

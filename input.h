@@ -12,7 +12,8 @@
 #include <Arduino.h>
 #include "config.h"
 
-// Abstracted Input Events
+// Abstracted UI events. InputManager converts hardware edges/clicks into these
+// high-level actions so UI code does not know about debounce or quadrature.
 enum InputEvent {
     EVT_NONE,
     EVT_NAV_UP,      // Encoder Right (Clockwise)
@@ -26,11 +27,9 @@ enum InputEvent {
 /**
  * @brief Manages physical input devices (Encoder, Buttons).
  * 
- * Handles:
- * - Quadrature decoding
- * - Acceleration (faster rotation = larger delta)
- * - Button debouncing
- * - Click detection (Single, Double, Long, Very Long)
+ * Handles main encoder quadrature, optional pitch encoder, optional discrete
+ * buttons, acceleration, button debounce, click timing, and serial-test input
+ * injection. It owns input timing only; UI decides what each event means.
  */
 class InputManager {
 public:
@@ -61,6 +60,8 @@ public:
 
 private:
     // Encoder State
+    // Main encoder position is incremented in the GPIO ISR and consumed from the
+    // Core 0 loop.
     volatile long _encoderPosition;
     long _lastEncoderPosition;
     
@@ -74,7 +75,8 @@ private:
     uint32_t _lastPitchTime;
     int _pitchAccel;
     
-    // Button State
+    // Button State. Clicks are resolved after the double-click window expires so
+    // a short press is not emitted prematurely.
     bool _btnPressed;
     uint32_t _btnPressTime;
     bool _waitingForDoubleClick;
@@ -91,7 +93,8 @@ private:
     
     static void isrEncoder();
 
-    // Event Queue (Single item buffer)
+    // Event Queue (Single item buffer). The UI polls frequently, so one pending
+    // semantic event is enough and avoids dynamic allocation.
     InputEvent _pendingEvent;
     
     // Injection State

@@ -20,10 +20,12 @@ ErrorHandler::ErrorHandler() {
 }
 
 void ErrorHandler::begin() {
-    // Filesystem initialization is handled by Settings class
+    // Filesystem initialization is handled by Settings before ErrorHandler starts.
 }
 
 void ErrorHandler::logEvent(ErrorCode code, const char* message) {
+    // logEvent is for informational boot/runtime entries. It does not trigger
+    // UI alerts or motor actions.
     Serial.print("ERROR ");
     Serial.print(code);
     Serial.print(": ");
@@ -34,6 +36,8 @@ void ErrorHandler::logEvent(ErrorCode code, const char* message) {
 
 void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
     if (critical) {
+        // Stop outputs before doing file/UI work so safety action is not delayed
+        // by flash or display operations.
         _criticalError = true;
         motor.emergencyStop();
     }
@@ -51,7 +55,8 @@ void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
 }
 
 void ErrorHandler::logToFile(ErrorCode code, const char* message) {
-    // Check file size first
+    // Keep the log bounded. A small log is enough for bench diagnostics and
+    // avoids filling the LittleFS partition after repeated warnings.
     File f = LittleFS.open("/error.log", "r");
     if (f) {
         size_t size = f.size();
@@ -80,6 +85,7 @@ void ErrorHandler::clearLogs() {
 }
 
 void ErrorHandler::dumpLog(Stream& out) {
+    // Serial command path: stream bytes directly rather than building a String.
     File f = LittleFS.open("/error.log", "r");
     if (!f) {
         out.println("No log file.");
@@ -93,11 +99,11 @@ void ErrorHandler::dumpLog(Stream& out) {
 }
 
 void ErrorHandler::getLogLines(std::vector<String>& lines, int maxLines) {
+    // UI/web path: return a capped number of lines so callers can render quickly.
     File f = LittleFS.open("/error.log", "r");
     if (!f) return;
     
-    // Read lines from the beginning of the file
-    // TODO: For large logs, implementing a tail reader would be more efficient
+    // Read from the beginning; log rotation keeps the file small.
     while (f.available() && (int)lines.size() < maxLines) {
         String line = f.readStringUntil('\n');
         line.trim();

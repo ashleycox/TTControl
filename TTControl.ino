@@ -27,6 +27,9 @@
 #include "system_monitor.h"
 
 // --- Global Objects ---
+// These are constructed once and referenced from the modules through globals.h.
+// Keeping ownership here makes the Arduino sketch the composition root for the
+// firmware while the modules stay focused on behavior.
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
 
 Settings settings;
@@ -34,12 +37,20 @@ WaveformGenerator waveform;
 MotorController motor;
 UserInterface ui;
 
-// Shared State
+// --- Cross-core State ---
+// Core 0 owns motor decisions; Core 1 reads these values while generating the
+// waveform. Volatile prevents stale reads across cores, but callers should still
+// prefer the module APIs so updates remain clamped and sequenced.
 volatile MotorState currentMotorState = STATE_STANDBY;
 volatile float currentFrequency = 50.0;
 volatile float currentPitchPercent = 0.0;
+
+// Core 1 refreshes this each waveform loop. Core 0 uses it both for watchdog
+// gating and for detecting a waveform task that has stopped servicing buffers.
 volatile uint32_t core1HeartbeatMs = 0;
 
+// Fault reporting is one-shot so a stalled waveform path does not spam the
+// persistent error log while the watchdog is already being withheld.
 static bool waveformHealthFaultReported = false;
 static bool settingsBootConfirmed = false;
 static const uint32_t WAVEFORM_CORE_STALL_MS = 1000;
@@ -48,12 +59,15 @@ static const uint32_t WAVEFORM_BUFFER_STALL_MS = 250;
 static void checkWaveformHealth(uint32_t now) {
     if (waveformHealthFaultReported) return;
 
+    // A missing heartbeat means Core 1 has stopped running its loop entirely.
     if (core1HeartbeatMs != 0 && now - core1HeartbeatMs > WAVEFORM_CORE_STALL_MS) {
         waveformHealthFaultReported = true;
         errorHandler.report(ERR_WAVEFORM_HEALTH, "Waveform core heartbeat stalled", true);
         return;
     }
 
+    // A fresh heartbeat with an old fill timestamp points to the buffer service
+    // path rather than the core scheduler itself.
     uint32_t lastFillMs = waveform.getLastBufferFillMs();
     if (lastFillMs != 0 && now - lastFillMs > WAVEFORM_BUFFER_STALL_MS) {
         waveformHealthFaultReported = true;
@@ -75,13 +89,15 @@ void setup() {
         safeModeActive = true;
     }
 
-    // Initialize Serial for debugging
+    // Serial is intentionally optional so production builds can disable the
+    // monitor without changing command or UI code.
     if (SERIAL_MONITOR_ENABLE) {
         Serial.begin(115200);
         Serial.println("TT Control Booting...");
     }
 
-    // Initialize Settings (Mounts LittleFS and loads config)
+    // Settings must come before modules that read configuration. Safe Mode is
+    // already latched so Settings can decide whether to bypass flash contents.
     settings.begin();
     errorHandler.begin();
     char resetMsg[48];
@@ -96,21 +112,21 @@ void setup() {
     
     if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS)) {
         Serial.println(F("SSD1306 allocation failed"));
-        // TODO: Blink LED to indicate fatal error
+        // Keep booting so serial diagnostics and safe hardware defaults remain
+        // available even when the OLED is disconnected or failed.
     }
     display.clearDisplay();
     display.display();
 
-    // Initialize User Interface
+    // UI and motor startup are separated: UI sets up displays and inputs, then
+    // MotorController applies relay and waveform-safe defaults.
     ui.begin();
 
-    // Initialize Motor Control Logic (State Machine)
     motor.begin();
 
-    // Initialize amplifier thermal monitor
+    // Safety and connectivity services are polled from loop(); begin() only
+    // performs lightweight setup so watchdog enable remains near the end.
     ampMonitor.begin();
-
-    // Initialize network services on Wi-Fi-capable builds.
     networkManager.begin();
     webInterface.begin();
     
@@ -127,31 +143,30 @@ void setup() {
 void loop() {
     systemMonitor.beginCore0Loop();
 
-    // 1. Update User Interface (Poll inputs, draw screen)
+    // Keep each subsystem non-blocking. This loop owns all user-facing work and
+    // must leave regular time for motor state transitions and network polling.
     ui.update();
-    
-    // 2. Update Motor Logic (State transitions, speed ramping)
     motor.update();
-
-    // 3. Monitor amplifier thermal safety
     ampMonitor.update();
     
-    // 4. Handle Serial Commands (Debug/Control)
     if (SERIAL_MONITOR_ENABLE) {
         handleSerialCommands();
     }
 
-    // 5. Service network and web UI without blocking motor control.
     networkManager.update();
     webInterface.update();
     systemMonitor.update();
     systemMonitor.endCore0Loop();
     
-    // 6. Feed Watchdog only while Core 1 is actively servicing waveform work.
+    // Feed the watchdog only after waveform generation has proved it is alive.
+    // If Core 1 or DMA service stalls, the watchdog reset is the safest outcome.
     uint32_t now = hal.getMillis();
     checkWaveformHealth(now);
     uint32_t core1Age = now - core1HeartbeatMs;
     if (core1HeartbeatMs != 0 && core1Age < 1000) {
+        // The boot marker is delayed until a waveform buffer has actually been
+        // filled, so fallback logic can distinguish a real boot from a crash
+        // during early initialization.
         if (!settingsBootConfirmed && waveform.getLastBufferFillMs() != 0) {
             settings.markBootSuccessful();
             settingsBootConfirmed = true;
@@ -168,7 +183,8 @@ void setup1() {
         delay(1);
     }
     
-    // Initialize Waveform Generator (PWM, LUTs)
+    // Core 1 owns timing-sensitive PWM/DMA state. No display, filesystem, or
+    // serial command work should be added below this point.
     waveform.begin();
     core1HeartbeatMs = hal.getMillis();
     
@@ -176,8 +192,8 @@ void setup1() {
 }
 
 void loop1() {
-    // High priority waveform generation loop
-    // Generates samples at 20kHz (50us interval)
+    // High-priority waveform loop. WaveformGenerator decides whether a DMA
+    // buffer needs service; this wrapper only records liveness for Core 0.
     waveform.update();
     core1HeartbeatMs = hal.getMillis();
 }

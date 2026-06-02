@@ -10,30 +10,40 @@
 #define CONFIG_H
 
 // --- System Information ---
+// The version is embedded in the serial CLI and web diagnostics. BUILD_DATE can
+// be overridden by CI; otherwise Arduino's compile-time date is used.
 #define FIRMWARE_VERSION "v1.0.0"
 #ifndef BUILD_DATE
 #define BUILD_DATE __DATE__ " " __TIME__
 #endif
 
 // --- Flash Memory Configuration ---
-// 8MB LittleFS partition recommended for Pico+2 (16MB total flash)
-// Ensure you select the correct partition scheme in Arduino IDE
+// 8MB LittleFS partition recommended for Pico+2 (16MB total flash). The binary
+// settings and preset structs assume LittleFS is available, so the board's flash
+// partition scheme must match this expectation.
 #define LITTLEFS_FS_SIZE (8 * 1024 * 1024) 
 
 // --- Core Hardware Settings ---
+// OLED geometry is fixed by the SSD1306 panel used in the control head.
 #define OLED_I2C_ADDRESS 0x3C
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64
 
 // --- Waveform Generation ---
-#define LUT_MAX_SIZE 16384 // Size of Sine Lookup Table
+// The DDS LUT is power-of-two sized so phase accumulator wrapping can be cheap.
+// Frequency limits protect the motor and PWM/DMA timing budget.
+#define LUT_MAX_SIZE 16384
 #define MIN_OUTPUT_FREQUENCY_HZ 10.0f
 #define MAX_OUTPUT_FREQUENCY_HZ 1500.0f
 
 // --- Preset Management ---
+// The menu, serial CLI, web UI, and binary preset directory all assume five
+// user preset slots.
 #define MAX_PRESET_SLOTS 5
 
 // --- Serial Debugging ---
+// SERIAL_MONITOR_ENABLE gates the CLI. DUPLICATE_DISPLAY_TO_SERIAL mirrors OLED
+// text for development without changing normal UI drawing.
 #ifndef SERIAL_MONITOR_ENABLE
 #define SERIAL_MONITOR_ENABLE 1
 #endif
@@ -42,7 +52,8 @@
 #endif
 
 // --- Optional Features (Compile-time flags) ---
-// Set to 1 to enable specific hardware features
+// These flags describe hardware that may not be populated on every controller.
+// Keep them compile-time so absent GPIO and libraries do not affect lean builds.
 #ifndef NETWORK_ENABLE
 #if defined(PICO_CYW43_SUPPORTED)
 #define NETWORK_ENABLE 1
@@ -65,6 +76,9 @@
 #endif
 
 // --- Feature Flags ---
+// These change real output behavior. Be conservative when enabling them because
+// relay topology, connected amplifier protection, and output channel count vary
+// between builds.
 #ifndef ENABLE_STANDBY
 #define ENABLE_STANDBY 1         // Set to 0 to disable all standby functionality
 #endif
@@ -87,6 +101,8 @@
 #define CLOSED_LOOP_TREND_SIZE 24  // Rolling runtime samples retained for closed-loop trend diagnostics
 #endif
 
+// The active channel count is derived once so waveform, menu, and diagnostics
+// code can share the same feature-gated boundary.
 #if ENABLE_4_CHANNEL_SUPPORT
 #define MAX_PHASE_MODE 4
 #define MAX_ACTIVE_PHASE_OUTPUTS 4
@@ -96,8 +112,12 @@
 #endif
 
 // --- Pin Assignments (RP2350 / Arduino-Pico) ---
+// GPIO numbers are physical controller wiring, not arbitrary Arduino pins.
+// Changing them can energize the wrong relay or waveform output.
 
 // PWM Outputs (Waveform Generation)
+// Channels A-D are adjacent so the waveform generator can use predictable PWM
+// slice/channel mapping.
 #define PIN_PWM_PHASE_A 0
 #define PIN_PWM_PHASE_B 1
 #define PIN_PWM_PHASE_C 2
@@ -113,6 +133,8 @@
 #define PIN_ENC_MAIN_SW 12
 
 // Optional Pins (only used if enabled above)
+// Pitch encoder and discrete buttons are compiled out unless their feature flag
+// is enabled, which keeps unpopulated pins from being polled.
 #define PIN_ENC_PITCH_CLK 13
 #define PIN_ENC_PITCH_DT 14
 #define PIN_ENC_PITCH_SW 15
@@ -136,6 +158,8 @@
 #define PIN_AMP_TEMP 26
 #define PIN_AMP_THERM_OK 27
 
+// Thermal values are validated in settings so user-entered thresholds stay in
+// the same safe range as these firmware defaults.
 #define AMP_TEMP_WARN_C 65.0f
 #define AMP_TEMP_SHUTDOWN_C 75.0f
 #define AMP_TEMP_MIN_C 30.0f
@@ -144,6 +168,8 @@
 #define AMP_TEMP_WARN_HYSTERESIS_C 5.0f
 
 // --- Network Defaults (Wi-Fi boards only) ---
+// Magic/version identify the binary network config file independently from the
+// motor settings schema.
 #define NETWORK_CONFIG_MAGIC 0x54545746UL
 #define NETWORK_CONFIG_VERSION 5
 #define NETWORK_HOSTNAME_MAX 32
@@ -161,6 +187,9 @@
 #define WELCOME_MESSAGE "Welcome to TT Control"
 
 // --- Storage Schema ---
+// These sizes intentionally mirror sizeof() checks in types.h. If a persisted
+// struct changes, bump SETTINGS_SCHEMA_VERSION and add migration code before
+// changing the expected size.
 #define SETTINGS_SCHEMA_VERSION 9
 #define SETTINGS_FILE_FORMAT_VERSION 1
 #define SETTINGS_FILE_MAGIC 0x54544353UL // "TTCS"
@@ -174,6 +203,7 @@
 #define DEFAULT_SPEED_INDEX 0 // 33.3 RPM
 
 // --- Compile-time Safety Checks ---
+// These fail the build before a bad hardware combination reaches a board.
 #if NETWORK_ENABLE && !defined(PICO_CYW43_SUPPORTED)
 #error "NETWORK_ENABLE requires a Wi-Fi-capable Pico/RP board target."
 #endif
@@ -218,6 +248,8 @@ static_assert(SETTINGS_SCHEMA_VERSION > 0, "Settings schema version must be posi
 static_assert(SETTINGS_FILE_FORMAT_VERSION == 1, "Update settings file load/save code when changing the file format.");
 static_assert(CLOSED_LOOP_TREND_SIZE > 0 && CLOSED_LOOP_TREND_SIZE <= 64, "Closed-loop trend size must stay small and non-zero.");
 
+// Pin uniqueness checks cover the always-present wiring first, then add checks
+// for feature-gated hardware blocks below.
 #define TT_PIN_ASSERT_DISTINCT(a, b) static_assert((a) != (b), #a " must not share a GPIO with " #b)
 
 TT_PIN_ASSERT_DISTINCT(PIN_PWM_PHASE_A, PIN_PWM_PHASE_B);

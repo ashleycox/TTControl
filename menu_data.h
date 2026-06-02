@@ -12,7 +12,8 @@
 #include "menu_system.h"
 #include "settings.h"
 
-// Global Menu Pages
+// Global Menu Pages. buildMenuSystem() allocates these once; UI navigates by
+// switching the current MenuPage pointer.
 extern MenuPage* pageMain;
 extern MenuPage* pagePresets;
 extern MenuPage* pageErrorLog;
@@ -31,8 +32,8 @@ extern MenuPage* pageRelayTest;
 extern MenuPage* pageNetwork;
 extern MenuPage* pageClosedLoop;
 
-// Shadow State for Speed Settings
-// Used to edit settings temporarily before saving
+// Shadow State for Speed Settings. Per-speed tuning edits this copy first so
+// Save/Cancel can commit or discard a whole speed tune at once.
 extern SpeedSettings menuShadowSettings;
 extern int menuShadowSpeedIndex;
 

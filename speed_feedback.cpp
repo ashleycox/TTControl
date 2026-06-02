@@ -69,6 +69,8 @@ SpeedFeedback::SpeedFeedback() {
 
 void SpeedFeedback::begin() {
 #if CLOSED_LOOP_SPEED_ENABLE
+    // Both pins are attached for quadrature. Pulse mode still uses pin A but pin
+    // B is sampled for diagnostics and setup visibility.
     hal.setPinMode(PIN_SPEED_SENSOR_A, INPUT_PULLUP);
     hal.setPinMode(PIN_SPEED_SENSOR_B, INPUT_PULLUP);
     configure();
@@ -81,6 +83,8 @@ void SpeedFeedback::begin() {
 
 void SpeedFeedback::configure() {
 #if CLOSED_LOOP_SPEED_ENABLE
+    // Snapshot pin state before enabling counting so the first interrupt has a
+    // valid previous state.
     bool a = hal.digitalRead(PIN_SPEED_SENSOR_A) == HIGH;
     bool b = hal.digitalRead(PIN_SPEED_SENSOR_B) == HIGH;
     GlobalSettings& g = settings.get();
@@ -152,6 +156,8 @@ void SpeedFeedback::resetMeasurements() {
 }
 
 void SpeedFeedback::beginSetupCapture() {
+    // Start with a clean counter window so the suggested counts/rev is the count
+    // delta for the user's manual revolution.
     reset();
     noInterrupts();
     _setupStartCount = _count;
@@ -167,6 +173,8 @@ void SpeedFeedback::cancelSetupCapture() {
 }
 
 void SpeedFeedback::update(float targetRpm) {
+    // This method runs on Core 0. It samples ISR counters at the configured
+    // interval and turns count delta over elapsed time into RPM.
     _targetRpm = targetRpm;
     ClosedLoopSpeedTuning& tuning = settings.getCurrentClosedLoopTuning();
     _lockTimeMs = tuning.lockTimeMs;
@@ -206,6 +214,8 @@ void SpeedFeedback::update(float targetRpm) {
     _signalValid = signalValid;
 
     if (!signalValid || _countsPerRev == 0 || elapsedMs == 0) {
+        // Drop stale speed estimates immediately when the signal is lost so
+        // closed-loop code cannot keep correcting from old RPM data.
         _measuredRpm = 0.0f;
         _filteredRpm = 0.0f;
         _rpmError = _targetRpm;
@@ -219,6 +229,7 @@ void SpeedFeedback::update(float targetRpm) {
     if (_filteredRpm <= 0.0f) {
         _filteredRpm = _measuredRpm;
     } else {
+        // Exponential smoothing is intentionally simple and bounded by settings.
         _filteredRpm += (_measuredRpm - _filteredRpm) * _filterAlpha;
     }
     _rpmError = _targetRpm - _filteredRpm;
@@ -246,6 +257,8 @@ SpeedFeedbackStatus SpeedFeedback::getStatus() {
     uint64_t intervalSumUs;
     uint64_t intervalJitterSumUs;
 
+    // Copy ISR-owned fields in one critical section, then derive percentages and
+    // ages after interrupts are restored.
     noInterrupts();
     status.configured = _configured;
     status.count = _count;
@@ -317,6 +330,9 @@ SpeedFeedbackSetupStatus SpeedFeedback::getSetupStatus() {
     status.invalidDelta = invalidTransitions - _setupStartInvalidTransitions;
     status.debouncedDelta = debouncedTransitions - _setupStartDebouncedTransitions;
     int32_t absDelta = abs(status.countDelta);
+    // A single manual revolution should be small enough to fit uint16_t and
+    // large enough to infer counts/rev. Larger values are treated as invalid
+    // capture noise rather than applying a bad setting.
     status.suggestedCountsPerRev = absDelta > 0 && absDelta <= 20000 ? (uint16_t)absDelta : 0;
     status.suggestedReverseDirection = status.rawDirection == SPEED_FEEDBACK_DIR_REVERSE;
     return status;
@@ -330,6 +346,8 @@ void SpeedFeedback::handleInterrupt() {
 #if CLOSED_LOOP_SPEED_ENABLE
     if (!_configured && !_setupActive) return;
 
+    // Debounce is based on accepted edges, not all pin changes, so rejected
+    // chatter does not keep extending the debounce window forever.
     uint32_t nowUs = micros();
     if (_debounceUs > 0 && (nowUs - _lastAcceptedEdgeUs) < _debounceUs) {
         _debouncedTransitions++;
@@ -342,6 +360,7 @@ void SpeedFeedback::handleInterrupt() {
     if (_sensorMode == CLOSED_LOOP_SENSOR_PULSE) {
         bool previousA = _lastAState;
         _lastAState = a;
+        _lastBState = b;
         if (!acceptsPulseEdge(previousA, a)) return;
 
         _lastRawDirection = SPEED_FEEDBACK_DIR_FORWARD;
@@ -357,6 +376,8 @@ void SpeedFeedback::handleInterrupt() {
 
     int8_t delta = quadratureDelta(previousState, currentState);
     if (delta == 0) {
+        // A two-bit jump means the encoder skipped an intermediate state or the
+        // input is noisy. Track it for diagnostics and resynchronize.
         _invalidTransitions++;
         _lastQuadState = currentState;
         _lastAState = a;
@@ -410,6 +431,8 @@ void SpeedFeedback::recordAcceptedTransition(uint32_t nowUs) {
 }
 
 bool SpeedFeedback::acceptsPulseEdge(bool previousA, bool currentA) const {
+    // Pulse tachometer mode can count rising, falling, or both edges depending
+    // on the sensor and magnet/slot geometry.
     if (previousA == currentA) return false;
     if (_pulseEdge == CLOSED_LOOP_EDGE_CHANGE) return true;
     if (_pulseEdge == CLOSED_LOOP_EDGE_RISING) return !previousA && currentA;
@@ -417,6 +440,8 @@ bool SpeedFeedback::acceptsPulseEdge(bool previousA, bool currentA) const {
 }
 
 int8_t SpeedFeedback::quadratureDelta(uint8_t previousState, uint8_t currentState) const {
+    // Standard Gray-code transition table. Zero means no movement or an invalid
+    // two-bit transition.
     static const int8_t lookup[16] = {
         0, 1, -1, 0,
         -1, 0, 0, 1,
@@ -429,6 +454,8 @@ int8_t SpeedFeedback::quadratureDelta(uint8_t previousState, uint8_t currentStat
 bool SpeedFeedback::shouldCountQuadratureStep(uint8_t previousState, uint8_t currentState) const {
     if (_quadratureMode == CLOSED_LOOP_QUAD_X4) return true;
 
+    // X2 and X1 are down-sampled from the same ISR stream by only counting A
+    // transitions or A rising transitions.
     bool previousA = previousState & 0x02;
     bool currentA = currentState & 0x02;
     if (previousA == currentA) return false;

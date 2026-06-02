@@ -15,6 +15,8 @@
 #include "hal.h"
 
 enum ErrorCode {
+    // Codes are persisted in /error.log. Add new codes at the end so older logs
+    // remain readable.
     ERR_NONE = 0,
     ERR_SYSTEM_FREEZE = 1,
     ERR_MOTOR_STALL = 2,
@@ -31,11 +33,9 @@ enum ErrorCode {
 /**
  * @brief Centralized Error Handling and Logging.
  * 
- * Capabilities:
- * - Logs errors to Serial console
- * - Appends errors to persistent file (/error.log)
- * - Triggers UI alerts
- * - Tracks critical system state
+ * Logs events/errors to Serial and LittleFS, raises OLED alerts for report(),
+ * and latches critical state. Critical reports force MotorController through the
+ * same emergency-stop path used by user commands.
  */
 class ErrorHandler {
 public:
@@ -62,6 +62,8 @@ public:
     bool hasCriticalError() { return _criticalError; }
     
 private:
+    // Latched until reboot. The UI and diagnostics use this to show that a
+    // critical fault occurred even if outputs have already been shut down.
     bool _criticalError;
     
     void logToFile(ErrorCode code, const char* message);

@@ -18,8 +18,8 @@
 extern UserInterface ui;
 extern MotorController motor;
 
-// Shadow State
-// We use a shadow copy of settings for editing, allowing the user to "Save" or "Cancel" changes.
+// Per-speed shadow editing. Speed pages edit menuShadowSettings; Save writes it
+// into settings, Cancel reloads persisted settings.
 char speedLabelBuffer[32];
 MenuItem* menuSpeedSelector = nullptr;
 MenuPage* pageNetwork = nullptr;
@@ -50,12 +50,14 @@ static MenuPage* pageClosedLoopTune = nullptr;
 #endif
 
 // --- Sweep Diagnostic ---
+// These are temporary diagnostic parameters, not persisted settings.
 float sweepMinSep = 80.0;
 float sweepMaxSep = 100.0;
 float sweepSpeed = 1.0;
 MenuPage* pageSweep = nullptr;
 
 static const char* const phaseModeLabels[] = {"-", "1P", "2P", "3P", "4P"};
+// OLED menu labels are deliberately short enough for a 128x64 display.
 static const char* const filterLabels[] = {"None", "IIR", "FIR"};
 static const char* const firLabels[] = {"Gentle", "Medium", "Agg"};
 static const char* const softStartCurveLabels[] = {"Linear", "Log", "Exp"};
@@ -104,6 +106,8 @@ static const size_t relayTestLabelCount = sizeof(relayTestLabels) / sizeof(relay
 static uint8_t relayTestStage = 0;
 
 static MenuPage* rebuildMenuPage(MenuPage*& page, const char* title) {
+    // Dynamic pages are rebuilt on entry so status text and conditional items are
+    // fresh without leaking old MenuItems.
     if (!page) page = new MenuPage(title);
     page->clear();
     return page;
@@ -124,12 +128,14 @@ static void addNavItem(MenuPage* page,
 
 #if CLOSED_LOOP_SPEED_ENABLE
 static void addClosedLoopItem(MenuPage* page, MenuItem* item) {
+    // Closed-loop subitems remain hidden until the feature is enabled in settings.
     item->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     page->addItem(item);
 }
 #endif
 
 void updateSpeedLabel() {
+    // Main menu's first item doubles as the "which speed am I editing" selector.
     if (menuShadowSpeedIndex == 0) snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 33");
     else if (menuShadowSpeedIndex == 1) snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 45");
     else snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 78");
@@ -140,6 +146,8 @@ void updateSpeedLabel() {
 }
 
 void initMenuState() {
+    // Called when the menu opens so edits begin from the currently selected
+    // motor speed.
     menuShadowSpeedIndex = (int)motor.getSpeed();
     menuShadowSettings = settings.get().speeds[menuShadowSpeedIndex];
     updateSpeedLabel();
@@ -165,12 +173,15 @@ void actionNextSpeed() {
 
 
 void commitMenuShadowSettings() {
+    // Commit only the speed currently represented by menuShadowSettings.
     if (menuShadowSpeedIndex >= 0 && menuShadowSpeedIndex < 3) {
         settings.get().speeds[menuShadowSpeedIndex] = menuShadowSettings;
     }
 }
 
 void saveMenuChangesAndExit() {
+    // Normalize and protected-save because these changes can affect hardware
+    // startup on the next boot.
     commitMenuShadowSettings();
     motor.endRelayTest();
     settings.normalize();
@@ -180,6 +191,8 @@ void saveMenuChangesAndExit() {
 }
 
 void cancelMenuChangesAndExit() {
+    // Reload persisted settings to discard shadow edits and any live global menu
+    // edits made during this menu session.
     settings.load();
     motor.endRelayTest();
     motor.applySettings();
@@ -195,6 +208,7 @@ void actionCancelExit() {
 }
 
 void actionFactoryReset() {
+    // Confirmation keeps the destructive filesystem format behind a second click.
     ui.showConfirm("Factory Reset?", [](){
         settings.factoryReset();
         settings.load();
@@ -205,6 +219,8 @@ void actionFactoryReset() {
 }
 
 void actionUnlockDevice() {
+    // Unlock page uses a separate buffer so failed attempts never overwrite the
+    // saved PIN.
     if (networkManager.unlockDevice(unlockPinBuffer)) {
         memset(unlockPinBuffer, 0, sizeof(unlockPinBuffer));
         ui.showMessage("Unlocked", 1000);
@@ -225,6 +241,7 @@ static void saveSecurityPin() {
 }
 
 static void actionEnterSecurity() {
+    // Rebuild this page on every entry so Lock/State lines reflect current state.
     if (!pageSecurity) pageSecurity = new MenuPage("UI Lock");
     pageSecurity->clear();
 
@@ -271,21 +288,20 @@ static void actionEnterSecurity() {
 
 void actionClearLog() {
     errorHandler.clearLogs();
-    ui.back(); // Return to refresh the menu
+    // Return to the parent so re-entering the log page rebuilds it empty.
+    ui.back();
     ui.showError("Log Cleared", 2000);
 }
 
 void actionEnterErrorLog() {
-    // Create page on demand if needed (or reuse global)
+    // Create page on demand and rebuild it from the current log contents.
     if (!pageErrorLog) pageErrorLog = new MenuPage("Error Log");
 
-    // Clear previous items (important for dynamic content)
     pageErrorLog->clear();
 
-    // Add Clear Action
+    // Add Clear action first so it is reachable even when the log is long.
     pageErrorLog->addItem(new MenuAction("Clear Log", actionClearLog));
 
-    // Fetch and add log lines
     std::vector<String> lines;
     errorHandler.getLogLines(lines);
 
@@ -293,7 +309,7 @@ void actionEnterErrorLog() {
         pageErrorLog->addItem(new MenuInfo("No Errors"));
     } else {
         for (const auto& line : lines) {
-            // Use MenuDynamicInfo to manage string memory
+            // MenuDynamicInfo owns a copy of each generated log line.
             pageErrorLog->addItem(new MenuDynamicInfo(line));
         }
     }
@@ -304,8 +320,9 @@ void actionEnterErrorLog() {
 
 // --- Preset Actions ---
 
-// Helper to build the actions for a specific slot
 void buildPresetSlotMenu(int slot) {
+    // Rebuild one reusable slot page. Lambdas read currentSlot so the callback
+    // always targets the slot displayed in this page.
     static int currentSlot = 0;
     currentSlot = slot;
     static MenuPage* pageSlot = nullptr;
@@ -316,7 +333,8 @@ void buildPresetSlotMenu(int slot) {
     if (pageSlot) delete pageSlot; // Rebuild
     pageSlot = new MenuPage(title);
 
-    // Load Action
+    // Loading a preset replaces active settings and protected-saves it as boot
+    // settings so the selected preset survives restart.
     pageSlot->addItem(new MenuAction("Load", [](){
         if (settings.loadPreset(currentSlot)) {
             motor.applySettings();
@@ -328,7 +346,7 @@ void buildPresetSlotMenu(int slot) {
         }
     }));
 
-    // Save Action
+    // Save writes the active settings snapshot to the chosen slot.
     pageSlot->addItem(new MenuAction("Save", [](){
         ui.showConfirm("Overwrite?", [](){
             settings.savePreset(currentSlot);
@@ -337,16 +355,15 @@ void buildPresetSlotMenu(int slot) {
         });
     }));
 
-    // Rename Action
-    // We need a persistent buffer for the name editing
+    // Persistent buffer because MenuText edits in place and the page lives until
+    // rebuilt for another slot.
     static char nameBuffer[17];
     strncpy(nameBuffer, settings.getPresetName(slot), 16);
     nameBuffer[16] = 0;
 
     pageSlot->addItem(new MenuText("Rename", nameBuffer, 16));
 
-    // Save Name Action (Explicit or auto-save on back?)
-    // MenuText saves to buffer on exit. We need to commit it to settings.
+    // MenuText only updates nameBuffer; Apply Name commits it to settings.
     pageSlot->addItem(new MenuAction("Apply Name", [](){
         settings.renamePreset(currentSlot, nameBuffer);
         ui.showMessage("Renamed!", 1000);
@@ -366,7 +383,7 @@ void buildPresetSlotMenu(int slot) {
 }
 
 void actionEnterPresets() {
-    // Populate the Presets page dynamically
+    // Populate the Presets page dynamically so slot names are current.
     pagePresets->clear();
 
     for (int i = 0; i < MAX_PRESET_SLOTS; i++) {
@@ -383,6 +400,8 @@ void actionEnterPresets() {
 }
 
 void actionEnterSweep() {
+    // Sweep is a live diagnostic. MotorController restores original phase
+    // offsets when sweep exits/stops.
     if (settings.get().phaseMode == 4) {
         ui.showError("N/A 4-Phase", 2000);
         return;
@@ -402,6 +421,8 @@ void actionEnterSweep() {
 }
 
 void actionEnterBrakeTune() {
+    // Brake Tune edits global brake settings live so the user can start/stop the
+    // motor repeatedly, then explicitly save the final tune.
     if (!pageBrakeTune) pageBrakeTune = new MenuPage("Brake Tune");
     pageBrakeTune->clear();
 
@@ -453,6 +474,8 @@ void actionEnterBrakeTune() {
 }
 
 void actionEnterRelayTest() {
+    // Relay test is refused while the motor is moving and disables waveform
+    // output before any relay stage is selected.
     if (!motor.beginRelayTest()) {
         ui.showError("Stop Motor First", 2000);
         return;
@@ -483,6 +506,8 @@ void actionEnterRelayTest() {
 }
 
 void actionEnterNetwork() {
+    // Network pages edit NetworkConfig directly and apply/restart only when the
+    // user chooses Apply.
     if (!networkManager.isAvailable()) {
         ui.showError("No Wi-Fi", 2000);
         return;
@@ -557,6 +582,7 @@ void actionEnterNetwork() {
 
 #if CLOSED_LOOP_SPEED_ENABLE
 void actionApplyClosedLoopSettings() {
+    // Apply validates tuning and reconfigures the feedback sensor/controller.
     settings.normalize();
     motor.applySettings();
     ui.showMessage("CL Applied", 1000);
@@ -595,6 +621,7 @@ void actionClosedLoopSetupStatus() {
 }
 
 void actionClosedLoopSetupApply() {
+    // Setup apply uses the captured one-revolution count as counts/rev.
     SpeedFeedbackSetupStatus setup = speedFeedback.getSetupStatus();
     if (!setup.active || setup.suggestedCountsPerRev == 0) {
         ui.showMessage("No Setup Data", 1500);
@@ -644,6 +671,8 @@ void actionClosedLoopTuneStop() {
 }
 
 void actionEnterClosedLoop() {
+    // Closed-loop pages are rebuilt because the currently edited speed selects
+    // which per-speed tuning block is shown.
     rebuildMenuPage(pageClosedLoop, "Closed Loop");
     rebuildMenuPage(pageClosedLoopControl, "CL Control");
     rebuildMenuPage(pageClosedLoopSensor, "CL Sensor");
@@ -892,6 +921,7 @@ void actionEnterClosedLoop() {
 
 
 void buildMenuSystem() {
+    // Static pages are allocated once. Dynamic pages are built when entered.
     // --- Speed Tuning Page (Per-Speed) ---
     pageSpeedTuning = new MenuPage("Speed Tuning");
     pageSpeedTuning->addItem(new MenuFloat("Frequency", &menuShadowSettings.frequency, 0.1, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ));
@@ -907,6 +937,7 @@ void buildMenuSystem() {
     pageSpeedTuning->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- Phase Page (Mixed) ---
+    // Phase mode is global; phase offsets are per-speed shadow values.
     pagePhase = new MenuPage("Phase Control");
     pagePhase->addItem(new MenuByte("Mode (Glb)", &settings.get().phaseMode, 1, MAX_PHASE_MODE, phaseModeLabels, MAX_PHASE_MODE + 1));
     MenuItem* phase2 = new MenuFloat("Ph 2 Offs", &menuShadowSettings.phaseOffset[1], 0.1, -360.0, 360.0);
@@ -924,6 +955,8 @@ void buildMenuSystem() {
     pagePhase->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- Motor Pages (Mixed) ---
+    // Startup/amplitude per-speed fields use the shadow copy; global ramp/brake
+    // fields update settings directly.
     pageMotor = new MenuPage("Motor Control");
     pageMotorStartup = new MenuPage("Motor Start");
     pageMotorAmplitude = new MenuPage("Motor Amp");
@@ -995,6 +1028,7 @@ void buildMenuSystem() {
     addBackItem(pageMotorBraking);
 
     // --- Power Page (Global) ---
+    // Relay items are only added for hardware compiled into this build.
     pagePower = new MenuPage("Power Control");
 
     if (ENABLE_MUTE_RELAYS) {
@@ -1061,7 +1095,7 @@ void buildMenuSystem() {
 
     // --- Presets Page ---
     pagePresets = new MenuPage("Presets");
-    // Items are populated dynamically in actionEnterPresets
+    // Items are populated dynamically in actionEnterPresets.
     pagePresets->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     // --- Main Menu ---
@@ -1074,7 +1108,7 @@ void buildMenuSystem() {
         }));
     }
 
-    // The first item toggles which speed we are editing in the submenus
+    // The first item toggles which speed we are editing in the submenus.
     menuSpeedSelector = new MenuAction(speedLabelBuffer, actionNextSpeed);
     pageMain->addItem(menuSpeedSelector);
 
@@ -1096,6 +1130,7 @@ void buildMenuSystem() {
     pageMain->addItem(new MenuAction("Cancel", actionCancelExit));
 
     // --- Locked UI Entry Page ---
+    // This page is shown instead of the main menu when the device lock is active.
     pageUnlock = new MenuPage("UI Locked");
     pageUnlock->addItem(new MenuInfo("Enter PIN"));
     pageUnlock->addItem(new MenuText("PIN", unlockPinBuffer, NETWORK_WEB_PIN_MAX));

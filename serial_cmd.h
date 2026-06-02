@@ -20,11 +20,10 @@
 /**
  * @brief Handles Serial Command Interface.
  * 
- * Parses incoming serial strings and executes commands for:
- * - Motor control (start, stop, speed)
- * - System status reporting
- * - UI input injection (for testing)
- * - Error log management
+ * Parses 115200 baud line commands for motor control, settings, presets,
+ * diagnostics, Wi-Fi setup, UI-test input injection, and error log management.
+ * The implementation stays non-blocking except for serial readLine behavior and
+ * asynchronous Wi-Fi scan polling.
  */
 
 void handleSerialCommands();
