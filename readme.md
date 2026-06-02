@@ -2,7 +2,7 @@
 
 TT Control is an advanced turntable motor controller designed to provide precise, multi-phase sine wave generation for controlling synchronous AC and BLDC motors. Built on the Raspberry Pi Pico RP2350, using the Arduino-Pico core, it leverages the Pico's dual-core architecture for efficient operation, separating UI and control logic from high-precision waveform generation.
 
-It features extensive configurability via a hierarchical menu system, hardware configurability via compile-time flags, multi-speed support, configurable settings presets, advanced amplitude and phase control, configurable hardware controls, support for a pitch control, digital filtering and sine wave interpolation, non-volatile settings storage and so much more.
+It features extensive configurability via a hierarchical menu system, hardware configurability via compile-time flags, multi-speed support, configurable settings presets, advanced amplitude and phase control, optional pulse or quadrature closed-loop speed feedback, configurable hardware controls, support for a pitch control, digital filtering and sine wave interpolation, and non-volatile settings storage.
 
 ---
 ## 1. Hardware & Environment Setup
@@ -69,6 +69,8 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico2w:flash=4194304_1048576 .
 | 3 | PWM Phase D | Can be disabled only in custom 3-channel builds. |
 | 4 | I2C0 SDA (OLED) | |
 | 5 | I2C0 SCL (OLED) | |
+| 6 | Speed Sensor A | Optional pulse tachometer input or quadrature A input, controlled by `CLOSED_LOOP_SPEED_ENABLE`. |
+| 7 | Speed Sensor B | Optional quadrature B input, controlled by `CLOSED_LOOP_SPEED_ENABLE`. |
 | 10 | Primary Encoder CLK | |
 | 11 | Primary Encoder DT | |
 | 12 | Primary Encoder SW | |
@@ -111,6 +113,7 @@ Default angles depend on phase mode and can be adjusted.
 - **Multi-Speed Support:** Supports 33⅓, 45, and 78 RPM. Factory defaults target the primary 12-pole motor: 25.07Hz, 33.85Hz, and 58.66Hz.
 - **78 RPM Toggle:** 78RPM can be enabled or disabled in the menu.
 - **Frequency Constraints:** Configurable minimum and maximum frequency constraint, per speed.
+- **Optional Closed-Loop Speed Control:** When `CLOSED_LOOP_SPEED_ENABLE` is `1`, GP6/GP7 read either a pulse tachometer or A/B quadrature encoder. Feedback correction engages only after the motor reaches stable running state, then applies bounded PID frequency correction against per-speed target RPM values. Dropout behavior can fall back to open-loop, hold the last correction, or stop; quadrature reverse direction can be ignored, warned, or treated as a stop fault.
 
 ---
 
@@ -253,7 +256,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ### 2.6. Serial Monitor Support
 - **Optional Enable:** Optional, enabled or disabled by compile-time configuration flags.
 - **Interactive CLI:** Full command-line interface for control and configuration.
-- **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, and diagnostics.
+- **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, closed-loop feedback status/reset when enabled, and diagnostics.
 - **Serial Wi-Fi Setup:** Wi-Fi builds add `wifi wizard` for guided Serial Monitor network setup, `wifi scan` for nearby SSIDs, `wifi connect <ssid> [password]` for quick DHCP station setup, and `wifi set ...` commands for hostname, mode, standby mode, hidden SSIDs, DHCP/static IP, setup AP, fallback, and web access options.
 - **Diagnostics:** Serial commands include `diag safety` for a non-actuating safety check, plus `brake test start`, `brake test stop`, and `relay test <stage|off>` for bench checks.
 - **JSON Preset Export/Import:** Advanced configuration sharing.
@@ -274,15 +277,15 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Credential Characters:** Browser, serial, and OLED network entry support printable special characters in SSIDs and passwords, including `@`, `/`, `!`, `#`, `$`, and `£`. The OLED text editor includes a shift option for uppercase entry.
 - **Hosted Web App:** When the device has a station connection or setup AP active, it hosts a local browser interface on port 80.
 - **User-Selectable Home Page:** The device saves which page opens first, including Dashboard, Control, Settings, Calibrate, Network, Presets, Bench, Diagnostics, or Errors. The saved home page applies to any browser that opens the device UI.
-- **Dashboard:** The browser dashboard mirrors the supported display modes: Standard, Stats, Dim, Scope, CPU, Memory, and Flash, using live status data from the firmware. The Standard, Stats, and Scope views include a live telemetry chart for frequency, pitch, and amplifier temperature when available.
+- **Dashboard:** The browser dashboard mirrors the supported display modes: Standard, Stats, Dim, Scope, CPU, Memory, and Flash, using live status data from the firmware. The Standard, Stats, and Scope views include a live telemetry chart for frequency, pitch, measured RPM, and amplifier temperature when available.
 - **Web UI Theme Presets:** The browser UI includes System, Light, Dark, Calm, Workshop, and High Contrast theme presets, plus large controls and visible focus states.
-- **Polished Visual System:** The web UI uses stronger section identities, status color accents, compact button/tab badges, dashboard tiles, sticky navigation/search controls, and a mobile layout tuned for one-handed phone use.
+- **Polished Visual System:** The web UI uses stronger section identities, status color accents, compact button/tab badges, dashboard tiles, sticky navigation/search controls, and a tuned mobile layout.
 - **Sticky Safety Controls:** Emergency stop, stop, standby/wake, start, and speed buttons remain available in a sticky browser control bar. Emergency stop immediately exits relay test mode, disables waveform output, mutes relays, and stops the motor.
 - **Standby Networking:** Network standby keeps Wi-Fi available while the controller is in standby. Eco standby turns Wi-Fi off during standby and reconnects after a physical wake; the web Standby/Wake button can enter Eco standby but is disabled once the browser can no longer wake the device.
 - **Simple Control View:** A dedicated large-button control page exposes the day-to-day start/stop/standby/speed/pitch controls without the full settings surface.
 - **78 RPM Visibility:** Browser speed controls, bench speed controls, and calibration speed selectors hide 78 RPM while `Enable 78 RPM` is off. A stale 78 RPM browser action is rejected with a clear message.
 - **Complete Controls:** Browser controls include start, stop, emergency stop, standby/wake, speed switching, pitch reset/set, relay test, relay test off, runtime reset, factory reset, and API support for reboot.
-- **Schema-Driven Full Settings UI:** The web interface fetches `/api/schema` from firmware and builds the complete settings UI from that schema, including global phase, motor, brake, relay, display, system, network, and all per-speed speed/phase/filter/startup settings.
+- **Schema-Driven Full Settings UI:** The web interface fetches `/api/schema` from firmware and builds the complete settings UI from that schema, including global phase, motor, brake, relay, display, system, network, optional closed-loop feedback, and all per-speed speed/phase/filter/startup settings.
 - **Settings Search and Contextual Help:** The full settings page includes search by label, key, or help text. Every schema-driven setting has a Help control with purpose, range, units, accepted choices, key name, and safety context where relevant.
 - **Staged Editing and Validation:** Browser settings and network forms track unsaved changes, highlight safety-related edits, provide discard buttons, show a review of pending changes before save, and validate ranges, required fields, frequency limits, password length, and static IPv4 fields before applying.
 - **Guided Calibration:** The Calibrate page provides task-based forms for speed frequency, phase offsets, startup kick, braking, and amplitude tuning.
@@ -290,6 +293,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Accessibility Preferences:** The browser UI includes a remembered home page, theme presets, large controls, visible focus states, live status announcements, semantic form grouping, and labels/error text for screen-reader navigation.
 - **Optional Read-Only Guest Mode:** Read-only mode is off by default. When enabled from the web Network page or OLED Network menu, dashboard/status pages remain visible but write actions require the configured web PIN. The PIN can be changed from both the OLED Network menu and the web Network page.
 - **Amplifier Status:** The web status API reports amplifier temperature and thermal state when `AMP_MONITOR_ENABLE` is compiled in; the dashboard and telemetry views show the same information.
+- **Closed-Loop Status:** When `CLOSED_LOOP_SPEED_ENABLE` is compiled in, the web status API, dashboard, telemetry, diagnostics, preset JSON, backups, and bench report include feedback configuration and live RPM/correction state.
 - **Diagnostics and Events:** The Diagnostics page shows firmware/build info, compile-time feature flags, active pin assignments, network state, amplifier state, stored-file presence, and a recent browser event feed.
 - **Bench Test Page:** The Bench page groups live pre-checks, relay output testing, brake start/stop checks, speed and pitch checks, amplifier status, and a generated bench report in one place.
 - **Presets and Logs:** Preset load/save/rename/clear/import/export and error log viewing/clearing are available from the browser. Preset load and import actions include validation reports and preview diffs against the current motor settings before applying or storing JSON, and preset slots can be compared with each other.
@@ -316,6 +320,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Settings File Schema:**
   - **Storage Location:** Stored on LittleFS.
   - **File Integrity:** Settings and preset files include a firmware-specific magic value, file format version, settings schema version, payload size, and CRC32 before the binary settings payload.
+  - **Schema Migration:** Schema 6 adds optional closed-loop feedback settings and migrates schema 5 payloads. Incompatible or invalid payloads are reset to defaults.
   - **Strict First-Release Format:** Schema, size, or CRC mismatch causes settings to reset to defaults rather than attempting to migrate older binary layouts.
 
 ---
@@ -420,6 +425,8 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `brake test stop` | Stop motor using the configured brake mode |
 | `relay test <0-N>` | Enter relay test and activate a relay output stage |
 | `relay test off` | Exit relay test and restore normal relay handling |
+| `cl status` | Show closed-loop target RPM, measured RPM, correction, lock, direction, and count state when `CLOSED_LOOP_SPEED_ENABLE` is `1` |
+| `cl reset` | Reset the closed-loop controller and feedback counters when `CLOSED_LOOP_SPEED_ENABLE` is `1` |
 | `diag safety` | Run a non-actuating safety diagnostic covering settings ranges, thermal thresholds, and expected start/stop/emergency/standby outcomes |
 | `wifi help` | List Serial Monitor Wi-Fi setup commands when network support is enabled |
 | `wifi status` | Show current network state, active IP address, SSID, AP status, MAC, and RSSI |
@@ -463,6 +470,30 @@ Use these keys with `set` and `get`. Speed-specific settings apply to the **curr
 | `brake_cutoff` | Soft-stop cutoff frequency (Hz) | Float |
 | `relay_active_high` | Relay active polarity (0/1) | Bool |
 | `relay_delay` | Relay power-on delay (s) | Int |
+| **Closed Loop (`CLOSED_LOOP_SPEED_ENABLE`)** | | |
+| `cl_enable` | Enable feedback correction (0/1) | Bool |
+| `cl_mode` | Sensor mode (0=pulse tach, 1=quadrature) | Int |
+| `cl_target_rpm` | Target RPM for the currently selected speed | Float |
+| `cl_counts` | Counts per platter revolution after the selected decode mode | Int |
+| `cl_edge` | Pulse edge (0=rising, 1=falling, 2=change) | Int |
+| `cl_quad` | Quadrature decode density (0=x1, 1=x2, 2=x4) | Int |
+| `cl_reverse` | Reverse quadrature direction (0/1) | Bool |
+| `cl_dir_fault` | Reverse-direction action (0=ignore, 1=warn, 2=stop) | Int |
+| `cl_debounce_us` | Sensor debounce interval in microseconds | Int |
+| `cl_timeout_ms` | Feedback signal timeout in milliseconds | Int |
+| `cl_engage_ms` | Delay before closed-loop correction engages | Int |
+| `cl_update_ms` | Controller update interval in milliseconds | Int |
+| `cl_filter` | RPM filter alpha | Float |
+| `cl_deadband` | RPM error deadband | Float |
+| `cl_lock_tol` | RPM tolerance used to declare lock | Float |
+| `cl_lock_ms` | Time inside tolerance before lock is reported | Int |
+| `cl_kp` | Proportional gain in Hz per RPM error | Float |
+| `cl_ki` | Integral gain | Float |
+| `cl_kd` | Derivative gain | Float |
+| `cl_i_limit` | Integral contribution limit in Hz | Float |
+| `cl_corr_limit` | Total correction limit in Hz | Float |
+| `cl_slew` | Correction slew limit in Hz/s | Float |
+| `cl_dropout` | Signal-loss action (0=open-loop, 1=hold correction, 2=stop) | Int |
 | **Current Speed** | | |
 | `freq` | Frequency (Hz) | Float |
 | `phase1`..`phase4` | Phase Offsets (Degrees) | Float |
@@ -489,6 +520,7 @@ The menu structure is designed for a data-driven implementation.
 - **Power Control:** Relays, Auto Standby/Boot (Global).
 - **Display:** Sleep, Dim, Saver, Errors (Global).
 - **System:** Pitch Reset, 78RPM, Logs (Global).
+- **Closed Loop:** Optional pulse or quadrature speed feedback setup, visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
 - **Network:** Wi-Fi setup and local web interface connection flow (Wi-Fi builds only).
 - **Presets:** Load, Save, Rename, and Clear presets.
 - **Save & Exit:** Saves all changes to flash and returns to dashboard.
@@ -574,6 +606,34 @@ The menu structure is designed for a data-driven implementation.
 
 When `AMP_MONITOR_ENABLE` is compiled in, amplifier monitoring runs automatically. Warnings and shutdowns appear through the Error Log, serial status, and web status/dashboard; thresholds are editable in the System menu and web Settings page.
 
+### Closed Loop
+Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
+
+- **Enable:** Turns feedback correction on or off.
+- **Mode:** Selects pulse tachometer or quadrature feedback.
+- **Target RPM:** Per-speed target for the currently selected speed context.
+- **Counts/Rev:** Sensor counts per platter revolution after pulse or quadrature decode.
+- **Pulse Edge:** Rising, falling, or change counting for pulse tach mode.
+- **Quad Decode:** x1, x2, or x4 decode for A/B quadrature mode.
+- **Reverse Dir:** Inverts quadrature direction.
+- **Dir Fault:** Ignore, warn, or stop when quadrature reports reverse motion.
+- **Debounce us:** Minimum accepted time between sensor transitions.
+- **Timeout ms:** Maximum time without a valid count before feedback is lost.
+- **Engage ms:** Delay after stable running before correction starts.
+- **Update ms:** Controller update interval.
+- **Filter A:** RPM filter alpha.
+- **Dead RPM:** Error deadband ignored by the controller.
+- **Lock Tol:** RPM tolerance used to declare speed lock.
+- **Lock ms:** Time inside tolerance before lock is reported.
+- **Kp / Ki / Kd:** PID gains.
+- **I Lim Hz:** Integral contribution limit.
+- **Corr Hz:** Total frequency correction limit.
+- **Slew Hz/s:** Maximum correction change rate.
+- **Dropout:** Open-loop, hold correction, or stop on signal loss.
+- **Apply:** Reconfigure feedback immediately without waiting for menu exit.
+- **Reset PID:** Clear controller state and feedback counters.
+- **Sensor Test:** Show current feedback signal and RPM status.
+
 ### Network
 - **Status:** Shows the current Wi-Fi connection state.
 - **Web:** Shows the active IP address for the browser interface.
@@ -637,6 +697,9 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Features** | `ENABLE_DPDT_RELAYS` | Use 2x DPDT instead of 4x SPST | `0` | Changes relay switching logic. |
 | **Features** | `ENABLE_4_CHANNEL_SUPPORT` | Enable 4-phase/4-channel support. | `0` | Normal firmware builds expose three channels. Set to `1` to enable optional four-channel/Premotec bridge modes on hardware that has the fourth output populated. |
 | **Features** | `AMP_MONITOR_ENABLE` | Enable amplifier temperature and thermal cutout monitoring. | `1` | Samples every 500 ms using `PIN_AMP_TEMP` and `PIN_AMP_THERM_OK`; thresholds appear in the System menu and web Settings page. |
+| **Features** | `CLOSED_LOOP_SPEED_ENABLE` | Enable pulse tachometer or quadrature feedback correction. | `0` | Adds sensor decoding, PID correction, OLED menu, serial keys, and Web UI/API fields. |
+| **Optional Pins**| `PIN_SPEED_SENSOR_A` | Pulse input or quadrature A input. | `6` | Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`. |
+| **Optional Pins**| `PIN_SPEED_SENSOR_B` | Quadrature B input. | `7` | Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`; ignored by pulse tach mode. |
 | **Optional Pins**| `PITCH_CONTROL_ENABLE` | Enables the secondary (Pitch) encoder functionality and logic. | `0` (Disabled) | **Required** flag for the optional pitch feature (3.3). |
 | **Optional Pins**| `PIN_ENC_PITCH_CLK` | Assigns the pin for the Pitch Encoder Clock. | `13` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
 | **Optional Pins**| `PIN_ENC_PITCH_DT` | Assigns the pin for the Pitch Encoder Data. | `14` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
@@ -657,7 +720,7 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Thermal Limits**| `AMP_TEMP_WARN_HYSTERESIS_C` | Temperature drop required to re-arm the warning. | `5.0` | Warning-only hysteresis. |
 | **Display Msg** | `STANDBY_MESSAGE` | Sets the message displayed while the system is in standby, if enabled in the menu. | `message` | Controls message display logic. |
 | **Display Msg** | `WELCOME_MESSAGE` | Sets the message displayed on boot. | `"Welcome to TT Control"` | |
-| **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `5` | Use for compatibility checks when firmware is updated. |
+| **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `6` | Use for compatibility checks when firmware is updated. |
 | **Storage** | `SETTINGS_FILE_FORMAT_VERSION` | Tag for the binary settings/preset file wrapper. | `1` | Change only when the on-flash header format changes. |
 | **Storage** | `SETTINGS_FILE_MAGIC` / `PRESET_FILE_MAGIC` | Magic values for settings and preset files. | `TTCS` / `TTCP` | Prevents a preset file from being loaded as global settings, or vice versa. |
 | **Defaults** | `DEFAULT_PHASE_MODE` | Default phase mode. | `3` (3-phase) | |
