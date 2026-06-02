@@ -113,7 +113,7 @@ private:
     bool _signalValid;
     bool _locked;
 
-    bool _setupActive;
+    volatile bool _setupActive;
     int32_t _setupStartCount;
     uint32_t _setupStartInvalidTransitions;
     uint32_t _setupStartDebouncedTransitions;

@@ -271,7 +271,7 @@ void SpeedFeedback::isrHandler() {
 
 void SpeedFeedback::handleInterrupt() {
 #if CLOSED_LOOP_SPEED_ENABLE
-    if (!_configured) return;
+    if (!_configured && !_setupActive) return;
 
     uint32_t nowUs = micros();
     if (_debounceUs > 0 && (nowUs - _lastAcceptedEdgeUs) < _debounceUs) {

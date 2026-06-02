@@ -311,6 +311,7 @@ void MotorController::update() {
                         speedFeedback.update(_closedLoopTargetRpm);
                         if (!_isSweepingMode && settings.get().closedLoopRampMode == CLOSED_LOOP_RAMP_TRACK) {
                             commandedFreq = applyClosedLoopRampCorrection(now, openLoopFreq, _closedLoopTargetRpm);
+                            if (_state != STATE_RUNNING) break;
                         } else {
                             _closedLoopActive = false;
                             _closedLoopCorrectionHz = 0.0f;
@@ -329,6 +330,7 @@ void MotorController::update() {
                     speedFeedback.update(_closedLoopTargetRpm);
                     if (!_isSweepingMode) {
                         commandedFreq = applyClosedLoopCorrection(now, _targetFreq);
+                        if (_state != STATE_RUNNING) break;
                     } else {
                         _closedLoopActive = false;
                         resetClosedLoopPidState();
