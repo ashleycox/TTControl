@@ -90,9 +90,10 @@ void SpeedFeedback::configure() {
     _countsPerRev = g.closedLoopCountsPerRev;
     _timeoutMs = g.closedLoopTimeoutMs;
     _updateIntervalMs = g.closedLoopUpdateIntervalMs;
-    _lockTimeMs = g.closedLoopLockTimeMs;
     _filterAlpha = g.closedLoopFilterAlpha;
-    _lockToleranceRpm = g.closedLoopLockToleranceRpm;
+    ClosedLoopSpeedTuning& t = settings.getCurrentClosedLoopTuning();
+    _lockTimeMs = t.lockTimeMs;
+    _lockToleranceRpm = t.lockToleranceRpm;
     reset();
 #else
     _configured = false;
@@ -147,6 +148,9 @@ void SpeedFeedback::cancelSetupCapture() {
 
 void SpeedFeedback::update(float targetRpm) {
     _targetRpm = targetRpm;
+    ClosedLoopSpeedTuning& tuning = settings.getCurrentClosedLoopTuning();
+    _lockTimeMs = tuning.lockTimeMs;
+    _lockToleranceRpm = tuning.lockToleranceRpm;
 
     int32_t count;
     uint32_t lastPulseUs;

@@ -1067,54 +1067,54 @@ void initCLI() {
     });
 
     registry.push_back({ "cl_deadband",
-        []() { return String(settings.get().closedLoopDeadbandRpm); },
-        [](String v) { settings.get().closedLoopDeadbandRpm = clampFloat(v.toFloat(), 0.0, 5.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().deadbandRpm); },
+        [](String v) { settings.getCurrentClosedLoopTuning().deadbandRpm = clampFloat(v.toFloat(), 0.0, 5.0); }
     });
 
     registry.push_back({ "cl_lock_tol",
-        []() { return String(settings.get().closedLoopLockToleranceRpm); },
+        []() { return String(settings.getCurrentClosedLoopTuning().lockToleranceRpm); },
         [](String v) {
-            settings.get().closedLoopLockToleranceRpm = clampFloat(v.toFloat(), 0.01, 5.0);
+            settings.getCurrentClosedLoopTuning().lockToleranceRpm = clampFloat(v.toFloat(), 0.01, 5.0);
             motor.applySettings();
         }
     });
 
     registry.push_back({ "cl_lock_ms",
-        []() { return String(settings.get().closedLoopLockTimeMs); },
+        []() { return String(settings.getCurrentClosedLoopTuning().lockTimeMs); },
         [](String v) {
-            settings.get().closedLoopLockTimeMs = (uint16_t)clampInt(v.toInt(), 0, 30000);
+            settings.getCurrentClosedLoopTuning().lockTimeMs = (uint16_t)clampInt(v.toInt(), 0, 30000);
             motor.applySettings();
         }
     });
 
     registry.push_back({ "cl_kp",
-        []() { return String(settings.get().closedLoopKp); },
-        [](String v) { settings.get().closedLoopKp = clampFloat(v.toFloat(), 0.0, 20.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().kp); },
+        [](String v) { settings.getCurrentClosedLoopTuning().kp = clampFloat(v.toFloat(), 0.0, 20.0); }
     });
 
     registry.push_back({ "cl_ki",
-        []() { return String(settings.get().closedLoopKi); },
-        [](String v) { settings.get().closedLoopKi = clampFloat(v.toFloat(), 0.0, 20.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().ki); },
+        [](String v) { settings.getCurrentClosedLoopTuning().ki = clampFloat(v.toFloat(), 0.0, 20.0); }
     });
 
     registry.push_back({ "cl_kd",
-        []() { return String(settings.get().closedLoopKd); },
-        [](String v) { settings.get().closedLoopKd = clampFloat(v.toFloat(), 0.0, 20.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().kd); },
+        [](String v) { settings.getCurrentClosedLoopTuning().kd = clampFloat(v.toFloat(), 0.0, 20.0); }
     });
 
     registry.push_back({ "cl_i_limit",
-        []() { return String(settings.get().closedLoopIntegralLimitHz); },
-        [](String v) { settings.get().closedLoopIntegralLimitHz = clampFloat(v.toFloat(), 0.0, 50.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().integralLimitHz); },
+        [](String v) { settings.getCurrentClosedLoopTuning().integralLimitHz = clampFloat(v.toFloat(), 0.0, 50.0); }
     });
 
     registry.push_back({ "cl_corr_limit",
-        []() { return String(settings.get().closedLoopCorrectionLimitHz); },
-        [](String v) { settings.get().closedLoopCorrectionLimitHz = clampFloat(v.toFloat(), 0.0, 100.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().correctionLimitHz); },
+        [](String v) { settings.getCurrentClosedLoopTuning().correctionLimitHz = clampFloat(v.toFloat(), 0.0, 100.0); }
     });
 
     registry.push_back({ "cl_slew",
-        []() { return String(settings.get().closedLoopSlewLimitHzPerSec); },
-        [](String v) { settings.get().closedLoopSlewLimitHzPerSec = clampFloat(v.toFloat(), 0.0, 100.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().slewLimitHzPerSec); },
+        [](String v) { settings.getCurrentClosedLoopTuning().slewLimitHzPerSec = clampFloat(v.toFloat(), 0.0, 100.0); }
     });
 
     registry.push_back({ "cl_dropout",
@@ -1158,13 +1158,13 @@ void initCLI() {
     });
 
     registry.push_back({ "cl_ramp_kp",
-        []() { return String(settings.get().closedLoopRampKp); },
-        [](String v) { settings.get().closedLoopRampKp = clampFloat(v.toFloat(), 0.0, 5.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().rampKp); },
+        [](String v) { settings.getCurrentClosedLoopTuning().rampKp = clampFloat(v.toFloat(), 0.0, 5.0); }
     });
 
     registry.push_back({ "cl_ramp_limit",
-        []() { return String(settings.get().closedLoopRampCorrectionLimitHz); },
-        [](String v) { settings.get().closedLoopRampCorrectionLimitHz = clampFloat(v.toFloat(), 0.0, 20.0); }
+        []() { return String(settings.getCurrentClosedLoopTuning().rampCorrectionLimitHz); },
+        [](String v) { settings.getCurrentClosedLoopTuning().rampCorrectionLimitHz = clampFloat(v.toFloat(), 0.0, 20.0); }
     });
 
     registry.push_back({ "cl_pitch_slew",
@@ -1902,16 +1902,26 @@ static void printSafetyDiagnostic() {
     printDiagCheck("closed-loop update timing is within range",
         g.closedLoopUpdateIntervalMs >= 20 && g.closedLoopUpdateIntervalMs <= 1000,
         ok);
-    printDiagCheck("closed-loop correction limits are non-negative",
-        g.closedLoopCorrectionLimitHz >= 0.0f &&
-        g.closedLoopIntegralLimitHz >= 0.0f &&
-        g.closedLoopSlewLimitHzPerSec >= 0.0f,
-        ok);
     printDiagCheck("closed-loop ramp tracking settings are valid",
-        g.closedLoopRampMode <= CLOSED_LOOP_RAMP_TRACK &&
-        g.closedLoopRampKp >= 0.0f &&
-        g.closedLoopRampCorrectionLimitHz >= 0.0f,
+        g.closedLoopRampMode <= CLOSED_LOOP_RAMP_TRACK,
         ok);
+    for (uint8_t i = 0; i < 3; i++) {
+        ClosedLoopSpeedTuning& t = g.closedLoopTuning[i];
+        char label[48];
+        snprintf(label, sizeof(label), "closed-loop %s tuning is valid", speedName((SpeedMode)i));
+        printDiagCheck(label,
+            t.deadbandRpm >= 0.0f &&
+            t.lockToleranceRpm >= 0.01f &&
+            t.kp >= 0.0f &&
+            t.ki >= 0.0f &&
+            t.kd >= 0.0f &&
+            t.integralLimitHz >= 0.0f &&
+            t.correctionLimitHz >= 0.0f &&
+            t.slewLimitHzPerSec >= 0.0f &&
+            t.rampKp >= 0.0f &&
+            t.rampCorrectionLimitHz >= 0.0f,
+            ok);
+    }
     printDiagCheck("closed-loop plausibility range is ordered",
         g.closedLoopPlausibilityMinRpm <= g.closedLoopPlausibilityMaxRpm,
         ok);
@@ -2405,22 +2415,26 @@ static void printSettingsDump() {
     Serial.print(", tolerance ");
     Serial.print(g.closedLoopEngageToleranceRpm);
     Serial.println(" RPM");
-    Serial.print("Closed Loop PID: Kp ");
-    Serial.print(g.closedLoopKp);
-    Serial.print(", Ki ");
-    Serial.print(g.closedLoopKi);
-    Serial.print(", Kd ");
-    Serial.print(g.closedLoopKd);
-    Serial.print(", limit ");
-    Serial.print(g.closedLoopCorrectionLimitHz);
-    Serial.println("Hz");
-    Serial.print("Closed Loop Ramp: ");
-    Serial.print(closedLoopRampName(g.closedLoopRampMode));
-    Serial.print(", Kp ");
-    Serial.print(g.closedLoopRampKp);
-    Serial.print(", limit ");
-    Serial.print(g.closedLoopRampCorrectionLimitHz);
-    Serial.println("Hz");
+    Serial.print("Closed Loop Ramp Mode: ");
+    Serial.println(closedLoopRampName(g.closedLoopRampMode));
+    for (uint8_t i = 0; i < 3; i++) {
+        ClosedLoopSpeedTuning& t = g.closedLoopTuning[i];
+        Serial.print("Closed Loop ");
+        Serial.print(speedName((SpeedMode)i));
+        Serial.print(": Kp ");
+        Serial.print(t.kp);
+        Serial.print(", Ki ");
+        Serial.print(t.ki);
+        Serial.print(", Kd ");
+        Serial.print(t.kd);
+        Serial.print(", limit ");
+        Serial.print(t.correctionLimitHz);
+        Serial.print("Hz, ramp Kp ");
+        Serial.print(t.rampKp);
+        Serial.print(", ramp limit ");
+        Serial.print(t.rampCorrectionLimitHz);
+        Serial.println("Hz");
+    }
     Serial.print("Closed Loop Pitch Target: slew ");
     Serial.print(g.closedLoopPitchSlewRpmPerSec);
     Serial.print(" RPM/s, reset ");

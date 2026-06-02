@@ -136,6 +136,20 @@ struct SpeedSettings {
     uint8_t firProfile; // 0=Gentle, 1=Medium, 2=Aggressive
 };
 
+struct ClosedLoopSpeedTuning {
+    float deadbandRpm;
+    float lockToleranceRpm;
+    float kp;
+    float ki;
+    float kd;
+    float integralLimitHz;
+    float correctionLimitHz;
+    float slewLimitHzPerSec;
+    float rampKp;
+    float rampCorrectionLimitHz;
+    uint16_t lockTimeMs;
+};
+
 struct GlobalSettings {
     uint32_t schemaVersion;
     
@@ -255,9 +269,11 @@ struct GlobalSettings {
     uint8_t closedLoopLockTimeoutAction; // 0=Ignore, 1=Warn, 2=Stop
     uint8_t closedLoopAmpRecoveryMode; // 0=Off, 1=Warn, 2=Restore full amplitude
     uint16_t closedLoopAmpRecoveryDelayMs;
+    ClosedLoopSpeedTuning closedLoopTuning[3];
 };
 
 static_assert(sizeof(SpeedSettings) == SPEED_SETTINGS_STORAGE_SIZE, "Update SPEED_SETTINGS_STORAGE_SIZE when SpeedSettings changes.");
+static_assert(sizeof(ClosedLoopSpeedTuning) == CLOSED_LOOP_TUNING_STORAGE_SIZE, "Update CLOSED_LOOP_TUNING_STORAGE_SIZE when ClosedLoopSpeedTuning changes.");
 static_assert(sizeof(GlobalSettings) == GLOBAL_SETTINGS_STORAGE_SIZE, "Update GLOBAL_SETTINGS_STORAGE_SIZE and storage handling when GlobalSettings changes.");
 
 #endif // TYPES_H

@@ -1000,6 +1000,7 @@ bool MotorController::closedLoopSafetyAllowsCorrection(uint32_t now, const Speed
 float MotorController::applyClosedLoopRampCorrection(uint32_t now, float openLoopFreq, float rampTargetRpm) {
 #if CLOSED_LOOP_SPEED_ENABLE
     GlobalSettings& g = settings.get();
+    ClosedLoopSpeedTuning& tuning = settings.getCurrentClosedLoopTuning();
     if (!closedLoopControlAllowed() || g.closedLoopRampMode != CLOSED_LOOP_RAMP_TRACK) {
         _closedLoopActive = false;
         _closedLoopCorrectionHz = 0.0f;
@@ -1022,13 +1023,13 @@ float MotorController::applyClosedLoopRampCorrection(uint32_t now, float openLoo
     }
 
     float errorRpm = rampTargetRpm - feedback.filteredRpm;
-    if (fabs(errorRpm) < g.closedLoopDeadbandRpm) errorRpm = 0.0f;
+    if (fabs(errorRpm) < tuning.deadbandRpm) errorRpm = 0.0f;
 
-    float requestedCorrection = g.closedLoopRampKp * errorRpm;
-    if (requestedCorrection > g.closedLoopRampCorrectionLimitHz) {
-        requestedCorrection = g.closedLoopRampCorrectionLimitHz;
-    } else if (requestedCorrection < -g.closedLoopRampCorrectionLimitHz) {
-        requestedCorrection = -g.closedLoopRampCorrectionLimitHz;
+    float requestedCorrection = tuning.rampKp * errorRpm;
+    if (requestedCorrection > tuning.rampCorrectionLimitHz) {
+        requestedCorrection = tuning.rampCorrectionLimitHz;
+    } else if (requestedCorrection < -tuning.rampCorrectionLimitHz) {
+        requestedCorrection = -tuning.rampCorrectionLimitHz;
     }
 
     _closedLoopCorrectionHz = requestedCorrection;
@@ -1044,6 +1045,7 @@ float MotorController::applyClosedLoopRampCorrection(uint32_t now, float openLoo
 float MotorController::applyClosedLoopCorrection(uint32_t now, float openLoopFreq) {
 #if CLOSED_LOOP_SPEED_ENABLE
     GlobalSettings& g = settings.get();
+    ClosedLoopSpeedTuning& tuning = settings.getCurrentClosedLoopTuning();
     if (!g.closedLoopEnabled) {
         resetClosedLoopControl(false);
         return openLoopFreq;
@@ -1134,34 +1136,34 @@ float MotorController::applyClosedLoopCorrection(uint32_t now, float openLoopFre
 
     float dt = elapsedMs / 1000.0f;
     float errorRpm = feedback.rpmError;
-    if (fabs(errorRpm) < g.closedLoopDeadbandRpm) errorRpm = 0.0f;
+    if (fabs(errorRpm) < tuning.deadbandRpm) errorRpm = 0.0f;
 
-    float proportionalHz = g.closedLoopKp * errorRpm;
-    if (g.closedLoopKi > 0.0f && g.closedLoopIntegralLimitHz > 0.0f) {
-        _closedLoopIntegralHz += g.closedLoopKi * errorRpm * dt;
-        if (_closedLoopIntegralHz > g.closedLoopIntegralLimitHz) {
-            _closedLoopIntegralHz = g.closedLoopIntegralLimitHz;
-        } else if (_closedLoopIntegralHz < -g.closedLoopIntegralLimitHz) {
-            _closedLoopIntegralHz = -g.closedLoopIntegralLimitHz;
+    float proportionalHz = tuning.kp * errorRpm;
+    if (tuning.ki > 0.0f && tuning.integralLimitHz > 0.0f) {
+        _closedLoopIntegralHz += tuning.ki * errorRpm * dt;
+        if (_closedLoopIntegralHz > tuning.integralLimitHz) {
+            _closedLoopIntegralHz = tuning.integralLimitHz;
+        } else if (_closedLoopIntegralHz < -tuning.integralLimitHz) {
+            _closedLoopIntegralHz = -tuning.integralLimitHz;
         }
     } else {
         _closedLoopIntegralHz = 0.0f;
     }
 
     float derivativeHz = 0.0f;
-    if (dt > 0.0f && g.closedLoopKd > 0.0f) {
-        derivativeHz = g.closedLoopKd * ((errorRpm - _closedLoopLastErrorRpm) / dt);
+    if (dt > 0.0f && tuning.kd > 0.0f) {
+        derivativeHz = tuning.kd * ((errorRpm - _closedLoopLastErrorRpm) / dt);
     }
 
     float requestedCorrection = proportionalHz + _closedLoopIntegralHz + derivativeHz;
-    if (requestedCorrection > g.closedLoopCorrectionLimitHz) {
-        requestedCorrection = g.closedLoopCorrectionLimitHz;
-    } else if (requestedCorrection < -g.closedLoopCorrectionLimitHz) {
-        requestedCorrection = -g.closedLoopCorrectionLimitHz;
+    if (requestedCorrection > tuning.correctionLimitHz) {
+        requestedCorrection = tuning.correctionLimitHz;
+    } else if (requestedCorrection < -tuning.correctionLimitHz) {
+        requestedCorrection = -tuning.correctionLimitHz;
     }
 
-    if (g.closedLoopCorrectionLimitHz > 0.0f &&
-        fabs(requestedCorrection) >= (g.closedLoopCorrectionLimitHz - 0.001f)) {
+    if (tuning.correctionLimitHz > 0.0f &&
+        fabs(requestedCorrection) >= (tuning.correctionLimitHz - 0.001f)) {
         if (_closedLoopSaturationStart == 0) {
             _closedLoopSaturationStart = now;
         } else if (g.closedLoopSaturationTimeMs > 0 &&
@@ -1177,8 +1179,8 @@ float MotorController::applyClosedLoopCorrection(uint32_t now, float openLoopFre
         _closedLoopSaturationLatched = false;
     }
 
-    if (g.closedLoopSlewLimitHzPerSec > 0.0f) {
-        float maxStep = g.closedLoopSlewLimitHzPerSec * dt;
+    if (tuning.slewLimitHzPerSec > 0.0f) {
+        float maxStep = tuning.slewLimitHzPerSec * dt;
         float delta = requestedCorrection - _closedLoopCorrectionHz;
         if (delta > maxStep) {
             requestedCorrection = _closedLoopCorrectionHz + maxStep;
@@ -1208,7 +1210,8 @@ void MotorController::updateClosedLoopAmpRecovery(uint32_t now, const SpeedFeedb
         return;
     }
 
-    if (!feedback.signalValid || feedback.locked || fabs(feedback.rpmError) <= g.closedLoopLockToleranceRpm) {
+    ClosedLoopSpeedTuning& tuning = settings.getCurrentClosedLoopTuning();
+    if (!feedback.signalValid || feedback.locked || fabs(feedback.rpmError) <= tuning.lockToleranceRpm) {
         _closedLoopAmpOutOfLockStart = 0;
         _closedLoopAmpRecoveryActive = false;
         _closedLoopAmpRecoveryLatched = false;

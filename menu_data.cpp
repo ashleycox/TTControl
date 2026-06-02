@@ -491,6 +491,7 @@ void actionEnterClosedLoop() {
     pageClosedLoop->clear();
 
     uint8_t speedIndex = menuShadowSpeedIndex >= 0 && menuShadowSpeedIndex <= 2 ? (uint8_t)menuShadowSpeedIndex : SPEED_33;
+    ClosedLoopSpeedTuning& tuning = settings.get().closedLoopTuning[speedIndex];
     pageClosedLoop->addItem(new MenuDynamicInfo(String("Target: ") + (speedIndex == SPEED_33 ? "33" : speedIndex == SPEED_45 ? "45" : "78")));
     pageClosedLoop->addItem(new MenuBool("Enable", &settings.get().closedLoopEnabled));
     MenuItem* controlMode = new MenuByte("Control", &settings.get().closedLoopControlMode,
@@ -577,39 +578,39 @@ void actionEnterClosedLoop() {
     alpha->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(alpha);
 
-    MenuItem* deadband = new MenuFloat("Dead RPM", &settings.get().closedLoopDeadbandRpm, 0.01, 0.0, 5.0);
+    MenuItem* deadband = new MenuFloat("Dead RPM", &tuning.deadbandRpm, 0.01, 0.0, 5.0);
     deadband->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(deadband);
 
-    MenuItem* lockTol = new MenuFloat("Lock Tol", &settings.get().closedLoopLockToleranceRpm, 0.01, 0.01, 5.0);
+    MenuItem* lockTol = new MenuFloat("Lock Tol", &tuning.lockToleranceRpm, 0.01, 0.01, 5.0);
     lockTol->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(lockTol);
 
-    MenuItem* lockMs = new MenuUInt16("Lock ms", &settings.get().closedLoopLockTimeMs, 100, 0, 30000);
+    MenuItem* lockMs = new MenuUInt16("Lock ms", &tuning.lockTimeMs, 100, 0, 30000);
     lockMs->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(lockMs);
 
-    MenuItem* kp = new MenuFloat("Kp", &settings.get().closedLoopKp, 0.01, 0.0, 20.0);
+    MenuItem* kp = new MenuFloat("Kp", &tuning.kp, 0.01, 0.0, 20.0);
     kp->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(kp);
 
-    MenuItem* ki = new MenuFloat("Ki", &settings.get().closedLoopKi, 0.01, 0.0, 20.0);
+    MenuItem* ki = new MenuFloat("Ki", &tuning.ki, 0.01, 0.0, 20.0);
     ki->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(ki);
 
-    MenuItem* kd = new MenuFloat("Kd", &settings.get().closedLoopKd, 0.01, 0.0, 20.0);
+    MenuItem* kd = new MenuFloat("Kd", &tuning.kd, 0.01, 0.0, 20.0);
     kd->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(kd);
 
-    MenuItem* iLimit = new MenuFloat("I Lim Hz", &settings.get().closedLoopIntegralLimitHz, 0.1, 0.0, 50.0);
+    MenuItem* iLimit = new MenuFloat("I Lim Hz", &tuning.integralLimitHz, 0.1, 0.0, 50.0);
     iLimit->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(iLimit);
 
-    MenuItem* correction = new MenuFloat("Corr Hz", &settings.get().closedLoopCorrectionLimitHz, 0.1, 0.0, 100.0);
+    MenuItem* correction = new MenuFloat("Corr Hz", &tuning.correctionLimitHz, 0.1, 0.0, 100.0);
     correction->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(correction);
 
-    MenuItem* slew = new MenuFloat("Slew Hz/s", &settings.get().closedLoopSlewLimitHzPerSec, 0.1, 0.0, 100.0);
+    MenuItem* slew = new MenuFloat("Slew Hz/s", &tuning.slewLimitHzPerSec, 0.1, 0.0, 100.0);
     slew->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(slew);
 
@@ -623,14 +624,14 @@ void actionEnterClosedLoop() {
     rampMode->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
     pageClosedLoop->addItem(rampMode);
 
-    MenuItem* rampKp = new MenuFloat("Ramp Kp", &settings.get().closedLoopRampKp, 0.01, 0.0, 5.0);
+    MenuItem* rampKp = new MenuFloat("Ramp Kp", &tuning.rampKp, 0.01, 0.0, 5.0);
     rampKp->setVisibleWhen([](){
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopRampMode == CLOSED_LOOP_RAMP_TRACK;
     });
     pageClosedLoop->addItem(rampKp);
 
-    MenuItem* rampLimit = new MenuFloat("Ramp Lim", &settings.get().closedLoopRampCorrectionLimitHz, 0.1, 0.0, 20.0);
+    MenuItem* rampLimit = new MenuFloat("Ramp Lim", &tuning.rampCorrectionLimitHz, 0.1, 0.0, 20.0);
     rampLimit->setVisibleWhen([](){
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopRampMode == CLOSED_LOOP_RAMP_TRACK;

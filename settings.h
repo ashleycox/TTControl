@@ -39,6 +39,8 @@ public:
     
     // Helper to get current speed settings
     SpeedSettings& getCurrentSpeedSettings();
+    ClosedLoopSpeedTuning& getCurrentClosedLoopTuning();
+    ClosedLoopSpeedTuning& getClosedLoopTuning(SpeedMode speed);
 
     // --- Preset Management ---
     void savePreset(uint8_t slot);

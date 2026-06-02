@@ -146,6 +146,119 @@ struct GlobalSettingsV6 {
 
 static_assert(sizeof(GlobalSettingsV6) == 412, "GlobalSettingsV6 must match schema 6 storage size.");
 
+struct GlobalSettingsV7 {
+    uint32_t schemaVersion;
+    uint8_t phaseMode;
+    uint8_t maxAmplitude;
+    uint8_t softStartCurve;
+    bool smoothSwitching;
+    uint8_t switchRampDuration;
+    uint8_t brakeMode;
+    float brakeDuration;
+    float brakePulseGap;
+    float brakeStartFreq;
+    float brakeStopFreq;
+    float softStopCutoff;
+    bool relayActiveHigh;
+    bool muteRelayLinkStandby;
+    bool muteRelayLinkStartStop;
+    uint8_t powerOnRelayDelay;
+    uint8_t displayBrightness;
+    uint8_t displaySleepDelay;
+    bool screensaverEnabled;
+    uint8_t autoDimDelay;
+    bool showRuntime;
+    bool errorDisplayEnabled;
+    uint8_t errorDisplayDuration;
+    uint8_t autoStandbyDelay;
+    bool autoStart;
+    bool autoBoot;
+    bool pitchResetOnStop;
+    SpeedSettings speeds[3];
+    char presetNames[5][17];
+    uint32_t totalRuntime;
+    bool reverseEncoder;
+    float pitchStepSize;
+    uint8_t rampType;
+    uint8_t screensaverMode;
+    bool enable78rpm;
+    uint8_t freqDependentAmplitude;
+    float vfLowFreq;
+    uint8_t vfLowBoost;
+    float vfMidFreq;
+    uint8_t vfMidBoost;
+    uint8_t bootSpeed;
+    SpeedMode currentSpeed;
+    float ampTempWarnC;
+    float ampTempShutdownC;
+    bool showCpuDashboard;
+    bool showMemoryDashboard;
+    bool showFlashDashboard;
+    bool closedLoopEnabled;
+    uint8_t closedLoopControlMode;
+    uint8_t closedLoopSensorMode;
+    float closedLoopTargetRpm[3];
+    uint16_t closedLoopCountsPerRev;
+    uint8_t closedLoopPulseEdge;
+    uint8_t closedLoopQuadratureMode;
+    bool closedLoopReverseDirection;
+    uint8_t closedLoopDirectionFaultAction;
+    uint16_t closedLoopDebounceUs;
+    uint16_t closedLoopTimeoutMs;
+    uint16_t closedLoopEngageDelayMs;
+    uint16_t closedLoopUpdateIntervalMs;
+    float closedLoopFilterAlpha;
+    float closedLoopDeadbandRpm;
+    float closedLoopLockToleranceRpm;
+    uint16_t closedLoopLockTimeMs;
+    float closedLoopKp;
+    float closedLoopKi;
+    float closedLoopKd;
+    float closedLoopIntegralLimitHz;
+    float closedLoopCorrectionLimitHz;
+    float closedLoopSlewLimitHzPerSec;
+    uint8_t closedLoopDropoutAction;
+    bool closedLoopRequireSignalBeforeEngage;
+    bool closedLoopRequireNearTargetBeforeEngage;
+    float closedLoopEngageToleranceRpm;
+    uint8_t closedLoopRampMode;
+    float closedLoopRampKp;
+    float closedLoopRampCorrectionLimitHz;
+    float closedLoopPitchSlewRpmPerSec;
+    float closedLoopPitchResetThresholdRpm;
+    uint16_t closedLoopSaturationTimeMs;
+    uint8_t closedLoopSaturationAction;
+    float closedLoopPlausibilityMinRpm;
+    float closedLoopPlausibilityMaxRpm;
+    uint8_t closedLoopPlausibilityAction;
+    uint16_t closedLoopLockTimeoutMs;
+    uint8_t closedLoopLockTimeoutAction;
+    uint8_t closedLoopAmpRecoveryMode;
+    uint16_t closedLoopAmpRecoveryDelayMs;
+};
+
+static_assert(sizeof(GlobalSettingsV7) == 456, "GlobalSettingsV7 must match schema 7 storage size.");
+
+void copyGlobalClosedLoopTuningToSpeed(const GlobalSettings& source, ClosedLoopSpeedTuning& target) {
+    target.deadbandRpm = source.closedLoopDeadbandRpm;
+    target.lockToleranceRpm = source.closedLoopLockToleranceRpm;
+    target.kp = source.closedLoopKp;
+    target.ki = source.closedLoopKi;
+    target.kd = source.closedLoopKd;
+    target.integralLimitHz = source.closedLoopIntegralLimitHz;
+    target.correctionLimitHz = source.closedLoopCorrectionLimitHz;
+    target.slewLimitHzPerSec = source.closedLoopSlewLimitHzPerSec;
+    target.rampKp = source.closedLoopRampKp;
+    target.rampCorrectionLimitHz = source.closedLoopRampCorrectionLimitHz;
+    target.lockTimeMs = source.closedLoopLockTimeMs;
+}
+
+void copyGlobalClosedLoopTuningToSpeeds(GlobalSettings& data) {
+    for (int i = 0; i < 3; i++) {
+        copyGlobalClosedLoopTuningToSpeed(data, data.closedLoopTuning[i]);
+    }
+}
+
 void setClosedLoopAdvancedDefaults(GlobalSettings& data) {
     data.closedLoopControlMode = CLOSED_LOOP_CONTROL_CORRECT;
     data.closedLoopRequireSignalBeforeEngage = true;
@@ -195,6 +308,7 @@ void setClosedLoopDefaults(GlobalSettings& data) {
     data.closedLoopSlewLimitHzPerSec = 0.5f;
     data.closedLoopDropoutAction = CLOSED_LOOP_DROPOUT_OPEN_LOOP;
     setClosedLoopAdvancedDefaults(data);
+    copyGlobalClosedLoopTuningToSpeeds(data);
 }
 
 void copyFromV5(const GlobalSettingsV5& source, GlobalSettings& target) {
@@ -332,6 +446,106 @@ void copyFromV6(const GlobalSettingsV6& source, GlobalSettings& target) {
     target.closedLoopSlewLimitHzPerSec = source.closedLoopSlewLimitHzPerSec;
     target.closedLoopDropoutAction = source.closedLoopDropoutAction;
     setClosedLoopAdvancedDefaults(target);
+    copyGlobalClosedLoopTuningToSpeeds(target);
+}
+
+void copyFromV7(const GlobalSettingsV7& source, GlobalSettings& target) {
+    target.schemaVersion = SETTINGS_SCHEMA_VERSION;
+    target.phaseMode = source.phaseMode;
+    target.maxAmplitude = source.maxAmplitude;
+    target.softStartCurve = source.softStartCurve;
+    target.smoothSwitching = source.smoothSwitching;
+    target.switchRampDuration = source.switchRampDuration;
+    target.brakeMode = source.brakeMode;
+    target.brakeDuration = source.brakeDuration;
+    target.brakePulseGap = source.brakePulseGap;
+    target.brakeStartFreq = source.brakeStartFreq;
+    target.brakeStopFreq = source.brakeStopFreq;
+    target.softStopCutoff = source.softStopCutoff;
+    target.relayActiveHigh = source.relayActiveHigh;
+    target.muteRelayLinkStandby = source.muteRelayLinkStandby;
+    target.muteRelayLinkStartStop = source.muteRelayLinkStartStop;
+    target.powerOnRelayDelay = source.powerOnRelayDelay;
+    target.displayBrightness = source.displayBrightness;
+    target.displaySleepDelay = source.displaySleepDelay;
+    target.screensaverEnabled = source.screensaverEnabled;
+    target.autoDimDelay = source.autoDimDelay;
+    target.showRuntime = source.showRuntime;
+    target.errorDisplayEnabled = source.errorDisplayEnabled;
+    target.errorDisplayDuration = source.errorDisplayDuration;
+    target.autoStandbyDelay = source.autoStandbyDelay;
+    target.autoStart = source.autoStart;
+    target.autoBoot = source.autoBoot;
+    target.pitchResetOnStop = source.pitchResetOnStop;
+    for (int i = 0; i < 3; i++) {
+        target.speeds[i] = source.speeds[i];
+    }
+    for (int i = 0; i < MAX_PRESET_SLOTS; i++) {
+        strncpy(target.presetNames[i], source.presetNames[i], 16);
+        target.presetNames[i][16] = 0;
+    }
+    target.totalRuntime = source.totalRuntime;
+    target.reverseEncoder = source.reverseEncoder;
+    target.pitchStepSize = source.pitchStepSize;
+    target.rampType = source.rampType;
+    target.screensaverMode = source.screensaverMode;
+    target.enable78rpm = source.enable78rpm;
+    target.freqDependentAmplitude = source.freqDependentAmplitude;
+    target.vfLowFreq = source.vfLowFreq;
+    target.vfLowBoost = source.vfLowBoost;
+    target.vfMidFreq = source.vfMidFreq;
+    target.vfMidBoost = source.vfMidBoost;
+    target.bootSpeed = source.bootSpeed;
+    target.currentSpeed = source.currentSpeed;
+    target.ampTempWarnC = source.ampTempWarnC;
+    target.ampTempShutdownC = source.ampTempShutdownC;
+    target.showCpuDashboard = source.showCpuDashboard;
+    target.showMemoryDashboard = source.showMemoryDashboard;
+    target.showFlashDashboard = source.showFlashDashboard;
+    target.closedLoopEnabled = source.closedLoopEnabled;
+    target.closedLoopControlMode = source.closedLoopControlMode;
+    target.closedLoopSensorMode = source.closedLoopSensorMode;
+    for (int i = 0; i < 3; i++) {
+        target.closedLoopTargetRpm[i] = source.closedLoopTargetRpm[i];
+    }
+    target.closedLoopCountsPerRev = source.closedLoopCountsPerRev;
+    target.closedLoopPulseEdge = source.closedLoopPulseEdge;
+    target.closedLoopQuadratureMode = source.closedLoopQuadratureMode;
+    target.closedLoopReverseDirection = source.closedLoopReverseDirection;
+    target.closedLoopDirectionFaultAction = source.closedLoopDirectionFaultAction;
+    target.closedLoopDebounceUs = source.closedLoopDebounceUs;
+    target.closedLoopTimeoutMs = source.closedLoopTimeoutMs;
+    target.closedLoopEngageDelayMs = source.closedLoopEngageDelayMs;
+    target.closedLoopUpdateIntervalMs = source.closedLoopUpdateIntervalMs;
+    target.closedLoopFilterAlpha = source.closedLoopFilterAlpha;
+    target.closedLoopDeadbandRpm = source.closedLoopDeadbandRpm;
+    target.closedLoopLockToleranceRpm = source.closedLoopLockToleranceRpm;
+    target.closedLoopLockTimeMs = source.closedLoopLockTimeMs;
+    target.closedLoopKp = source.closedLoopKp;
+    target.closedLoopKi = source.closedLoopKi;
+    target.closedLoopKd = source.closedLoopKd;
+    target.closedLoopIntegralLimitHz = source.closedLoopIntegralLimitHz;
+    target.closedLoopCorrectionLimitHz = source.closedLoopCorrectionLimitHz;
+    target.closedLoopSlewLimitHzPerSec = source.closedLoopSlewLimitHzPerSec;
+    target.closedLoopDropoutAction = source.closedLoopDropoutAction;
+    target.closedLoopRequireSignalBeforeEngage = source.closedLoopRequireSignalBeforeEngage;
+    target.closedLoopRequireNearTargetBeforeEngage = source.closedLoopRequireNearTargetBeforeEngage;
+    target.closedLoopEngageToleranceRpm = source.closedLoopEngageToleranceRpm;
+    target.closedLoopRampMode = source.closedLoopRampMode;
+    target.closedLoopRampKp = source.closedLoopRampKp;
+    target.closedLoopRampCorrectionLimitHz = source.closedLoopRampCorrectionLimitHz;
+    target.closedLoopPitchSlewRpmPerSec = source.closedLoopPitchSlewRpmPerSec;
+    target.closedLoopPitchResetThresholdRpm = source.closedLoopPitchResetThresholdRpm;
+    target.closedLoopSaturationTimeMs = source.closedLoopSaturationTimeMs;
+    target.closedLoopSaturationAction = source.closedLoopSaturationAction;
+    target.closedLoopPlausibilityMinRpm = source.closedLoopPlausibilityMinRpm;
+    target.closedLoopPlausibilityMaxRpm = source.closedLoopPlausibilityMaxRpm;
+    target.closedLoopPlausibilityAction = source.closedLoopPlausibilityAction;
+    target.closedLoopLockTimeoutMs = source.closedLoopLockTimeoutMs;
+    target.closedLoopLockTimeoutAction = source.closedLoopLockTimeoutAction;
+    target.closedLoopAmpRecoveryMode = source.closedLoopAmpRecoveryMode;
+    target.closedLoopAmpRecoveryDelayMs = source.closedLoopAmpRecoveryDelayMs;
+    copyGlobalClosedLoopTuningToSpeeds(target);
 }
 
 uint32_t settingsCrc32(const uint8_t* data, size_t length) {
@@ -423,6 +637,22 @@ bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, 
         if (crc != header.crc32) return false;
 
         copyFromV6(legacy, target);
+        if (migrated) *migrated = true;
+        return true;
+    }
+
+    if (header.schemaVersion == 7 && header.payloadSize == sizeof(GlobalSettingsV7)) {
+        GlobalSettingsV7 legacy;
+        if (f.read((uint8_t*)&legacy, sizeof(legacy)) != sizeof(legacy)) {
+            f.close();
+            return false;
+        }
+        f.close();
+
+        uint32_t crc = settingsCrc32((const uint8_t*)&legacy, sizeof(legacy));
+        if (crc != header.crc32) return false;
+
+        copyFromV7(legacy, target);
         if (migrated) *migrated = true;
         return true;
     }
@@ -614,6 +844,16 @@ SpeedSettings& Settings::getCurrentSpeedSettings() {
     return _data.speeds[_data.currentSpeed];
 }
 
+ClosedLoopSpeedTuning& Settings::getCurrentClosedLoopTuning() {
+    return getClosedLoopTuning(_data.currentSpeed);
+}
+
+ClosedLoopSpeedTuning& Settings::getClosedLoopTuning(SpeedMode speed) {
+    uint8_t index = (uint8_t)speed;
+    if (index > SPEED_78) index = SPEED_33;
+    return _data.closedLoopTuning[index];
+}
+
 void Settings::normalize() {
     validate();
 }
@@ -754,6 +994,31 @@ void Settings::validate() {
         _data.closedLoopAmpRecoveryMode = CLOSED_LOOP_AMP_RECOVERY_OFF;
     }
     if (_data.closedLoopAmpRecoveryDelayMs > 30000) _data.closedLoopAmpRecoveryDelayMs = 30000;
+
+    for (uint8_t i = 0; i < 3; i++) {
+        ClosedLoopSpeedTuning& t = _data.closedLoopTuning[i];
+        if (t.deadbandRpm < 0.0f) t.deadbandRpm = 0.0f;
+        if (t.deadbandRpm > 5.0f) t.deadbandRpm = 5.0f;
+        if (t.lockToleranceRpm < 0.01f) t.lockToleranceRpm = 0.01f;
+        if (t.lockToleranceRpm > 5.0f) t.lockToleranceRpm = 5.0f;
+        if (t.lockTimeMs > 30000) t.lockTimeMs = 30000;
+        if (t.kp < 0.0f) t.kp = 0.0f;
+        if (t.kp > 20.0f) t.kp = 20.0f;
+        if (t.ki < 0.0f) t.ki = 0.0f;
+        if (t.ki > 20.0f) t.ki = 20.0f;
+        if (t.kd < 0.0f) t.kd = 0.0f;
+        if (t.kd > 20.0f) t.kd = 20.0f;
+        if (t.integralLimitHz < 0.0f) t.integralLimitHz = 0.0f;
+        if (t.integralLimitHz > 50.0f) t.integralLimitHz = 50.0f;
+        if (t.correctionLimitHz < 0.0f) t.correctionLimitHz = 0.0f;
+        if (t.correctionLimitHz > 100.0f) t.correctionLimitHz = 100.0f;
+        if (t.slewLimitHzPerSec < 0.0f) t.slewLimitHzPerSec = 0.0f;
+        if (t.slewLimitHzPerSec > 100.0f) t.slewLimitHzPerSec = 100.0f;
+        if (t.rampKp < 0.0f) t.rampKp = 0.0f;
+        if (t.rampKp > 5.0f) t.rampKp = 5.0f;
+        if (t.rampCorrectionLimitHz < 0.0f) t.rampCorrectionLimitHz = 0.0f;
+        if (t.rampCorrectionLimitHz > 20.0f) t.rampCorrectionLimitHz = 20.0f;
+    }
 
     // Validate Per-Speed Settings
     for(int i=0; i<3; i++) {
@@ -992,22 +1257,22 @@ bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
     doc["clEng"] = target.closedLoopEngageDelayMs;
     doc["clUpd"] = target.closedLoopUpdateIntervalMs;
     doc["clAlpha"] = target.closedLoopFilterAlpha;
-    doc["clDbnd"] = target.closedLoopDeadbandRpm;
-    doc["clLock"] = target.closedLoopLockToleranceRpm;
-    doc["clLockMs"] = target.closedLoopLockTimeMs;
-    doc["clKp"] = target.closedLoopKp;
-    doc["clKi"] = target.closedLoopKi;
-    doc["clKd"] = target.closedLoopKd;
-    doc["clILim"] = target.closedLoopIntegralLimitHz;
-    doc["clCLim"] = target.closedLoopCorrectionLimitHz;
-    doc["clSlew"] = target.closedLoopSlewLimitHzPerSec;
+    doc["clDbnd"] = target.closedLoopTuning[SPEED_33].deadbandRpm;
+    doc["clLock"] = target.closedLoopTuning[SPEED_33].lockToleranceRpm;
+    doc["clLockMs"] = target.closedLoopTuning[SPEED_33].lockTimeMs;
+    doc["clKp"] = target.closedLoopTuning[SPEED_33].kp;
+    doc["clKi"] = target.closedLoopTuning[SPEED_33].ki;
+    doc["clKd"] = target.closedLoopTuning[SPEED_33].kd;
+    doc["clILim"] = target.closedLoopTuning[SPEED_33].integralLimitHz;
+    doc["clCLim"] = target.closedLoopTuning[SPEED_33].correctionLimitHz;
+    doc["clSlew"] = target.closedLoopTuning[SPEED_33].slewLimitHzPerSec;
     doc["clDrop"] = target.closedLoopDropoutAction;
     doc["clReqSig"] = target.closedLoopRequireSignalBeforeEngage;
     doc["clReqNear"] = target.closedLoopRequireNearTargetBeforeEngage;
     doc["clEngTol"] = target.closedLoopEngageToleranceRpm;
     doc["clRamp"] = target.closedLoopRampMode;
-    doc["clRampKp"] = target.closedLoopRampKp;
-    doc["clRampLim"] = target.closedLoopRampCorrectionLimitHz;
+    doc["clRampKp"] = target.closedLoopTuning[SPEED_33].rampKp;
+    doc["clRampLim"] = target.closedLoopTuning[SPEED_33].rampCorrectionLimitHz;
     doc["clPitchSlew"] = target.closedLoopPitchSlewRpmPerSec;
     doc["clPitchReset"] = target.closedLoopPitchResetThresholdRpm;
     doc["clSatMs"] = target.closedLoopSaturationTimeMs;
@@ -1019,6 +1284,21 @@ bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
     doc["clLockAct"] = target.closedLoopLockTimeoutAction;
     doc["clAmpRec"] = target.closedLoopAmpRecoveryMode;
     doc["clAmpRecMs"] = target.closedLoopAmpRecoveryDelayMs;
+    JsonArray clTune = doc["clTune"].to<JsonArray>();
+    for (int i = 0; i < 3; i++) {
+        JsonObject tune = clTune.add<JsonObject>();
+        tune["db"] = target.closedLoopTuning[i].deadbandRpm;
+        tune["lock"] = target.closedLoopTuning[i].lockToleranceRpm;
+        tune["lockMs"] = target.closedLoopTuning[i].lockTimeMs;
+        tune["kp"] = target.closedLoopTuning[i].kp;
+        tune["ki"] = target.closedLoopTuning[i].ki;
+        tune["kd"] = target.closedLoopTuning[i].kd;
+        tune["iLim"] = target.closedLoopTuning[i].integralLimitHz;
+        tune["cLim"] = target.closedLoopTuning[i].correctionLimitHz;
+        tune["slew"] = target.closedLoopTuning[i].slewLimitHzPerSec;
+        tune["rKp"] = target.closedLoopTuning[i].rampKp;
+        tune["rLim"] = target.closedLoopTuning[i].rampCorrectionLimitHz;
+    }
 
     // Braking
     doc["brkMd"] = target.brakeMode;
@@ -1101,22 +1381,23 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
     if (doc["clEng"].is<uint16_t>()) target.closedLoopEngageDelayMs = doc["clEng"].as<uint16_t>();
     if (doc["clUpd"].is<uint16_t>()) target.closedLoopUpdateIntervalMs = doc["clUpd"].as<uint16_t>();
     if (doc["clAlpha"].is<float>()) target.closedLoopFilterAlpha = doc["clAlpha"].as<float>();
-    if (doc["clDbnd"].is<float>()) target.closedLoopDeadbandRpm = doc["clDbnd"].as<float>();
-    if (doc["clLock"].is<float>()) target.closedLoopLockToleranceRpm = doc["clLock"].as<float>();
-    if (doc["clLockMs"].is<uint16_t>()) target.closedLoopLockTimeMs = doc["clLockMs"].as<uint16_t>();
-    if (doc["clKp"].is<float>()) target.closedLoopKp = doc["clKp"].as<float>();
-    if (doc["clKi"].is<float>()) target.closedLoopKi = doc["clKi"].as<float>();
-    if (doc["clKd"].is<float>()) target.closedLoopKd = doc["clKd"].as<float>();
-    if (doc["clILim"].is<float>()) target.closedLoopIntegralLimitHz = doc["clILim"].as<float>();
-    if (doc["clCLim"].is<float>()) target.closedLoopCorrectionLimitHz = doc["clCLim"].as<float>();
-    if (doc["clSlew"].is<float>()) target.closedLoopSlewLimitHzPerSec = doc["clSlew"].as<float>();
+    bool oldClosedLoopTuningImported = false;
+    if (doc["clDbnd"].is<float>()) { target.closedLoopDeadbandRpm = doc["clDbnd"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clLock"].is<float>()) { target.closedLoopLockToleranceRpm = doc["clLock"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clLockMs"].is<uint16_t>()) { target.closedLoopLockTimeMs = doc["clLockMs"].as<uint16_t>(); oldClosedLoopTuningImported = true; }
+    if (doc["clKp"].is<float>()) { target.closedLoopKp = doc["clKp"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clKi"].is<float>()) { target.closedLoopKi = doc["clKi"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clKd"].is<float>()) { target.closedLoopKd = doc["clKd"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clILim"].is<float>()) { target.closedLoopIntegralLimitHz = doc["clILim"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clCLim"].is<float>()) { target.closedLoopCorrectionLimitHz = doc["clCLim"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clSlew"].is<float>()) { target.closedLoopSlewLimitHzPerSec = doc["clSlew"].as<float>(); oldClosedLoopTuningImported = true; }
     if (doc["clDrop"].is<uint8_t>()) target.closedLoopDropoutAction = doc["clDrop"].as<uint8_t>();
     if (doc["clReqSig"].is<bool>()) target.closedLoopRequireSignalBeforeEngage = doc["clReqSig"].as<bool>();
     if (doc["clReqNear"].is<bool>()) target.closedLoopRequireNearTargetBeforeEngage = doc["clReqNear"].as<bool>();
     if (doc["clEngTol"].is<float>()) target.closedLoopEngageToleranceRpm = doc["clEngTol"].as<float>();
     if (doc["clRamp"].is<uint8_t>()) target.closedLoopRampMode = doc["clRamp"].as<uint8_t>();
-    if (doc["clRampKp"].is<float>()) target.closedLoopRampKp = doc["clRampKp"].as<float>();
-    if (doc["clRampLim"].is<float>()) target.closedLoopRampCorrectionLimitHz = doc["clRampLim"].as<float>();
+    if (doc["clRampKp"].is<float>()) { target.closedLoopRampKp = doc["clRampKp"].as<float>(); oldClosedLoopTuningImported = true; }
+    if (doc["clRampLim"].is<float>()) { target.closedLoopRampCorrectionLimitHz = doc["clRampLim"].as<float>(); oldClosedLoopTuningImported = true; }
     if (doc["clPitchSlew"].is<float>()) target.closedLoopPitchSlewRpmPerSec = doc["clPitchSlew"].as<float>();
     if (doc["clPitchReset"].is<float>()) target.closedLoopPitchResetThresholdRpm = doc["clPitchReset"].as<float>();
     if (doc["clSatMs"].is<uint16_t>()) target.closedLoopSaturationTimeMs = doc["clSatMs"].as<uint16_t>();
@@ -1128,6 +1409,27 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
     if (doc["clLockAct"].is<uint8_t>()) target.closedLoopLockTimeoutAction = doc["clLockAct"].as<uint8_t>();
     if (doc["clAmpRec"].is<uint8_t>()) target.closedLoopAmpRecoveryMode = doc["clAmpRec"].as<uint8_t>();
     if (doc["clAmpRecMs"].is<uint16_t>()) target.closedLoopAmpRecoveryDelayMs = doc["clAmpRecMs"].as<uint16_t>();
+    JsonArray clTune = doc["clTune"].as<JsonArray>();
+    if (!clTune.isNull()) {
+        for (size_t i = 0; i < 3 && i < clTune.size(); i++) {
+            JsonObject tune = clTune[i].as<JsonObject>();
+            if (tune.isNull()) continue;
+            ClosedLoopSpeedTuning& t = target.closedLoopTuning[i];
+            if (tune["db"].is<float>()) t.deadbandRpm = tune["db"].as<float>();
+            if (tune["lock"].is<float>()) t.lockToleranceRpm = tune["lock"].as<float>();
+            if (tune["lockMs"].is<uint16_t>()) t.lockTimeMs = tune["lockMs"].as<uint16_t>();
+            if (tune["kp"].is<float>()) t.kp = tune["kp"].as<float>();
+            if (tune["ki"].is<float>()) t.ki = tune["ki"].as<float>();
+            if (tune["kd"].is<float>()) t.kd = tune["kd"].as<float>();
+            if (tune["iLim"].is<float>()) t.integralLimitHz = tune["iLim"].as<float>();
+            if (tune["cLim"].is<float>()) t.correctionLimitHz = tune["cLim"].as<float>();
+            if (tune["slew"].is<float>()) t.slewLimitHzPerSec = tune["slew"].as<float>();
+            if (tune["rKp"].is<float>()) t.rampKp = tune["rKp"].as<float>();
+            if (tune["rLim"].is<float>()) t.rampCorrectionLimitHz = tune["rLim"].as<float>();
+        }
+    } else if (oldClosedLoopTuningImported) {
+        copyGlobalClosedLoopTuningToSpeeds(target);
+    }
 
     if (doc["brkMd"].is<uint8_t>()) target.brakeMode = doc["brkMd"].as<uint8_t>();
     if (doc["brkDur"].is<float>()) target.brakeDuration = doc["brkDur"].as<float>();
