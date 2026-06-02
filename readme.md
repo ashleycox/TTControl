@@ -2,9 +2,10 @@
 
 TT Control is an advanced turntable motor controller designed to provide precise, multi-phase sine wave generation for controlling synchronous AC and BLDC motors. Built on the Raspberry Pi Pico RP2350, using the Arduino-Pico core, it leverages the Pico's dual-core architecture for efficient operation, separating UI and control logic from high-precision waveform generation.
 
-It features extensive configurability via a hierarchical menu system, hardware configurability via compile-time flags, multi-speed support, configurable settings presets, advanced amplitude and phase control, optional pulse or quadrature closed-loop speed feedback, configurable hardware controls, support for a pitch control, digital filtering and sine wave interpolation, and non-volatile settings storage.
+It features extensive configurability via a hierarchical menu system, hardware configurability via compile-time flags, multi-speed support, configurable settings presets, advanced amplitude and phase control, optional pulse or quadrature closed-loop speed feedback, configurable hardware controls, support for an optional pitch control, digital filtering and sine wave interpolation, and non-volatile settings storage.
 
 ---
+
 ## 1. Hardware & Environment Setup
 
 | Component | Specification | Default Value / Assignment | Notes |
@@ -16,15 +17,7 @@ It features extensive configurability via a hierarchical menu system, hardware c
 
 ---
 
-### 1.1. Code Requirements
-
-All code conforms to C coding best practices, ensuring optimal utilisation of all library features and functions.
-
-All code is extensively commented. The menu system is data-driven and arranged as outlined.
-
----
-
-### 1.2. Datasheets and Resources
+### 1.1. Datasheets and Resources
 
 - **Microcontroller:** Raspberry Pi Pico, [RP2350](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf)
 - **Board:** [Pimoroni Pico+2](https://shop.pimoroni.com/products/pimoroni-pico-plus-2)
@@ -37,7 +30,9 @@ All code is extensively commented. The menu system is data-driven and arranged a
   - **JSON:** ArduinoJson
   - **Wi-Fi builds:** Arduino-Pico bundled `WiFi`, `WebServer`, and `DNSServer`
 
-### 1.3. Build Targets
+---
+
+### 1.2. Build Targets
 
 Non-Wi-Fi Pimoroni Pico+2 build:
 
@@ -59,7 +54,7 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico2w:flash=4194304_1048576 .
 
 ---
 
-### 1.4. Pin Assignments
+### 1.3. Pin Assignments
 
 | Pin | Function | Notes |
 | :--- | :--- | :--- |
@@ -90,7 +85,7 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico2w:flash=4194304_1048576 .
 
 ---
 
-### 1.5. Default phase offset angles
+### 1.4. Default phase offset angles
 
 Default angles depend on phase mode and can be adjusted.
 
@@ -106,6 +101,7 @@ Default angles depend on phase mode and can be adjusted.
 ## 2. Features in detail
 
 ### 2.1. Sine Wave Generation
+
 - **High-Precision DMA-based Generation:** Uses the RP2350's Direct Memory Access (DMA) and hardware PWM slices for jitter-free, CPU-independent waveform generation.
 - **Waveform Lookup Table:** Pre-computed, configurable sample lookup table with configurable lookup table size (1024, 2048, 4096, 8192, 16384).
 - **Interpolation:** Linear interpolation to smooth output with smaller sample tables.
@@ -117,6 +113,7 @@ Default angles depend on phase mode and can be adjusted.
 ---
 
 ### 2.2. Multi-Phase Operation
+
 - **Single Phase Mode:** 0 degrees.
 - **2-Phase Mode:** 0° and 90°.
 - **3-Phase Mode:** 0°, 120°, 240°.
@@ -133,6 +130,7 @@ Default angles depend on phase mode and can be adjusted.
 ---
 
 ### 2.3. Motor Control Features
+
 - **Max Amplitude Limit:** Configurable maximum amplitude to limit the output voltage to safe margins (global).
 - **Soft Start:** Configurable soft start with continuous duration from 0.0s to 10.0s (per speed). Choose between Linear, S-Curve, Logarithmic, or Exponential ramping profiles.
 - **Frequency Dependent Amplitude (FDA):**
@@ -175,6 +173,7 @@ Default angles depend on phase mode and can be adjusted.
 ---
 
 ### 2.4. Closed-Loop Speed Control
+
 When `CLOSED_LOOP_SPEED_ENABLE` is `1`, GP6/GP7 become optional speed feedback inputs for platter RPM monitoring and correction. The default build keeps the feature compiled out, so existing hardware without sensors is unchanged.
 
 - **Sensor Support:** GP6 can read a pulse tachometer. GP6/GP7 can read A/B quadrature feedback with x1, x2, or x4 decode, reverse-direction correction, raw/corrected direction reporting, and configurable reverse-motion fault handling.
@@ -230,6 +229,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.6. User Interface
+
 - **Display Support:** Support for 128x64 OLED display.
 - **Menu System:** Comprehensive, logically organised hierarchical menu system to adjust all possible configuration settings via the user interface.
 - **Context-Aware Menus:** Dependent settings are hidden until relevant, such as IIR/FIR filter options, phase offsets, V/f curve points, brake parameters, closed-loop sensor/controller options, and screensaver/error durations.
@@ -277,6 +277,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.7. Serial Monitor Support
+
 - **Optional Enable:** Optional, enabled or disabled by compile-time configuration flags.
 - **Interactive CLI:** Full command-line interface for control and configuration.
 - **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, closed-loop status/reset/setup/tuning/health/trend when enabled, and diagnostics.
@@ -291,6 +292,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.8. Wi-Fi Web Interface
+
 - **Automatic Wi-Fi Build Detection:** `NETWORK_ENABLE` defaults to `1` only when the selected Arduino-Pico board target defines `PICO_CYW43_SUPPORTED`. Non-Wi-Fi builds compile the network and web modules out.
 - **Default Setup Access Point:** Wi-Fi-capable builds start in open setup access point mode by default using SSID `TTControl-Setup`, so the network setup UI can be reached before any home network credentials are entered.
 - **Setup-Only Safety:** When reached through an open setup AP, the hosted server only serves Wi-Fi configuration pages and network APIs. Motor controls, full settings, presets, and error logs are blocked until the device is reached through the configured Wi-Fi network, or through a protected setup access point.
@@ -328,6 +330,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.9. Settings Management
+
 - **Configurable Presets:** Multiple configurable presets (5 by default, the number defined in configuration flag).
 - **Preset Management:** Presets can be reverted to defaults, loaded, renamed and duplicated.
 - **Preset Naming:** Presets can have names up to 16 characters, a-z 0-9.
@@ -350,6 +353,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.10. Power Management
+
 - Standby mode to enter low power state
   - **Compile-time Flag**: `ENABLE_STANDBY` (default `1`). If disabled, the system boots directly to STOPPED state and all standby features are hidden.
 - Relay control for secondary power to drive load driving circuitry
@@ -371,6 +375,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.11. Amplifier Monitoring And Thermal Safety
+
 - **Compile-Time Enable:** `AMP_MONITOR_ENABLE` enables the amplifier monitor. It is enabled by default and has no runtime enable/disable toggle.
 - **Temperature Sensor:** `PIN_AMP_TEMP` reads a TMP36-style analogue heatsink sensor on ADC GP26. The firmware samples it every 500 ms and converts voltage to degrees Celsius.
 - **Thermal Cutout Input:** `PIN_AMP_THERM_OK` reads the amplifier thermal cutout/status line on GP27 using an input pulldown. HIGH means the amplifier thermal chain is healthy; LOW triggers an immediate critical shutdown.
@@ -382,6 +387,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.12. Multi-Core & DMA Architecture
+
 - **Core 0:** Handles UI, menu system, encoder input, and high-level motor control logic.
 - **Core 1:** Dedicated to waveform buffer management.
 - **DMA & Hardware PWM:** The actual waveform generation is offloaded to the RP2350's DMA controller and PWM hardware. This ensures:
@@ -396,6 +402,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 2.13. Error Handling
+
 - **Initialization Checks:** Display initialization check.
 - **Range Validation:** Settings range validation.
 - **Error Reporting:** Error code system to display errors on screen (configurable in menu) and via serial output (configurable in flag).
@@ -407,8 +414,6 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ## 3. User Interface
-
----
 
 ### 3.1. Basic Operation
 
@@ -425,6 +430,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 ---
 
 ### 3.2. Serial Commands
+
 Connect at 115200 baud. The CLI supports a registry of settings that can be accessed via `set` and `get`.
 
 | Command | Description |
@@ -480,9 +486,8 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `error clear` | Clear error log |
 | `f` | Factory Reset |
 
-
-
 #### Available Settings Keys
+
 Use these keys with `set` and `get`. Speed-specific settings apply to the **currently selected speed**.
 
 | Key | Description | Type |
@@ -563,10 +568,12 @@ Use these keys with `set` and `get`. Speed-specific settings apply to the **curr
 
 ---
 
-## 3.3. Screens and Menus
+### 3.3. Screens and Menus
+
 The menu structure is designed for a data-driven implementation.
 
-### Main Menu
+#### Main Menu
+
 - **Exit Safe Mode** (Only visible if currently in Safe Mode: forces watchdog reboot targetting normal flash load)
 - **Edit Speed: [33/45/78]** (Toggle speed context for submenus)
 - **Speed Tuning:** Frequency, Limits, Filters (Per-Speed).
@@ -581,7 +588,8 @@ The menu structure is designed for a data-driven implementation.
 - **Save & Exit:** Saves all changes to flash and returns to dashboard.
 - **Cancel:** Discards changes and reloads from flash.
 
-### Speed Tuning
+#### Speed Tuning
+
 - **Frequency:** Nominal frequency (Hz).
 - **Min Freq:** Limit for pitch control.
 - **Max Freq:** Limit for pitch control.
@@ -589,14 +597,16 @@ The menu structure is designed for a data-driven implementation.
 - **IIR Alpha:** IIR Filter smoothing factor.
 - **FIR Prof:** FIR Filter Profile (0=Gentle, 1=Medium, 2=Aggressive).
 
-### Phase Control
+#### Phase Control
+
 - **Mode (Glb):** 1, 2, or 3 phase operation by default; 4 phase operation appears only when `ENABLE_4_CHANNEL_SUPPORT` is set to `1`.
 - **Ph 2 Offs:** Phase 2 offset for multi-phase motors.
 - **Ph 3 Offs:** Phase 3 offset for multi-phase motors.
 - **Ph 4 Offs:** Phase 4 offset for multi-phase motors.
 - **Sweep Diag.:** Symmetric Resonance Sweep mode.
 
-### Motor Control
+#### Motor Control
+
 - **Soft Start**: Adjustable duration (0.0s to 10.0s) to ramp up amplitude gently.
 - **Red. Amp %**: Automatically lower voltage after spin-up to reduce motor noise and heat (10-100%).
 - **Amp Delay**: Configurable delay before amplitude reduction (0s to 60s).
@@ -622,7 +632,8 @@ The menu structure is designed for a data-driven implementation.
 - **Auto Start**: Start motor immediately after boot/wake.
 - **Brake Tune:** Guided brake tuning page with mode-specific settings, explicit Start Motor and Brake Stop actions, and Save Brake.
 
-### Power Control
+#### Power Control
+
 - **Rly: ActHi:** Toggle relay logic (Active High/Low). (If `ENABLE_MUTE_RELAYS`)
 - **Rly: Stby:** Mute relays when entering Standby. (If `ENABLE_STANDBY`)
 - **Rly: S/S:** Unmute relays on Start, Mute on Stop.
@@ -631,7 +642,8 @@ The menu structure is designed for a data-driven implementation.
 - **Auto Boot:** Boot directly to operation (bypass standby).
 - **Relay Test:** Bench diagnostic that turns waveform output off and activates one relay output stage at a time. It refuses to run while the motor is moving.
 
-### Display
+#### Display
+
 - **Brightness:** OLED Brightness/Contrast (0-255).
 - **Sleep Dly:** Display sleep delay (s).
 - **Scrn Saver:** Enable screensaver in standby.
@@ -644,7 +656,8 @@ The menu structure is designed for a data-driven implementation.
 - **Err Display:** Toggle on-screen error messages.
 - **Err Dur:** Duration of error messages (s).
 
-### System
+#### System
+
 - **Ver:** Firmware Version info.
 - **Rev Encoder:** Reverse the direction of the main encoder.
 - **Pitch Step:** Step size for pitch control (0.01% - 1.0%).
@@ -661,7 +674,8 @@ The menu structure is designed for a data-driven implementation.
 
 When `AMP_MONITOR_ENABLE` is compiled in, amplifier monitoring runs automatically. Warnings and shutdowns appear through the Error Log, serial status, and web status/dashboard; thresholds are editable in the System menu and web Settings page.
 
-### Closed Loop
+#### Closed Loop
+
 Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
 
 - **Enable:** Turns closed-loop feedback on or off.
@@ -717,7 +731,8 @@ Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
 - **Tune Apply:** Apply the current safe tuning recommendation, when one is available.
 - **Tune Stop:** Stop the guided tuning workflow.
 
-### Network
+#### Network
+
 - **Status:** Shows the current Wi-Fi connection state.
 - **Web:** Shows the active IP address for the browser interface.
 - **Wi-Fi:** Enable or disable network services.
@@ -740,7 +755,7 @@ Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
 - **Setup AP:** Force the device into setup access point mode.
 - **Refresh:** Rebuild the Network page with current status.
 
-### Presets
+#### Presets
 
 Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveals:
 
@@ -758,9 +773,9 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **System Info** | `FIRMWARE_VERSION` | Defines the firmware version string. | `"v1.0.0"` | Displayed on splash screen and system menu. |
 | **System Info** | `BUILD_DATE` | Stores the timestamp/date of the firmware compilation. | If possible, automatically generated by build script. | |
 | **Flash** | `LITTLEFS_FS_SIZE` | Defines the size of the LittleFS partition for settings storage. | `8MB` (Min `1MB` recommended) | Critical for non-volatile storage setup. |
-| **Core Hardware**| `OLED_I2C_ADDRESS` | Defines the I2C address for the SSD1306 display. | `0x3C` | Essential for display communication. |
-| **Core Hardware**| `OLED_WIDTH` | Defines the width of the OLED display. | `128` | |
-| **Core Hardware**| `OLED_HEIGHT` | Defines the height of the OLED display. | `64` | |
+| **Core Hardware** | `OLED_I2C_ADDRESS` | Defines the I2C address for the SSD1306 display. | `0x3C` | Essential for display communication. |
+| **Core Hardware** | `OLED_WIDTH` | Defines the width of the OLED display. | `128` | |
+| **Core Hardware** | `OLED_HEIGHT` | Defines the height of the OLED display. | `64` | |
 | **Waveform** | `LUT_MAX_SIZE` | Sets the maximum size of the sine wave Look-Up Table (LUT). | `16384` | Affects memory usage and processing load. |
 | **Waveform** | `MIN_OUTPUT_FREQUENCY_HZ` | Minimum generated sine frequency. | `10.0` | Used by menus, validation, serial commands, and waveform output. |
 | **Waveform** | `MAX_OUTPUT_FREQUENCY_HZ` | Maximum generated sine frequency. | `1500.0` | Used by menus, validation, serial commands, and waveform output. |
@@ -782,26 +797,26 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Features** | `AMP_MONITOR_ENABLE` | Enable amplifier temperature and thermal cutout monitoring. | `1` | Samples every 500 ms using `PIN_AMP_TEMP` and `PIN_AMP_THERM_OK`; thresholds appear in the System menu and web Settings page. |
 | **Features** | `CLOSED_LOOP_SPEED_ENABLE` | Enable pulse tachometer or quadrature speed feedback. | `0` | Adds sensor decoding, monitor/correction modes, setup capture, OLED menu, serial keys, and Web UI/API fields. |
 | **Features** | `CLOSED_LOOP_TREND_SIZE` | Number of recent closed-loop samples kept for serial/web trend reporting. | `24` | Valid range is 1-64. Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`. |
-| **Optional Pins**| `PIN_SPEED_SENSOR_A` | Pulse input or quadrature A input. | `6` | Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`. |
-| **Optional Pins**| `PIN_SPEED_SENSOR_B` | Quadrature B input. | `7` | Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`; ignored by pulse tach mode. |
-| **Optional Pins**| `PITCH_CONTROL_ENABLE` | Enables the secondary (Pitch) encoder functionality and logic. | `0` (Disabled) | **Required** flag for the optional pitch feature (3.3). |
-| **Optional Pins**| `PIN_ENC_PITCH_CLK` | Assigns the pin for the Pitch Encoder Clock. | `13` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
-| **Optional Pins**| `PIN_ENC_PITCH_DT` | Assigns the pin for the Pitch Encoder Data. | `14` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
-| **Optional Pins**| `PIN_ENC_PITCH_SW` | Assigns the pin for the Pitch Encoder Switch. | `15` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
-| **Optional Pins**| `STANDBY_BUTTON_ENABLE` | Enables the external Standby button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
-| **Optional Pins**| `PIN_BTN_STANDBY` | Assigns the pin for the Standby Button. | `21` | Only compiled if `STANDBY_BUTTON_ENABLE` is `1`. |
-| **Optional Pins**| `SPEED_BUTTON_ENABLE` | Enables the external Speed change button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
-| **Optional Pins**| `PIN_BTN_SPEED` | Assigns the pin for the Speed Button. | `22` | Only compiled if `SPEED_BUTTON_ENABLE` is `1`. |
-| **Optional Pins**| `START_STOP_BUTTON_ENABLE` | Enables the external Start/Stop motor button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
-| **Optional Pins**| `PIN_BTN_START_STOP` | Assigns the pin for the Start/Stop Button. | `9` | Only compiled if `START_STOP_BUTTON_ENABLE` is `1`; selected because GP9 is exposed on Pico 2 W. |
-| **Monitor Pins**| `PIN_AMP_TEMP` | Amplifier heatsink temperature ADC input. | `26` | TMP36-style analogue sensor. |
-| **Monitor Pins**| `PIN_AMP_THERM_OK` | Amplifier thermal cutout/status input. | `27` | HIGH means healthy; LOW triggers critical shutdown. |
-| **Thermal Limits**| `AMP_TEMP_WARN_C` | Factory default amplifier warning temperature. | `65.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; logs non-critical `ERR_AMP_THERMAL`. |
-| **Thermal Limits**| `AMP_TEMP_SHUTDOWN_C` | Factory default amplifier shutdown temperature. | `75.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; reports a critical error, which calls emergency stop, disables waveform output, mutes relays, and drops standby power when available. |
-| **Thermal Limits**| `AMP_TEMP_MIN_C` | Lowest configurable amplifier threshold. | `30.0` | Used to constrain saved settings. |
-| **Thermal Limits**| `AMP_TEMP_MAX_C` | Highest configurable amplifier threshold. | `120.0` | Used to constrain saved settings. |
-| **Thermal Limits**| `AMP_TEMP_MIN_SHUTDOWN_MARGIN_C` | Minimum gap between warning and shutdown thresholds. | `1.0` | Keeps warning below shutdown. |
-| **Thermal Limits**| `AMP_TEMP_WARN_HYSTERESIS_C` | Temperature drop required to re-arm the warning. | `5.0` | Warning-only hysteresis. |
+| **Optional Pins** | `PIN_SPEED_SENSOR_A` | Pulse input or quadrature A input. | `6` | Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`. |
+| **Optional Pins** | `PIN_SPEED_SENSOR_B` | Quadrature B input. | `7` | Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`; ignored by pulse tach mode. |
+| **Optional Pins** | `PITCH_CONTROL_ENABLE` | Enables the secondary (Pitch) encoder functionality and logic. | `0` (Disabled) | **Required** flag for the optional pitch feature (3.3). |
+| **Optional Pins** | `PIN_ENC_PITCH_CLK` | Assigns the pin for the Pitch Encoder Clock. | `13` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
+| **Optional Pins** | `PIN_ENC_PITCH_DT` | Assigns the pin for the Pitch Encoder Data. | `14` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
+| **Optional Pins** | `PIN_ENC_PITCH_SW` | Assigns the pin for the Pitch Encoder Switch. | `15` | Only compiled if `PITCH_CONTROL_ENABLE` is `1`. |
+| **Optional Pins** | `STANDBY_BUTTON_ENABLE` | Enables the external Standby button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
+| **Optional Pins** | `PIN_BTN_STANDBY` | Assigns the pin for the Standby Button. | `21` | Only compiled if `STANDBY_BUTTON_ENABLE` is `1`. |
+| **Optional Pins** | `SPEED_BUTTON_ENABLE` | Enables the external Speed change button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
+| **Optional Pins** | `PIN_BTN_SPEED` | Assigns the pin for the Speed Button. | `22` | Only compiled if `SPEED_BUTTON_ENABLE` is `1`. |
+| **Optional Pins** | `START_STOP_BUTTON_ENABLE` | Enables the external Start/Stop motor button. | `0` (Disabled) | **Required** flag for the optional button (3.5). |
+| **Optional Pins** | `PIN_BTN_START_STOP` | Assigns the pin for the Start/Stop Button. | `9` | Only compiled if `START_STOP_BUTTON_ENABLE` is `1`; selected because GP9 is exposed on Pico 2 W. |
+| **Monitor Pins** | `PIN_AMP_TEMP` | Amplifier heatsink temperature ADC input. | `26` | TMP36-style analogue sensor. |
+| **Monitor Pins** | `PIN_AMP_THERM_OK` | Amplifier thermal cutout/status input. | `27` | HIGH means healthy; LOW triggers critical shutdown. |
+| **Thermal Limits** | `AMP_TEMP_WARN_C` | Factory default amplifier warning temperature. | `65.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; logs non-critical `ERR_AMP_THERMAL`. |
+| **Thermal Limits** | `AMP_TEMP_SHUTDOWN_C` | Factory default amplifier shutdown temperature. | `75.0` | Runtime configurable when `AMP_MONITOR_ENABLE` is `1`; reports a critical error, which calls emergency stop, disables waveform output, mutes relays, and drops standby power when available. |
+| **Thermal Limits** | `AMP_TEMP_MIN_C` | Lowest configurable amplifier threshold. | `30.0` | Used to constrain saved settings. |
+| **Thermal Limits** | `AMP_TEMP_MAX_C` | Highest configurable amplifier threshold. | `120.0` | Used to constrain saved settings. |
+| **Thermal Limits** | `AMP_TEMP_MIN_SHUTDOWN_MARGIN_C` | Minimum gap between warning and shutdown thresholds. | `1.0` | Keeps warning below shutdown. |
+| **Thermal Limits** | `AMP_TEMP_WARN_HYSTERESIS_C` | Temperature drop required to re-arm the warning. | `5.0` | Warning-only hysteresis. |
 | **Display Msg** | `STANDBY_MESSAGE` | Sets the message displayed while the system is in standby, if enabled in the menu. | `message` | Controls message display logic. |
 | **Display Msg** | `WELCOME_MESSAGE` | Sets the message displayed on boot. | `"Welcome to TT Control"` | |
 | **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `8` | Use for compatibility checks when firmware is updated. |
