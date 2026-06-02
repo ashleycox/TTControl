@@ -72,6 +72,32 @@ static const char* closedLoopSensorName(uint8_t mode) {
     return mode == CLOSED_LOOP_SENSOR_QUADRATURE ? "Quadrature" : "Pulse";
 }
 
+static const char* closedLoopControlName(uint8_t mode) {
+    return mode == CLOSED_LOOP_CONTROL_CORRECT ? "Correct" : "Monitor";
+}
+
+static const char* closedLoopRampName(uint8_t mode) {
+    return mode == CLOSED_LOOP_RAMP_TRACK ? "Track" : "Off";
+}
+
+static const char* closedLoopFaultActionName(uint8_t action) {
+    if (action == CLOSED_LOOP_FAULT_STOP) return "Stop";
+    if (action == CLOSED_LOOP_FAULT_WARN) return "Warn";
+    return "Ignore";
+}
+
+static const char* closedLoopDropoutName(uint8_t action) {
+    if (action == CLOSED_LOOP_DROPOUT_STOP) return "Stop";
+    if (action == CLOSED_LOOP_DROPOUT_HOLD) return "Hold";
+    return "Open loop";
+}
+
+static const char* closedLoopAmpRecoveryName(uint8_t mode) {
+    if (mode == CLOSED_LOOP_AMP_RECOVERY_RESTORE) return "Restore";
+    if (mode == CLOSED_LOOP_AMP_RECOVERY_WARN) return "Warn";
+    return "Off";
+}
+
 static const char* closedLoopDirectionName(int8_t direction) {
     if (direction == SPEED_FEEDBACK_DIR_FORWARD) return "Forward";
     if (direction == SPEED_FEEDBACK_DIR_REVERSE) return "Reverse";
@@ -86,6 +112,8 @@ static void handleWifiCommand(const String& input);
 static void updateWifiSerialTasks();
 static void printSafetyDiagnostic();
 static void printClosedLoopStatus();
+static void handleClosedLoopCommand(const String& input);
+static void printClosedLoopSetupStatus();
 
 static int clampInt(int value, int minValue, int maxValue) {
     if (value < minValue) return minValue;
@@ -930,6 +958,14 @@ void initCLI() {
         }
     });
 
+    registry.push_back({ "cl_control",
+        []() { return String(settings.get().closedLoopControlMode); },
+        [](String v) {
+            settings.get().closedLoopControlMode = (uint8_t)clampInt(v.toInt(), CLOSED_LOOP_CONTROL_MONITOR, CLOSED_LOOP_CONTROL_CORRECT);
+            motor.resetClosedLoop();
+        }
+    });
+
     registry.push_back({ "cl_mode",
         []() { return String(settings.get().closedLoopSensorMode); },
         [](String v) {
@@ -1084,6 +1120,115 @@ void initCLI() {
     registry.push_back({ "cl_dropout",
         []() { return String(settings.get().closedLoopDropoutAction); },
         [](String v) { settings.get().closedLoopDropoutAction = (uint8_t)clampInt(v.toInt(), CLOSED_LOOP_DROPOUT_OPEN_LOOP, CLOSED_LOOP_DROPOUT_STOP); }
+    });
+
+    registry.push_back({ "cl_req_signal",
+        []() { return String(settings.get().closedLoopRequireSignalBeforeEngage); },
+        [](String v) {
+            bool parsed = false;
+            if (parseBoolValue(v, parsed)) {
+                settings.get().closedLoopRequireSignalBeforeEngage = parsed;
+                motor.resetClosedLoop();
+            }
+        }
+    });
+
+    registry.push_back({ "cl_req_near",
+        []() { return String(settings.get().closedLoopRequireNearTargetBeforeEngage); },
+        [](String v) {
+            bool parsed = false;
+            if (parseBoolValue(v, parsed)) {
+                settings.get().closedLoopRequireNearTargetBeforeEngage = parsed;
+                motor.resetClosedLoop();
+            }
+        }
+    });
+
+    registry.push_back({ "cl_engage_tol",
+        []() { return String(settings.get().closedLoopEngageToleranceRpm); },
+        [](String v) { settings.get().closedLoopEngageToleranceRpm = clampFloat(v.toFloat(), 0.01, 20.0); }
+    });
+
+    registry.push_back({ "cl_ramp_mode",
+        []() { return String(settings.get().closedLoopRampMode); },
+        [](String v) {
+            settings.get().closedLoopRampMode = (uint8_t)clampInt(v.toInt(), CLOSED_LOOP_RAMP_DISABLED, CLOSED_LOOP_RAMP_TRACK);
+            motor.resetClosedLoop();
+        }
+    });
+
+    registry.push_back({ "cl_ramp_kp",
+        []() { return String(settings.get().closedLoopRampKp); },
+        [](String v) { settings.get().closedLoopRampKp = clampFloat(v.toFloat(), 0.0, 5.0); }
+    });
+
+    registry.push_back({ "cl_ramp_limit",
+        []() { return String(settings.get().closedLoopRampCorrectionLimitHz); },
+        [](String v) { settings.get().closedLoopRampCorrectionLimitHz = clampFloat(v.toFloat(), 0.0, 20.0); }
+    });
+
+    registry.push_back({ "cl_pitch_slew",
+        []() { return String(settings.get().closedLoopPitchSlewRpmPerSec); },
+        [](String v) {
+            settings.get().closedLoopPitchSlewRpmPerSec = clampFloat(v.toFloat(), 0.0, 200.0);
+            motor.resetClosedLoop();
+        }
+    });
+
+    registry.push_back({ "cl_pitch_reset",
+        []() { return String(settings.get().closedLoopPitchResetThresholdRpm); },
+        [](String v) { settings.get().closedLoopPitchResetThresholdRpm = clampFloat(v.toFloat(), 0.0, 20.0); }
+    });
+
+    registry.push_back({ "cl_sat_ms",
+        []() { return String(settings.get().closedLoopSaturationTimeMs); },
+        [](String v) { settings.get().closedLoopSaturationTimeMs = (uint16_t)clampInt(v.toInt(), 0, 60000); }
+    });
+
+    registry.push_back({ "cl_sat_action",
+        []() { return String(settings.get().closedLoopSaturationAction); },
+        [](String v) { settings.get().closedLoopSaturationAction = (uint8_t)clampInt(v.toInt(), CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP); }
+    });
+
+    registry.push_back({ "cl_min_rpm",
+        []() { return String(settings.get().closedLoopPlausibilityMinRpm); },
+        [](String v) {
+            settings.get().closedLoopPlausibilityMinRpm = clampFloat(v.toFloat(), 0.0, 120.0);
+            settings.normalize();
+        }
+    });
+
+    registry.push_back({ "cl_max_rpm",
+        []() { return String(settings.get().closedLoopPlausibilityMaxRpm); },
+        [](String v) {
+            settings.get().closedLoopPlausibilityMaxRpm = clampFloat(v.toFloat(), 1.0, 200.0);
+            settings.normalize();
+        }
+    });
+
+    registry.push_back({ "cl_plaus_action",
+        []() { return String(settings.get().closedLoopPlausibilityAction); },
+        [](String v) { settings.get().closedLoopPlausibilityAction = (uint8_t)clampInt(v.toInt(), CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP); }
+    });
+
+    registry.push_back({ "cl_lock_timeout",
+        []() { return String(settings.get().closedLoopLockTimeoutMs); },
+        [](String v) { settings.get().closedLoopLockTimeoutMs = (uint16_t)clampInt(v.toInt(), 0, 60000); }
+    });
+
+    registry.push_back({ "cl_lock_action",
+        []() { return String(settings.get().closedLoopLockTimeoutAction); },
+        [](String v) { settings.get().closedLoopLockTimeoutAction = (uint8_t)clampInt(v.toInt(), CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP); }
+    });
+
+    registry.push_back({ "cl_amp_recovery",
+        []() { return String(settings.get().closedLoopAmpRecoveryMode); },
+        [](String v) { settings.get().closedLoopAmpRecoveryMode = (uint8_t)clampInt(v.toInt(), CLOSED_LOOP_AMP_RECOVERY_OFF, CLOSED_LOOP_AMP_RECOVERY_RESTORE); }
+    });
+
+    registry.push_back({ "cl_amp_recovery_ms",
+        []() { return String(settings.get().closedLoopAmpRecoveryDelayMs); },
+        [](String v) { settings.get().closedLoopAmpRecoveryDelayMs = (uint16_t)clampInt(v.toInt(), 0, 30000); }
     });
 #endif
 
@@ -1343,12 +1488,8 @@ void handleSerialCommands() {
             handleWifiCommand(input);
         }
 #if CLOSED_LOOP_SPEED_ENABLE
-        else if (input == "cl status") {
-            printClosedLoopStatus();
-        }
-        else if (input == "cl reset") {
-            motor.resetClosedLoop();
-            Serial.println("Closed-loop controller reset.");
+        else if (input == "cl" || input.startsWith("cl ")) {
+            handleClosedLoopCommand(input);
         }
 #endif
         else if (input == "brake test start") {
@@ -1558,13 +1699,21 @@ static void printClosedLoopStatus() {
     Serial.print("Closed Loop: ");
     Serial.print(settings.get().closedLoopEnabled ? "ON" : "OFF");
     Serial.print(", ");
+    Serial.print(closedLoopControlName(settings.get().closedLoopControlMode));
+    Serial.print(", ");
     Serial.print(closedLoopSensorName(settings.get().closedLoopSensorMode));
     Serial.print(", controller ");
     Serial.println(motor.isClosedLoopActive() ? "ACTIVE" : "IDLE");
 
-    Serial.print("CL Target/Measured/Error: ");
+    Serial.print("CL Target/Requested/Ramp: ");
     Serial.print(motor.getClosedLoopTargetRpm(), 4);
     Serial.print(" / ");
+    Serial.print(motor.getClosedLoopRequestedTargetRpm(), 4);
+    Serial.print(" / ");
+    Serial.print(motor.getClosedLoopRampTargetRpm(), 4);
+    Serial.println(" RPM");
+
+    Serial.print("CL Measured/Error: ");
     Serial.print(feedback.filteredRpm, 4);
     Serial.print(" / ");
     Serial.print(feedback.rpmError, 4);
@@ -1572,7 +1721,10 @@ static void printClosedLoopStatus() {
 
     Serial.print("CL Correction: ");
     Serial.print(motor.getClosedLoopCorrectionHz(), 4);
-    Serial.println(" Hz");
+    Serial.print(" Hz, saturated ");
+    Serial.print(motor.isClosedLoopSaturated() ? "YES" : "NO");
+    Serial.print(", amp recovery ");
+    Serial.println(motor.isClosedLoopAmpRecoveryActive() ? "YES" : "NO");
 
     Serial.print("CL Signal: ");
     Serial.print(feedback.signalValid ? "VALID" : "LOST");
@@ -1581,12 +1733,141 @@ static void printClosedLoopStatus() {
     Serial.print(", Direction: ");
     Serial.println(closedLoopDirectionName(feedback.direction));
 
+    Serial.print("CL Pins: A=");
+    Serial.print(feedback.pinAHigh ? "H" : "L");
+    Serial.print(", B=");
+    Serial.print(feedback.pinBHigh ? "H" : "L");
+    Serial.print(", Raw Dir: ");
+    Serial.println(closedLoopDirectionName(feedback.rawDirection));
+
     Serial.print("CL Counts: ");
     Serial.print(feedback.count);
     Serial.print(", Delta: ");
     Serial.print(feedback.countDelta);
     Serial.print(", Invalid: ");
-    Serial.println(feedback.invalidTransitions);
+    Serial.print(feedback.invalidTransitions);
+    Serial.print(", Debounced: ");
+    Serial.println(feedback.debouncedTransitions);
+#endif
+}
+
+static void printClosedLoopSetupStatus() {
+#if CLOSED_LOOP_SPEED_ENABLE
+    SpeedFeedbackSetupStatus setup = speedFeedback.getSetupStatus();
+
+    Serial.println("--- Closed-Loop Setup ---");
+    Serial.print("Active: ");
+    Serial.println(yesNoText(setup.active));
+    if (!setup.active) {
+        Serial.println("-------------------------");
+        return;
+    }
+
+    Serial.print("Elapsed: ");
+    Serial.print(setup.elapsedMs);
+    Serial.println(" ms");
+    Serial.print("Count delta: ");
+    Serial.println(setup.countDelta);
+    Serial.print("Invalid/debounced: ");
+    Serial.print(setup.invalidDelta);
+    Serial.print("/");
+    Serial.println(setup.debouncedDelta);
+    Serial.print("Pins: A=");
+    Serial.print(setup.pinAHigh ? "H" : "L");
+    Serial.print(", B=");
+    Serial.println(setup.pinBHigh ? "H" : "L");
+    Serial.print("Raw/corrected direction: ");
+    Serial.print(closedLoopDirectionName(setup.rawDirection));
+    Serial.print(" / ");
+    Serial.println(closedLoopDirectionName(setup.correctedDirection));
+    Serial.print("Suggested counts/rev: ");
+    Serial.println(setup.suggestedCountsPerRev);
+    Serial.print("Suggested reverse: ");
+    Serial.println(yesNoText(setup.suggestedReverseDirection));
+    Serial.println("-------------------------");
+#endif
+}
+
+static void handleClosedLoopCommand(const String& input) {
+#if CLOSED_LOOP_SPEED_ENABLE
+    String rest = input.length() > 2 ? input.substring(2) : "";
+    rest.trim();
+
+    std::vector<String> args;
+    parseCommandArgs(rest, args);
+
+    if (args.empty() || args[0] == "help") {
+        Serial.println("Closed-loop commands:");
+        Serial.println("cl status - Show live feedback state");
+        Serial.println("cl reset - Reset controller and feedback counters");
+        Serial.println("cl setup start - Capture one manual platter revolution");
+        Serial.println("cl setup status - Show captured count and direction");
+        Serial.println("cl setup apply - Apply suggested counts/rev and reverse direction");
+        Serial.println("cl setup stop - Cancel setup capture");
+        return;
+    }
+
+    String command = args[0];
+    command.toLowerCase();
+
+    if (command == "status") {
+        printClosedLoopStatus();
+        return;
+    }
+
+    if (command == "reset") {
+        motor.resetClosedLoop();
+        Serial.println("Closed-loop controller reset.");
+        return;
+    }
+
+    if (command != "setup") {
+        Serial.println("Unknown closed-loop command. Type 'cl help'.");
+        return;
+    }
+
+    if (args.size() < 2) {
+        printClosedLoopSetupStatus();
+        return;
+    }
+
+    String setupCommand = args[1];
+    setupCommand.toLowerCase();
+
+    if (setupCommand == "start") {
+        speedFeedback.beginSetupCapture();
+        Serial.println("Closed-loop setup capture started. Rotate the platter exactly one revolution, then run 'cl setup status'.");
+    } else if (setupCommand == "status") {
+        printClosedLoopSetupStatus();
+    } else if (setupCommand == "apply") {
+        SpeedFeedbackSetupStatus setup = speedFeedback.getSetupStatus();
+        if (!setup.active || setup.suggestedCountsPerRev == 0) {
+            Serial.println("No setup capture is ready to apply.");
+            return;
+        }
+
+        settings.get().closedLoopCountsPerRev = setup.suggestedCountsPerRev;
+        if (settings.get().closedLoopSensorMode == CLOSED_LOOP_SENSOR_QUADRATURE) {
+            settings.get().closedLoopReverseDirection = setup.suggestedReverseDirection;
+        }
+        speedFeedback.cancelSetupCapture();
+        settings.normalize();
+        motor.applySettings();
+        Serial.print("Applied counts/rev ");
+        Serial.print(settings.get().closedLoopCountsPerRev);
+        if (settings.get().closedLoopSensorMode == CLOSED_LOOP_SENSOR_QUADRATURE) {
+            Serial.print(", reverse ");
+            Serial.print(yesNoText(settings.get().closedLoopReverseDirection));
+        }
+        Serial.println(".");
+    } else if (setupCommand == "stop" || setupCommand == "cancel") {
+        speedFeedback.cancelSetupCapture();
+        Serial.println("Closed-loop setup capture stopped.");
+    } else {
+        Serial.println("Unknown setup command. Use start, status, apply, or stop.");
+    }
+#else
+    (void)input;
 #endif
 }
 
@@ -1609,6 +1890,9 @@ static void printSafetyDiagnostic() {
         g.ampTempShutdownC >= g.ampTempWarnC + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C,
         ok);
 #if CLOSED_LOOP_SPEED_ENABLE
+    printDiagCheck("closed-loop control mode is valid",
+        g.closedLoopControlMode <= CLOSED_LOOP_CONTROL_CORRECT,
+        ok);
     printDiagCheck("closed-loop sensor mode is valid",
         g.closedLoopSensorMode <= CLOSED_LOOP_SENSOR_QUADRATURE,
         ok);
@@ -1622,6 +1906,22 @@ static void printSafetyDiagnostic() {
         g.closedLoopCorrectionLimitHz >= 0.0f &&
         g.closedLoopIntegralLimitHz >= 0.0f &&
         g.closedLoopSlewLimitHzPerSec >= 0.0f,
+        ok);
+    printDiagCheck("closed-loop ramp tracking settings are valid",
+        g.closedLoopRampMode <= CLOSED_LOOP_RAMP_TRACK &&
+        g.closedLoopRampKp >= 0.0f &&
+        g.closedLoopRampCorrectionLimitHz >= 0.0f,
+        ok);
+    printDiagCheck("closed-loop plausibility range is ordered",
+        g.closedLoopPlausibilityMinRpm <= g.closedLoopPlausibilityMaxRpm,
+        ok);
+    printDiagCheck("closed-loop fault actions are valid",
+        g.closedLoopSaturationAction <= CLOSED_LOOP_FAULT_STOP &&
+        g.closedLoopPlausibilityAction <= CLOSED_LOOP_FAULT_STOP &&
+        g.closedLoopLockTimeoutAction <= CLOSED_LOOP_FAULT_STOP,
+        ok);
+    printDiagCheck("closed-loop amplitude recovery mode is valid",
+        g.closedLoopAmpRecoveryMode <= CLOSED_LOOP_AMP_RECOVERY_RESTORE,
         ok);
 #endif
 
@@ -1701,7 +2001,8 @@ void printHelp() {
     Serial.println("brake test start|stop");
     Serial.println("relay test <0-N|off>");
 #if CLOSED_LOOP_SPEED_ENABLE
-    Serial.println("cl status|reset");
+    Serial.println("cl status|reset|help");
+    Serial.println("cl setup start|status|apply|stop");
 #endif
     Serial.println("diag safety - Dry-run safety diagnostic");
     Serial.println("wifi help|status|wizard|scan|connect");
@@ -2092,9 +2393,18 @@ static void printSettingsDump() {
 #if CLOSED_LOOP_SPEED_ENABLE
     Serial.print("Closed Loop: ");
     Serial.print(g.closedLoopEnabled ? "ON, " : "OFF, ");
+    Serial.print(closedLoopControlName(g.closedLoopControlMode));
+    Serial.print(", ");
     Serial.print(closedLoopSensorName(g.closedLoopSensorMode));
     Serial.print(", counts/rev ");
     Serial.println(g.closedLoopCountsPerRev);
+    Serial.print("Closed Loop Engage: require signal ");
+    Serial.print(yesNoText(g.closedLoopRequireSignalBeforeEngage));
+    Serial.print(", require near ");
+    Serial.print(yesNoText(g.closedLoopRequireNearTargetBeforeEngage));
+    Serial.print(", tolerance ");
+    Serial.print(g.closedLoopEngageToleranceRpm);
+    Serial.println(" RPM");
     Serial.print("Closed Loop PID: Kp ");
     Serial.print(g.closedLoopKp);
     Serial.print(", Ki ");
@@ -2104,6 +2414,39 @@ static void printSettingsDump() {
     Serial.print(", limit ");
     Serial.print(g.closedLoopCorrectionLimitHz);
     Serial.println("Hz");
+    Serial.print("Closed Loop Ramp: ");
+    Serial.print(closedLoopRampName(g.closedLoopRampMode));
+    Serial.print(", Kp ");
+    Serial.print(g.closedLoopRampKp);
+    Serial.print(", limit ");
+    Serial.print(g.closedLoopRampCorrectionLimitHz);
+    Serial.println("Hz");
+    Serial.print("Closed Loop Pitch Target: slew ");
+    Serial.print(g.closedLoopPitchSlewRpmPerSec);
+    Serial.print(" RPM/s, reset ");
+    Serial.print(g.closedLoopPitchResetThresholdRpm);
+    Serial.println(" RPM");
+    Serial.print("Closed Loop Faults: dropout ");
+    Serial.print(closedLoopDropoutName(g.closedLoopDropoutAction));
+    Serial.print(", saturation ");
+    Serial.print(g.closedLoopSaturationTimeMs);
+    Serial.print("ms ");
+    Serial.print(closedLoopFaultActionName(g.closedLoopSaturationAction));
+    Serial.print(", plausibility ");
+    Serial.print(g.closedLoopPlausibilityMinRpm);
+    Serial.print("-");
+    Serial.print(g.closedLoopPlausibilityMaxRpm);
+    Serial.print(" RPM ");
+    Serial.println(closedLoopFaultActionName(g.closedLoopPlausibilityAction));
+    Serial.print("Closed Loop Lock: timeout ");
+    Serial.print(g.closedLoopLockTimeoutMs);
+    Serial.print("ms ");
+    Serial.print(closedLoopFaultActionName(g.closedLoopLockTimeoutAction));
+    Serial.print(", amp recovery ");
+    Serial.print(closedLoopAmpRecoveryName(g.closedLoopAmpRecoveryMode));
+    Serial.print(" after ");
+    Serial.print(g.closedLoopAmpRecoveryDelayMs);
+    Serial.println("ms");
 #endif
 
     for (int i = 0; i < 3; i++) {
