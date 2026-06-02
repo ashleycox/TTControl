@@ -65,6 +65,35 @@ enum ScreensaverMode {
     SAVER_LISSAJOUS = 2
 };
 
+enum ClosedLoopSensorMode {
+    CLOSED_LOOP_SENSOR_PULSE = 0,
+    CLOSED_LOOP_SENSOR_QUADRATURE = 1
+};
+
+enum ClosedLoopPulseEdge {
+    CLOSED_LOOP_EDGE_RISING = 0,
+    CLOSED_LOOP_EDGE_FALLING = 1,
+    CLOSED_LOOP_EDGE_CHANGE = 2
+};
+
+enum ClosedLoopQuadratureMode {
+    CLOSED_LOOP_QUAD_X1 = 0,
+    CLOSED_LOOP_QUAD_X2 = 1,
+    CLOSED_LOOP_QUAD_X4 = 2
+};
+
+enum ClosedLoopFaultAction {
+    CLOSED_LOOP_FAULT_IGNORE = 0,
+    CLOSED_LOOP_FAULT_WARN = 1,
+    CLOSED_LOOP_FAULT_STOP = 2
+};
+
+enum ClosedLoopDropoutAction {
+    CLOSED_LOOP_DROPOUT_OPEN_LOOP = 0,
+    CLOSED_LOOP_DROPOUT_HOLD = 1,
+    CLOSED_LOOP_DROPOUT_STOP = 2
+};
+
 // --- Data Structures ---
 
 // Settings specific to a single speed (e.g. 33 RPM)
@@ -167,6 +196,31 @@ struct GlobalSettings {
     bool showCpuDashboard;
     bool showMemoryDashboard;
     bool showFlashDashboard;
+
+    // Closed-loop speed feedback
+    bool closedLoopEnabled;
+    uint8_t closedLoopSensorMode; // 0=Pulse tach, 1=Quadrature
+    float closedLoopTargetRpm[3]; // 33, 45, 78
+    uint16_t closedLoopCountsPerRev;
+    uint8_t closedLoopPulseEdge; // 0=Rising, 1=Falling, 2=Change
+    uint8_t closedLoopQuadratureMode; // 0=x1, 1=x2, 2=x4
+    bool closedLoopReverseDirection;
+    uint8_t closedLoopDirectionFaultAction; // 0=Ignore, 1=Warn, 2=Stop
+    uint16_t closedLoopDebounceUs;
+    uint16_t closedLoopTimeoutMs;
+    uint16_t closedLoopEngageDelayMs;
+    uint16_t closedLoopUpdateIntervalMs;
+    float closedLoopFilterAlpha;
+    float closedLoopDeadbandRpm;
+    float closedLoopLockToleranceRpm;
+    uint16_t closedLoopLockTimeMs;
+    float closedLoopKp;
+    float closedLoopKi;
+    float closedLoopKd;
+    float closedLoopIntegralLimitHz;
+    float closedLoopCorrectionLimitHz;
+    float closedLoopSlewLimitHzPerSec;
+    uint8_t closedLoopDropoutAction; // 0=Open loop, 1=Hold, 2=Stop
 };
 
 static_assert(sizeof(SpeedSettings) == SPEED_SETTINGS_STORAGE_SIZE, "Update SPEED_SETTINGS_STORAGE_SIZE when SpeedSettings changes.");

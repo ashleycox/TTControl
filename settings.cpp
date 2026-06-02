@@ -19,6 +19,142 @@ struct SettingsFileHeader {
     uint32_t crc32;
 };
 
+struct GlobalSettingsV5 {
+    uint32_t schemaVersion;
+    uint8_t phaseMode;
+    uint8_t maxAmplitude;
+    uint8_t softStartCurve;
+    bool smoothSwitching;
+    uint8_t switchRampDuration;
+    uint8_t brakeMode;
+    float brakeDuration;
+    float brakePulseGap;
+    float brakeStartFreq;
+    float brakeStopFreq;
+    float softStopCutoff;
+    bool relayActiveHigh;
+    bool muteRelayLinkStandby;
+    bool muteRelayLinkStartStop;
+    uint8_t powerOnRelayDelay;
+    uint8_t displayBrightness;
+    uint8_t displaySleepDelay;
+    bool screensaverEnabled;
+    uint8_t autoDimDelay;
+    bool showRuntime;
+    bool errorDisplayEnabled;
+    uint8_t errorDisplayDuration;
+    uint8_t autoStandbyDelay;
+    bool autoStart;
+    bool autoBoot;
+    bool pitchResetOnStop;
+    SpeedSettings speeds[3];
+    char presetNames[5][17];
+    uint32_t totalRuntime;
+    bool reverseEncoder;
+    float pitchStepSize;
+    uint8_t rampType;
+    uint8_t screensaverMode;
+    bool enable78rpm;
+    uint8_t freqDependentAmplitude;
+    float vfLowFreq;
+    uint8_t vfLowBoost;
+    float vfMidFreq;
+    uint8_t vfMidBoost;
+    uint8_t bootSpeed;
+    SpeedMode currentSpeed;
+    float ampTempWarnC;
+    float ampTempShutdownC;
+    bool showCpuDashboard;
+    bool showMemoryDashboard;
+    bool showFlashDashboard;
+};
+
+static_assert(sizeof(GlobalSettingsV5) == 336, "GlobalSettingsV5 must match schema 5 storage size.");
+
+void setClosedLoopDefaults(GlobalSettings& data) {
+    data.closedLoopEnabled = false;
+    data.closedLoopSensorMode = CLOSED_LOOP_SENSOR_PULSE;
+    data.closedLoopTargetRpm[SPEED_33] = 33.3333f;
+    data.closedLoopTargetRpm[SPEED_45] = 45.0f;
+    data.closedLoopTargetRpm[SPEED_78] = 78.0f;
+    data.closedLoopCountsPerRev = 1;
+    data.closedLoopPulseEdge = CLOSED_LOOP_EDGE_RISING;
+    data.closedLoopQuadratureMode = CLOSED_LOOP_QUAD_X4;
+    data.closedLoopReverseDirection = false;
+    data.closedLoopDirectionFaultAction = CLOSED_LOOP_FAULT_WARN;
+    data.closedLoopDebounceUs = 100;
+    data.closedLoopTimeoutMs = 1500;
+    data.closedLoopEngageDelayMs = 2000;
+    data.closedLoopUpdateIntervalMs = 100;
+    data.closedLoopFilterAlpha = 0.25f;
+    data.closedLoopDeadbandRpm = 0.02f;
+    data.closedLoopLockToleranceRpm = 0.05f;
+    data.closedLoopLockTimeMs = 3000;
+    data.closedLoopKp = 0.05f;
+    data.closedLoopKi = 0.01f;
+    data.closedLoopKd = 0.0f;
+    data.closedLoopIntegralLimitHz = 1.0f;
+    data.closedLoopCorrectionLimitHz = 3.0f;
+    data.closedLoopSlewLimitHzPerSec = 0.5f;
+    data.closedLoopDropoutAction = CLOSED_LOOP_DROPOUT_OPEN_LOOP;
+}
+
+void copyFromV5(const GlobalSettingsV5& source, GlobalSettings& target) {
+    target.schemaVersion = SETTINGS_SCHEMA_VERSION;
+    target.phaseMode = source.phaseMode;
+    target.maxAmplitude = source.maxAmplitude;
+    target.softStartCurve = source.softStartCurve;
+    target.smoothSwitching = source.smoothSwitching;
+    target.switchRampDuration = source.switchRampDuration;
+    target.brakeMode = source.brakeMode;
+    target.brakeDuration = source.brakeDuration;
+    target.brakePulseGap = source.brakePulseGap;
+    target.brakeStartFreq = source.brakeStartFreq;
+    target.brakeStopFreq = source.brakeStopFreq;
+    target.softStopCutoff = source.softStopCutoff;
+    target.relayActiveHigh = source.relayActiveHigh;
+    target.muteRelayLinkStandby = source.muteRelayLinkStandby;
+    target.muteRelayLinkStartStop = source.muteRelayLinkStartStop;
+    target.powerOnRelayDelay = source.powerOnRelayDelay;
+    target.displayBrightness = source.displayBrightness;
+    target.displaySleepDelay = source.displaySleepDelay;
+    target.screensaverEnabled = source.screensaverEnabled;
+    target.autoDimDelay = source.autoDimDelay;
+    target.showRuntime = source.showRuntime;
+    target.errorDisplayEnabled = source.errorDisplayEnabled;
+    target.errorDisplayDuration = source.errorDisplayDuration;
+    target.autoStandbyDelay = source.autoStandbyDelay;
+    target.autoStart = source.autoStart;
+    target.autoBoot = source.autoBoot;
+    target.pitchResetOnStop = source.pitchResetOnStop;
+    for (int i = 0; i < 3; i++) {
+        target.speeds[i] = source.speeds[i];
+    }
+    for (int i = 0; i < MAX_PRESET_SLOTS; i++) {
+        strncpy(target.presetNames[i], source.presetNames[i], 16);
+        target.presetNames[i][16] = 0;
+    }
+    target.totalRuntime = source.totalRuntime;
+    target.reverseEncoder = source.reverseEncoder;
+    target.pitchStepSize = source.pitchStepSize;
+    target.rampType = source.rampType;
+    target.screensaverMode = source.screensaverMode;
+    target.enable78rpm = source.enable78rpm;
+    target.freqDependentAmplitude = source.freqDependentAmplitude;
+    target.vfLowFreq = source.vfLowFreq;
+    target.vfLowBoost = source.vfLowBoost;
+    target.vfMidFreq = source.vfMidFreq;
+    target.vfMidBoost = source.vfMidBoost;
+    target.bootSpeed = source.bootSpeed;
+    target.currentSpeed = source.currentSpeed;
+    target.ampTempWarnC = source.ampTempWarnC;
+    target.ampTempShutdownC = source.ampTempShutdownC;
+    target.showCpuDashboard = source.showCpuDashboard;
+    target.showMemoryDashboard = source.showMemoryDashboard;
+    target.showFlashDashboard = source.showFlashDashboard;
+    setClosedLoopDefaults(target);
+}
+
 uint32_t settingsCrc32(const uint8_t* data, size_t length) {
     uint32_t crc = 0xFFFFFFFFUL;
     for (size_t i = 0; i < length; i++) {
@@ -39,12 +175,13 @@ bool makeSidecarPath(const char* path, const char* suffix, char* out, size_t out
     return written > 0 && written < (int)outSize;
 }
 
-bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target) {
+bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, bool* migrated = nullptr) {
+    if (migrated) *migrated = false;
+
     File f = LittleFS.open(path, "r");
     if (!f) return false;
 
-    const size_t expectedSize = sizeof(SettingsFileHeader) + sizeof(GlobalSettings);
-    if (f.size() != expectedSize) {
+    if (f.size() < sizeof(SettingsFileHeader)) {
         f.close();
         return false;
     }
@@ -58,32 +195,53 @@ bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target) 
     if (header.magic != magic ||
         header.formatVersion != SETTINGS_FILE_FORMAT_VERSION ||
         header.headerSize != sizeof(SettingsFileHeader) ||
-        header.schemaVersion != SETTINGS_SCHEMA_VERSION ||
-        header.payloadSize != sizeof(GlobalSettings)) {
+        f.size() != (size_t)header.headerSize + header.payloadSize) {
         f.close();
         return false;
     }
 
-    GlobalSettings candidate;
-    if (f.read((uint8_t*)&candidate, sizeof(candidate)) != sizeof(candidate)) {
+    if (header.schemaVersion == SETTINGS_SCHEMA_VERSION &&
+        header.payloadSize == sizeof(GlobalSettings)) {
+        GlobalSettings candidate;
+        if (f.read((uint8_t*)&candidate, sizeof(candidate)) != sizeof(candidate)) {
+            f.close();
+            return false;
+        }
         f.close();
-        return false;
+
+        uint32_t crc = settingsCrc32((const uint8_t*)&candidate, sizeof(candidate));
+        if (crc != header.crc32) return false;
+
+        target = candidate;
+        return true;
     }
+
+    if (header.schemaVersion == 5 && header.payloadSize == sizeof(GlobalSettingsV5)) {
+        GlobalSettingsV5 legacy;
+        if (f.read((uint8_t*)&legacy, sizeof(legacy)) != sizeof(legacy)) {
+            f.close();
+            return false;
+        }
+        f.close();
+
+        uint32_t crc = settingsCrc32((const uint8_t*)&legacy, sizeof(legacy));
+        if (crc != header.crc32) return false;
+
+        copyFromV5(legacy, target);
+        if (migrated) *migrated = true;
+        return true;
+    }
+
     f.close();
-
-    uint32_t crc = settingsCrc32((const uint8_t*)&candidate, sizeof(candidate));
-    if (crc != header.crc32) return false;
-
-    target = candidate;
-    return true;
+    return false;
 }
 
-bool loadSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target) {
-    if (readSettingsBlob(path, magic, target)) return true;
+bool loadSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, bool* migrated = nullptr) {
+    if (readSettingsBlob(path, magic, target, migrated)) return true;
 
     char backupPath[40];
     if (makeSidecarPath(path, ".bak", backupPath, sizeof(backupPath))) {
-        return readSettingsBlob(backupPath, magic, target);
+        return readSettingsBlob(backupPath, magic, target, migrated);
     }
     return false;
 }
@@ -222,10 +380,15 @@ void Settings::begin() {
 
 void Settings::load() {
     GlobalSettings loaded;
-    if (loadSettingsBlob(_filename, SETTINGS_FILE_MAGIC, loaded)) {
+    bool migrated = false;
+    if (loadSettingsBlob(_filename, SETTINGS_FILE_MAGIC, loaded, &migrated)) {
         _data = loaded;
         Serial.println("Settings loaded.");
         validate();
+        if (migrated) {
+            Serial.println("Settings migrated.");
+            save(false);
+        }
         return;
     }
 
@@ -309,6 +472,52 @@ void Settings::validate() {
     }
     if (_data.ampTempWarnC > (_data.ampTempShutdownC - AMP_TEMP_MIN_SHUTDOWN_MARGIN_C)) {
         _data.ampTempWarnC = _data.ampTempShutdownC - AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
+    }
+    if (_data.closedLoopSensorMode > CLOSED_LOOP_SENSOR_QUADRATURE) {
+        _data.closedLoopSensorMode = CLOSED_LOOP_SENSOR_PULSE;
+    }
+    for (uint8_t i = 0; i < 3; i++) {
+        if (_data.closedLoopTargetRpm[i] < 1.0f) _data.closedLoopTargetRpm[i] = 1.0f;
+        if (_data.closedLoopTargetRpm[i] > 120.0f) _data.closedLoopTargetRpm[i] = 120.0f;
+    }
+    if (_data.closedLoopCountsPerRev < 1) _data.closedLoopCountsPerRev = 1;
+    if (_data.closedLoopCountsPerRev > 20000) _data.closedLoopCountsPerRev = 20000;
+    if (_data.closedLoopPulseEdge > CLOSED_LOOP_EDGE_CHANGE) {
+        _data.closedLoopPulseEdge = CLOSED_LOOP_EDGE_RISING;
+    }
+    if (_data.closedLoopQuadratureMode > CLOSED_LOOP_QUAD_X4) {
+        _data.closedLoopQuadratureMode = CLOSED_LOOP_QUAD_X4;
+    }
+    if (_data.closedLoopDirectionFaultAction > CLOSED_LOOP_FAULT_STOP) {
+        _data.closedLoopDirectionFaultAction = CLOSED_LOOP_FAULT_WARN;
+    }
+    if (_data.closedLoopDebounceUs > 50000) _data.closedLoopDebounceUs = 50000;
+    if (_data.closedLoopTimeoutMs < 100) _data.closedLoopTimeoutMs = 100;
+    if (_data.closedLoopTimeoutMs > 10000) _data.closedLoopTimeoutMs = 10000;
+    if (_data.closedLoopEngageDelayMs > 30000) _data.closedLoopEngageDelayMs = 30000;
+    if (_data.closedLoopUpdateIntervalMs < 20) _data.closedLoopUpdateIntervalMs = 20;
+    if (_data.closedLoopUpdateIntervalMs > 1000) _data.closedLoopUpdateIntervalMs = 1000;
+    if (_data.closedLoopFilterAlpha < 0.01f) _data.closedLoopFilterAlpha = 0.01f;
+    if (_data.closedLoopFilterAlpha > 1.0f) _data.closedLoopFilterAlpha = 1.0f;
+    if (_data.closedLoopDeadbandRpm < 0.0f) _data.closedLoopDeadbandRpm = 0.0f;
+    if (_data.closedLoopDeadbandRpm > 5.0f) _data.closedLoopDeadbandRpm = 5.0f;
+    if (_data.closedLoopLockToleranceRpm < 0.01f) _data.closedLoopLockToleranceRpm = 0.01f;
+    if (_data.closedLoopLockToleranceRpm > 5.0f) _data.closedLoopLockToleranceRpm = 5.0f;
+    if (_data.closedLoopLockTimeMs > 30000) _data.closedLoopLockTimeMs = 30000;
+    if (_data.closedLoopKp < 0.0f) _data.closedLoopKp = 0.0f;
+    if (_data.closedLoopKp > 20.0f) _data.closedLoopKp = 20.0f;
+    if (_data.closedLoopKi < 0.0f) _data.closedLoopKi = 0.0f;
+    if (_data.closedLoopKi > 20.0f) _data.closedLoopKi = 20.0f;
+    if (_data.closedLoopKd < 0.0f) _data.closedLoopKd = 0.0f;
+    if (_data.closedLoopKd > 20.0f) _data.closedLoopKd = 20.0f;
+    if (_data.closedLoopIntegralLimitHz < 0.0f) _data.closedLoopIntegralLimitHz = 0.0f;
+    if (_data.closedLoopIntegralLimitHz > 50.0f) _data.closedLoopIntegralLimitHz = 50.0f;
+    if (_data.closedLoopCorrectionLimitHz < 0.0f) _data.closedLoopCorrectionLimitHz = 0.0f;
+    if (_data.closedLoopCorrectionLimitHz > 100.0f) _data.closedLoopCorrectionLimitHz = 100.0f;
+    if (_data.closedLoopSlewLimitHzPerSec < 0.0f) _data.closedLoopSlewLimitHzPerSec = 0.0f;
+    if (_data.closedLoopSlewLimitHzPerSec > 100.0f) _data.closedLoopSlewLimitHzPerSec = 100.0f;
+    if (_data.closedLoopDropoutAction > CLOSED_LOOP_DROPOUT_STOP) {
+        _data.closedLoopDropoutAction = CLOSED_LOOP_DROPOUT_OPEN_LOOP;
     }
 
     // Validate Per-Speed Settings
@@ -463,6 +672,7 @@ void Settings::setDefaults() {
     _data.bootSpeed = 3; // Default to Last Used
     _data.ampTempWarnC = AMP_TEMP_WARN_C;
     _data.ampTempShutdownC = AMP_TEMP_SHUTDOWN_C;
+    setClosedLoopDefaults(_data);
 }
 
 bool Settings::loadPreset(uint8_t slot) {
@@ -532,6 +742,30 @@ bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
     doc["vfLB"] = target.vfLowBoost;
     doc["vfMF"] = target.vfMidFreq;
     doc["vfMB"] = target.vfMidBoost;
+    doc["clEn"] = target.closedLoopEnabled;
+    doc["clMd"] = target.closedLoopSensorMode;
+    JsonArray clTargets = doc["clT"].to<JsonArray>();
+    for (int i = 0; i < 3; i++) clTargets.add(target.closedLoopTargetRpm[i]);
+    doc["clCpr"] = target.closedLoopCountsPerRev;
+    doc["clEdge"] = target.closedLoopPulseEdge;
+    doc["clQuad"] = target.closedLoopQuadratureMode;
+    doc["clRev"] = target.closedLoopReverseDirection;
+    doc["clDir"] = target.closedLoopDirectionFaultAction;
+    doc["clDb"] = target.closedLoopDebounceUs;
+    doc["clTo"] = target.closedLoopTimeoutMs;
+    doc["clEng"] = target.closedLoopEngageDelayMs;
+    doc["clUpd"] = target.closedLoopUpdateIntervalMs;
+    doc["clAlpha"] = target.closedLoopFilterAlpha;
+    doc["clDbnd"] = target.closedLoopDeadbandRpm;
+    doc["clLock"] = target.closedLoopLockToleranceRpm;
+    doc["clLockMs"] = target.closedLoopLockTimeMs;
+    doc["clKp"] = target.closedLoopKp;
+    doc["clKi"] = target.closedLoopKi;
+    doc["clKd"] = target.closedLoopKd;
+    doc["clILim"] = target.closedLoopIntegralLimitHz;
+    doc["clCLim"] = target.closedLoopCorrectionLimitHz;
+    doc["clSlew"] = target.closedLoopSlewLimitHzPerSec;
+    doc["clDrop"] = target.closedLoopDropoutAction;
 
     // Braking
     doc["brkMd"] = target.brakeMode;
@@ -595,6 +829,34 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
     if (doc["vfLB"].is<uint8_t>()) target.vfLowBoost = doc["vfLB"].as<uint8_t>();
     if (doc["vfMF"].is<float>()) target.vfMidFreq = doc["vfMF"].as<float>();
     if (doc["vfMB"].is<uint8_t>()) target.vfMidBoost = doc["vfMB"].as<uint8_t>();
+    if (doc["clEn"].is<bool>()) target.closedLoopEnabled = doc["clEn"].as<bool>();
+    if (doc["clMd"].is<uint8_t>()) target.closedLoopSensorMode = doc["clMd"].as<uint8_t>();
+    JsonArray clTargets = doc["clT"].as<JsonArray>();
+    if (!clTargets.isNull()) {
+        for (size_t i = 0; i < 3 && i < clTargets.size(); i++) {
+            if (clTargets[i].is<float>()) target.closedLoopTargetRpm[i] = clTargets[i].as<float>();
+        }
+    }
+    if (doc["clCpr"].is<uint16_t>()) target.closedLoopCountsPerRev = doc["clCpr"].as<uint16_t>();
+    if (doc["clEdge"].is<uint8_t>()) target.closedLoopPulseEdge = doc["clEdge"].as<uint8_t>();
+    if (doc["clQuad"].is<uint8_t>()) target.closedLoopQuadratureMode = doc["clQuad"].as<uint8_t>();
+    if (doc["clRev"].is<bool>()) target.closedLoopReverseDirection = doc["clRev"].as<bool>();
+    if (doc["clDir"].is<uint8_t>()) target.closedLoopDirectionFaultAction = doc["clDir"].as<uint8_t>();
+    if (doc["clDb"].is<uint16_t>()) target.closedLoopDebounceUs = doc["clDb"].as<uint16_t>();
+    if (doc["clTo"].is<uint16_t>()) target.closedLoopTimeoutMs = doc["clTo"].as<uint16_t>();
+    if (doc["clEng"].is<uint16_t>()) target.closedLoopEngageDelayMs = doc["clEng"].as<uint16_t>();
+    if (doc["clUpd"].is<uint16_t>()) target.closedLoopUpdateIntervalMs = doc["clUpd"].as<uint16_t>();
+    if (doc["clAlpha"].is<float>()) target.closedLoopFilterAlpha = doc["clAlpha"].as<float>();
+    if (doc["clDbnd"].is<float>()) target.closedLoopDeadbandRpm = doc["clDbnd"].as<float>();
+    if (doc["clLock"].is<float>()) target.closedLoopLockToleranceRpm = doc["clLock"].as<float>();
+    if (doc["clLockMs"].is<uint16_t>()) target.closedLoopLockTimeMs = doc["clLockMs"].as<uint16_t>();
+    if (doc["clKp"].is<float>()) target.closedLoopKp = doc["clKp"].as<float>();
+    if (doc["clKi"].is<float>()) target.closedLoopKi = doc["clKi"].as<float>();
+    if (doc["clKd"].is<float>()) target.closedLoopKd = doc["clKd"].as<float>();
+    if (doc["clILim"].is<float>()) target.closedLoopIntegralLimitHz = doc["clILim"].as<float>();
+    if (doc["clCLim"].is<float>()) target.closedLoopCorrectionLimitHz = doc["clCLim"].as<float>();
+    if (doc["clSlew"].is<float>()) target.closedLoopSlewLimitHzPerSec = doc["clSlew"].as<float>();
+    if (doc["clDrop"].is<uint8_t>()) target.closedLoopDropoutAction = doc["clDrop"].as<uint8_t>();
 
     if (doc["brkMd"].is<uint8_t>()) target.brakeMode = doc["brkMd"].as<uint8_t>();
     if (doc["brkDur"].is<float>()) target.brakeDuration = doc["brkDur"].as<float>();
