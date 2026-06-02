@@ -54,6 +54,9 @@ WaveformGenerator::WaveformGenerator() {
     _lutShift = 32 - (int)log2(_lutSize); // Calculate shift for LUT indexing
     
     _currentBufferIndex = 0;
+    _lastBufferFillMs = 0;
+    _bufferFillCount = 0;
+    _dmaStarted = false;
 }
 
 void WaveformGenerator::begin() {
@@ -68,6 +71,7 @@ void WaveformGenerator::begin() {
     // Start DMA
     dma_channel_start(_dmaChan0);
     dma_channel_start(_dmaChan2);
+    _dmaStarted = true;
 }
 
 void WaveformGenerator::setupPWM() {
@@ -242,6 +246,9 @@ void __not_in_flash_func(WaveformGenerator::update)() {
 }
 
 void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
+    _lastBufferFillMs = millis();
+    _bufferFillCount++;
+
     if (!_enabled) {
         // Fill with zeros
         for (int i = 0; i < DMA_BUFFER_SIZE; i++) {
@@ -394,6 +401,20 @@ void WaveformGenerator::setEnabled(bool e) {
 int16_t WaveformGenerator::getSample(int channel) {
     if (channel < 0 || channel >= 4) return 0;
     return _lastSamples[channel];
+}
+
+uint32_t WaveformGenerator::getLastBufferFillMs() const {
+    return _lastBufferFillMs;
+}
+
+uint32_t WaveformGenerator::getBufferFillCount() const {
+    return _bufferFillCount;
+}
+
+bool WaveformGenerator::isDmaRunning() const {
+    return _dmaStarted &&
+           (dma_channel_is_busy(_dmaChan0) || dma_channel_is_busy(_dmaChan1) ||
+            dma_channel_is_busy(_dmaChan2) || dma_channel_is_busy(_dmaChan3));
 }
 
 int16_t __not_in_flash_func(WaveformGenerator::generateSample)(int channel) {

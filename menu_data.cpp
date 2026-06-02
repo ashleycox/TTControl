@@ -32,6 +32,8 @@ static MenuPage* pageNetworkStation = nullptr;
 static MenuPage* pageNetworkIpPower = nullptr;
 static MenuPage* pageNetworkAccessPoint = nullptr;
 static MenuPage* pageNetworkWeb = nullptr;
+static char unlockPinBuffer[NETWORK_WEB_PIN_MAX + 1] = "";
+static char securityPinBuffer[NETWORK_WEB_PIN_MAX + 1] = "";
 #if CLOSED_LOOP_SPEED_ENABLE
 static MenuPage* pageClosedLoopControl = nullptr;
 static MenuPage* pageClosedLoopSensor = nullptr;
@@ -173,7 +175,7 @@ void saveMenuChangesAndExit() {
     motor.endRelayTest();
     settings.normalize();
     motor.applySettings();
-    settings.save();
+    settings.save(false, true);
     ui.exitMenu();
 }
 
@@ -200,6 +202,69 @@ void actionFactoryReset() {
         motor.applySettings();
         ui.exitMenu();
     });
+}
+
+void actionUnlockDevice() {
+    if (networkManager.unlockDevice(unlockPinBuffer)) {
+        memset(unlockPinBuffer, 0, sizeof(unlockPinBuffer));
+        ui.showMessage("Unlocked", 1000);
+        ui.exitMenu();
+    } else {
+        memset(unlockPinBuffer, 0, sizeof(unlockPinBuffer));
+        ui.showMessage("Wrong PIN", 1500);
+    }
+}
+
+static void saveSecurityPin() {
+    if (!networkManager.setWebPin(securityPinBuffer)) {
+        ui.showMessage("PIN 4-8 chars", 1500);
+        return;
+    }
+    networkManager.save();
+    ui.showMessage("PIN Saved", 1000);
+}
+
+static void actionEnterSecurity() {
+    if (!pageSecurity) pageSecurity = new MenuPage("UI Lock");
+    pageSecurity->clear();
+
+    const NetworkConfig& cfg = networkManager.getConfig();
+    strncpy(securityPinBuffer, cfg.webPin, NETWORK_WEB_PIN_MAX);
+    securityPinBuffer[NETWORK_WEB_PIN_MAX] = 0;
+
+    pageSecurity->addItem(new MenuInfo(networkManager.isDeviceLockEnabled() ? "Lock: ON" : "Lock: OFF"));
+    pageSecurity->addItem(new MenuInfo(networkManager.isDeviceLocked() ? "State: LOCKED" : "State: OPEN"));
+    pageSecurity->addItem(new MenuText("PIN", securityPinBuffer, NETWORK_WEB_PIN_MAX));
+    pageSecurity->addItem(new MenuAction("Save PIN", saveSecurityPin));
+
+    MenuAction* enableLock = new MenuAction("Enable Lock", [](){
+        networkManager.setDeviceLockEnabled(true);
+        networkManager.save();
+        ui.showMessage("Lock Enabled", 1000);
+        actionEnterSecurity();
+    });
+    enableLock->setVisibleWhen([](){ return !networkManager.isDeviceLockEnabled(); });
+    pageSecurity->addItem(enableLock);
+
+    MenuAction* disableLock = new MenuAction("Disable Lock", [](){
+        networkManager.setDeviceLockEnabled(false);
+        networkManager.save();
+        ui.showMessage("Lock Disabled", 1000);
+        actionEnterSecurity();
+    });
+    disableLock->setVisibleWhen([](){ return networkManager.isDeviceLockEnabled(); });
+    pageSecurity->addItem(disableLock);
+
+    MenuAction* lockNow = new MenuAction("Lock Now", [](){
+        networkManager.lockDevice();
+        ui.showMessage("Locked", 1000);
+        ui.exitMenu();
+    });
+    lockNow->setVisibleWhen([](){ return networkManager.isDeviceLockEnabled(); });
+    pageSecurity->addItem(lockNow);
+
+    pageSecurity->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    ui.navigateTo(pageSecurity);
 }
 
 // --- Error Log Actions ---
@@ -255,7 +320,7 @@ void buildPresetSlotMenu(int slot) {
     pageSlot->addItem(new MenuAction("Load", [](){
         if (settings.loadPreset(currentSlot)) {
             motor.applySettings();
-            settings.save();
+            settings.save(false, true);
             ui.showMessage("Loaded!", 2000);
             ui.exitMenu(); // Exit to apply
         } else {
@@ -379,7 +444,7 @@ void actionEnterBrakeTune() {
     }));
 
     pageBrakeTune->addItem(new MenuAction("Save Brake", [](){
-        settings.save();
+        settings.save(false, true);
         ui.showMessage("Brake Saved", 1000);
     }));
 
@@ -981,6 +1046,7 @@ void buildMenuSystem() {
     pageSystem->addItem(new MenuFloat("Amp Warn C", &settings.get().ampTempWarnC, 1.0, AMP_TEMP_MIN_C, AMP_TEMP_MAX_C));
     pageSystem->addItem(new MenuFloat("Amp Shut C", &settings.get().ampTempShutdownC, 1.0, AMP_TEMP_MIN_C, AMP_TEMP_MAX_C));
 #endif
+    pageSystem->addItem(new MenuAction("UI Lock", actionEnterSecurity));
     pageSystem->addItem(new MenuAction("Error Log", actionEnterErrorLog));
     pageSystem->addItem(new MenuAction("Reset Runtime", [](){
         ui.showConfirm("Reset Runtime?", [](){
@@ -1028,4 +1094,11 @@ void buildMenuSystem() {
 
     pageMain->addItem(new MenuAction("Save & Exit", actionSaveExit));
     pageMain->addItem(new MenuAction("Cancel", actionCancelExit));
+
+    // --- Locked UI Entry Page ---
+    pageUnlock = new MenuPage("UI Locked");
+    pageUnlock->addItem(new MenuInfo("Enter PIN"));
+    pageUnlock->addItem(new MenuText("PIN", unlockPinBuffer, NETWORK_WEB_PIN_MAX));
+    pageUnlock->addItem(new MenuAction("Unlock", actionUnlockDevice));
+    pageUnlock->addItem(new MenuAction("Back", [](){ ui.exitMenu(); }));
 }

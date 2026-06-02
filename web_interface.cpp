@@ -291,7 +291,7 @@ const networkFieldGroups=[
 ["Station",["ssid","hiddenSsid","password"]],
 ["IP and fallback",["dhcp","staticIp","gateway","subnet","dns","apFallback"]],
 ["Setup AP",["apSsid","apPassword","apChannel"]],
-["Web access",["readOnlyMode","webPin","webHomePage"]]
+["Web access",["readOnlyMode","deviceLockEnabled","webPin","webHomePage"]]
 ];
 const presetGlobalMap={pm:"phaseMode",maxAmp:"maxAmplitude",ssCurve:"softStartCurve",fda:"freqDependentAmplitude",vfLF:"vfLowFreq",vfLB:"vfLowBoost",vfMF:"vfMidFreq",vfMB:"vfMidBoost",clEn:"closedLoopEnabled",clCtrl:"closedLoopControlMode",clMd:"closedLoopSensorMode",clCpr:"closedLoopCountsPerRev",clEdge:"closedLoopPulseEdge",clQuad:"closedLoopQuadratureMode",clRev:"closedLoopReverseDirection",clDir:"closedLoopDirectionFaultAction",clDb:"closedLoopDebounceUs",clTo:"closedLoopTimeoutMs",clEng:"closedLoopEngageDelayMs",clUpd:"closedLoopUpdateIntervalMs",clAlpha:"closedLoopFilterAlpha",clDbnd:"closedLoopDeadbandRpm",clLock:"closedLoopLockToleranceRpm",clLockMs:"closedLoopLockTimeMs",clKp:"closedLoopKp",clKi:"closedLoopKi",clKd:"closedLoopKd",clILim:"closedLoopIntegralLimitHz",clCLim:"closedLoopCorrectionLimitHz",clSlew:"closedLoopSlewLimitHzPerSec",clDrop:"closedLoopDropoutAction",clReqSig:"closedLoopRequireSignalBeforeEngage",clReqNear:"closedLoopRequireNearTargetBeforeEngage",clEngTol:"closedLoopEngageToleranceRpm",clRamp:"closedLoopRampMode",clRampKp:"closedLoopRampKp",clRampLim:"closedLoopRampCorrectionLimitHz",clPitchMode:"closedLoopPitchTargetMode",clPitchSlew:"closedLoopPitchSlewRpmPerSec",clPitchReset:"closedLoopPitchResetThresholdRpm",clSatMs:"closedLoopSaturationTimeMs",clSatAct:"closedLoopSaturationAction",clMinRpm:"closedLoopPlausibilityMinRpm",clMaxRpm:"closedLoopPlausibilityMaxRpm",clPlausAct:"closedLoopPlausibilityAction",clLockTo:"closedLoopLockTimeoutMs",clLockAct:"closedLoopLockTimeoutAction",clAmpRec:"closedLoopAmpRecoveryMode",clAmpRecMs:"closedLoopAmpRecoveryDelayMs",brkMd:"brakeMode",brkDur:"brakeDuration",brkPG:"brakePulseGap",brkSF:"brakeStartFreq",brkStF:"brakeStopFreq",brkCut:"softStopCutoff"};
 const presetSpeedMap={f:"frequency",minF:"minFrequency",maxF:"maxFrequency",ssD:"softStartDuration",rAmp:"reducedAmplitude",aDly:"amplitudeDelay",kick:"startupKick",kDur:"startupKickDuration",kRmp:"startupKickRampDuration",fTyp:"filterType",iir:"iirAlpha",fir:"firProfile"};
@@ -310,10 +310,10 @@ function isStandbyActive(){return !!(statusData&&statusData.motor&&statusData.mo
 function setStandbyButtonState(locked=false){const ecoLocked=isEcoStandbyMode()&&isStandbyActive();document.querySelectorAll('[data-action="toggleStandby"]').forEach(el=>{el.disabled=!!locked||ecoLocked;el.title=ecoLocked?"Eco standby has turned Wi-Fi off. Wake from the device to reconnect.":""});return ecoLocked}
 function sync78Controls(locked=false){const disabled=!is78Enabled();document.querySelectorAll('button[data-speed="2"],button[data-bench-speed="2"],button[data-speed-tab="2"]').forEach(el=>{el.hidden=disabled;el.disabled=!!locked||disabled;el.title=disabled?disabled78Message():""});document.querySelectorAll("select").forEach(el=>{if(!el.id||!el.id.startsWith("cal"))return;[...el.options].forEach(o=>{if(Number(o.value)===2)o.hidden=disabled});if(disabled&&Number(el.value)===2)el.value="0"})}
 function setLockedUI(){const locked=authState&&authState.required&&!authState.unlocked;document.querySelectorAll("[data-action],button[data-speed],[data-bench],[data-bench-speed],#homeSelect,#setPitch,#setSimplePitch,#benchSetPitch,#relayTest,#applySave,#applyOnly,#factoryReset,#resetRuntime,#saveNetwork,#clearErrors,#importBackup").forEach(el=>{if(el)el.disabled=!!locked});document.querySelectorAll("[data-pa]").forEach(el=>{if(el)el.disabled=!!(locked&&!["preview","previewImport","export"].includes(el.dataset.pa))});setStandbyButtonState(!!locked);sync78Controls(!!locked)}
-function renderAuth(){const p=$("authPanel");if(!p||!authState){return}if(!authState.required){p.classList.add("hide");setLockedUI();return}p.classList.remove("hide");$("authTitle").textContent=authState.unlocked?"Controls unlocked":"Read-only mode: enter PIN to change controls or settings";$("unlockWeb").hidden=!!authState.unlocked;$("lockWeb").hidden=!authState.unlocked;setLockedUI()}
+function renderAuth(){const p=$("authPanel");if(!p||!authState){return}if(!authState.required){p.classList.add("hide");setLockedUI();return}p.classList.remove("hide");$("authTitle").textContent=authState.unlocked?"Controls unlocked":"PIN required: enter PIN to change controls or settings";$("unlockWeb").hidden=!!authState.unlocked;$("lockWeb").hidden=!authState.unlocked;setLockedUI()}
 async function loadAuth(){authState=await api("/api/auth");renderAuth()}
 async function unlockWeb(){const res=await api("/api/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pin:$("pinInput").value})});authToken=res.token||"";try{sessionStorage.setItem("ttc_token",authToken)}catch(e){}authState=res;$("pinInput").value="";renderAuth();addEvent("Web controls unlocked")}
-async function lockWeb(){await api("/api/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"logout"})});authToken="";try{sessionStorage.removeItem("ttc_token")}catch(e){}await loadAuth();addEvent("Web controls locked")}
+async function lockWeb(){await api("/api/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"logout"})});authToken="";try{sessionStorage.removeItem("ttc_token")}catch(e){}await loadAuth();addEvent("Controls locked")}
 function inputId(scope,key,index){return `${scope}_${index??"g"}_${key}`}
 function globalFields(){return globalGroups.flatMap(g=>g[1]||[])}
 function allSettingFields(){return [...globalFields(),...speedFields]}
@@ -368,7 +368,7 @@ function renderCalStepper(){const names=["Frequency","Phase","Kick","Brake","Amp
 function renderCalibrationTools(){if(!settingsData)return;const root=$("calibrationTools");if(!root)return;root.innerHTML=`<div class="panel cal-card"><h2>Speed frequency</h2><div class="field"><label for="calSpeed">Speed</label>${speedSelect("calSpeed")}</div><div class="field"><label for="calFreq">Frequency Hz</label><input id="calFreq" type="number" min="10" max="1500" step="0.1"></div><div class="button-row"><button data-cal="frequency">Apply</button><button data-cal="frequencySave" class="primary">Save</button></div></div><div class="panel cal-card"><h2>Phase offsets</h2><div class="field"><label for="calPhaseSpeed">Speed</label>${speedSelect("calPhaseSpeed")}</div>${[1,2,3,4].map(i=>`<div class="field"><label for="calPhase${i}">Phase ${i} degrees</label><input id="calPhase${i}" type="number" min="-360" max="360" step="0.1"></div>`).join("")}<div class="button-row"><button data-cal="phase">Apply</button><button data-cal="phaseSave" class="primary">Save</button></div></div><div class="panel cal-card"><h2>Startup kick</h2><div class="field"><label for="calKickSpeed">Speed</label>${speedSelect("calKickSpeed")}</div><div class="field"><label for="calKick">Kick multiplier</label><input id="calKick" type="number" min="1" max="4" step="1"></div><div class="field"><label for="calKickDur">Kick duration sec</label><input id="calKickDur" type="number" min="0" max="15" step="1"></div><div class="field"><label for="calKickRamp">Kick ramp sec</label><input id="calKickRamp" type="number" min="0" max="15" step="0.1"></div><div class="button-row"><button data-cal="kick">Apply</button><button data-cal="kickSave" class="primary">Save</button></div></div><div class="panel cal-card"><h2>Braking</h2><div class="field"><label for="calBrakeMode">Brake mode</label><select id="calBrakeMode">${(options.brakeMode||[]).map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join("")}</select></div><div class="field"><label for="calBrakeDur">Duration sec</label><input id="calBrakeDur" type="number" min="0" max="10" step="0.1"></div><div class="field"><label for="calBrakeStart">Start frequency Hz</label><input id="calBrakeStart" type="number" min="10" max="200" step="1"></div><div class="field"><label for="calBrakeStop">Stop frequency Hz</label><input id="calBrakeStop" type="number" min="0" max="50" step="1"></div><div class="button-row"><button data-cal="brake">Apply</button><button data-cal="brakeSave" class="primary">Save</button></div></div><div class="panel cal-card"><h2>Amplitude</h2><div class="field"><label for="calAmpSpeed">Speed</label>${speedSelect("calAmpSpeed")}</div><div class="field"><label for="calMaxAmp">Global maximum amplitude percent</label><input id="calMaxAmp" type="number" min="0" max="100" step="1"></div><div class="field"><label for="calRedAmp">Reduced amplitude percent</label><input id="calRedAmp" type="number" min="10" max="100" step="1"></div><div class="button-row"><button data-cal="amp">Apply</button><button data-cal="ampSave" class="primary">Save</button></div></div>`;if(activeCalStep>4)activeCalStep=0;document.querySelectorAll("#calibrationTools .cal-card").forEach((p,i)=>p.classList.toggle("active-cal",i===activeCalStep));renderCalStepper();document.querySelectorAll("[data-cal]").forEach(b=>b.onclick=()=>applyCalibration(b.dataset.cal));fillCalibration()}
 function fillCalibration(){if(!settingsData)return;const g=settingsData.global;["calSpeed","calPhaseSpeed","calKickSpeed","calAmpSpeed"].forEach(id=>{$(id).onchange=fillCalibration});const fs=Number($("calSpeed").value||0),ps=Number($("calPhaseSpeed").value||0),ks=Number($("calKickSpeed").value||0),as=Number($("calAmpSpeed").value||0);$("calFreq").value=settingsData.speeds[fs].frequency;$("calPhase1").value=settingsData.speeds[ps].phaseOffset[0];$("calPhase2").value=settingsData.speeds[ps].phaseOffset[1];$("calPhase3").value=settingsData.speeds[ps].phaseOffset[2];$("calPhase4").value=settingsData.speeds[ps].phaseOffset[3];$("calKick").value=settingsData.speeds[ks].startupKick;$("calKickDur").value=settingsData.speeds[ks].startupKickDuration;$("calKickRamp").value=settingsData.speeds[ks].startupKickRampDuration;$("calBrakeMode").value=g.brakeMode;$("calBrakeDur").value=g.brakeDuration;$("calBrakeStart").value=g.brakeStartFreq;$("calBrakeStop").value=g.brakeStopFreq;$("calMaxAmp").value=g.maxAmplitude;$("calRedAmp").value=settingsData.speeds[as].reducedAmplitude}
 async function applyCalibration(kind){const save=kind.endsWith("Save");kind=kind.replace("Save","");if(kind==="frequency"){settingsData.speeds[Number($("calSpeed").value)].frequency=Number($("calFreq").value)}else if(kind==="phase"){const s=settingsData.speeds[Number($("calPhaseSpeed").value)];for(let i=0;i<4;i++)s.phaseOffset[i]=Number($(`calPhase${i+1}`).value)}else if(kind==="kick"){const s=settingsData.speeds[Number($("calKickSpeed").value)];s.startupKick=Number($("calKick").value);s.startupKickDuration=Number($("calKickDur").value);s.startupKickRampDuration=Number($("calKickRamp").value)}else if(kind==="brake"){const g=settingsData.global;g.brakeMode=Number($("calBrakeMode").value);g.brakeDuration=Number($("calBrakeDur").value);g.brakeStartFreq=Number($("calBrakeStart").value);g.brakeStopFreq=Number($("calBrakeStop").value)}else if(kind==="amp"){settingsData.global.maxAmplitude=Number($("calMaxAmp").value);settingsData.speeds[Number($("calAmpSpeed").value)].reducedAmplitude=Number($("calRedAmp").value)}renderSettings();await applySettings(save);renderCalibrationTools();addEvent(`Calibration ${kind} ${save?"saved":"applied"}`)}
-function renderNetwork(){if(!networkData)return;const standby=networkData.standbyModeText||optionLabel("standbyMode",networkData.config?.standbyMode??0),ecoNote=networkData.ecoStandbySuspended?" (Wi-Fi suspended)":"";$("networkStatus").innerHTML=`<div class="notice"><strong>${esc(networkData.status)}</strong><br>Address: ${esc(networkData.ip||"none")}<br>Mode: ${esc(networkData.modeText)}<br>Standby: ${esc(standby)}${ecoNote}<br>SSID: ${esc(networkData.ssid||"none")}${networkData.config?.hiddenSsid?" (hidden)":""}<br>Clients: ${networkData.clients}</div>`;$("networkLine").textContent=networkData.available?`${networkData.status} ${networkData.ip||""}`:"No Wi-Fi support";const root=$("networkForm");root.innerHTML="";for(const [title,fields] of fieldGroups(networkFields,networkFieldGroups))appendFieldGroup(root,title,fields,"network",networkData.config);wireForm(root,()=>{validateNetworkForm(false);updateNetworkDirty()});updateNetworkDirty();setLockedUI()}
+function renderNetwork(){if(!networkData)return;const standby=networkData.standbyModeText||optionLabel("standbyMode",networkData.config?.standbyMode??0),ecoNote=networkData.ecoStandbySuspended?" (Wi-Fi suspended)":"";$("networkStatus").innerHTML=`<div class="notice"><strong>${esc(networkData.status)}</strong><br>Address: ${esc(networkData.ip||"none")}<br>Mode: ${esc(networkData.modeText)}<br>Standby: ${esc(standby)}${ecoNote}<br>SSID: ${esc(networkData.ssid||"none")}${networkData.config?.hiddenSsid?" (hidden)":""}<br>Clients: ${networkData.clients}<br>Device lock: ${networkData.config?.deviceLockEnabled?"on":"off"}</div>`;$("networkLine").textContent=networkData.available?`${networkData.status} ${networkData.ip||""}`:"No Wi-Fi support";const root=$("networkForm");root.innerHTML="";for(const [title,fields] of fieldGroups(networkFields,networkFieldGroups))appendFieldGroup(root,title,fields,"network",networkData.config);wireForm(root,()=>{validateNetworkForm(false);updateNetworkDirty()});updateNetworkDirty();setLockedUI()}
 async function loadNetwork(){networkData=await api("/api/network");deviceHomePage=Number(networkData.config.webHomePage)||0;baselineNetwork=networkComparableFromConfig(networkData.config);renderNetwork();applyDeviceHomePicker()}
 function gatherNetwork(){const out={};for(const f of networkFields){const v=fieldValue("network",f);if(f.k==="password"&&v==="")continue;out[f.k]=v}return out}
 async function saveNetwork(){if(!validateNetworkForm(true)){setLive("Fix network errors before saving");return}const body=gatherNetwork(),before=Number(networkData?.config?.standbyMode??0),after=Number(body.standbyMode??before),ecoStandbyNow=after===1&&isStandbyActive();if(before!==after){const msg=after===1?"Switch to Eco standby? Wi-Fi will turn off whenever the controller enters standby, so the web UI cannot wake it until you use the device controls.":"Switch to Network standby? Wi-Fi will stay connected while the controller is in standby.";if(!confirm(msg))return}networkData=await api("/api/network",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});baselineNetwork=networkComparableFromConfig(networkData.config);renderNetwork();addEvent("Network saved");if(ecoStandbyNow){setLive("Eco standby saved. Wake from the device controls to reconnect Wi-Fi.");return}await loadAuth();setLive("Network saved")}
@@ -406,7 +406,7 @@ async function loadPresets(){presetsData=await api("/api/presets");fillPresetCom
 async function presetAction(slot,action){let body={slot,action};if(action==="preview"){await previewPreset(slot);return}if(action==="previewImport"){await previewPreset(slot,$(`presetText${slot}`).value,"Import validation report");return}if(action==="load"){const r=await previewPreset(slot);if(!r||r.report.errors||!confirm("Load this preset into the live settings?"))return}if(action==="rename")body.name=$(`presetName${slot}`).value;if(action==="import"){const r=await previewPreset(slot,$(`presetText${slot}`).value,"Import validation report");if(!r||r.report.errors){setLive("Fix preset import errors before importing");return}if(!confirm(`Import this JSON into the preset slot?\n\n${r.report.warnings} warning${r.report.warnings===1?"":"s"} will be accepted.`))return;body.json=$(`presetText${slot}`).value}if(action==="clear"&&!confirm("Clear this preset?"))return;const res=await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(action==="export")$(`presetText${slot}`).value=res.json||"";await loadPresets();await loadSettings();setLive("Preset action complete")}
 function fillPresetCompare(){["compareA","compareB"].forEach(id=>{const el=$(id);if(!el||el.children.length)return;for(let i=0;i<5;i++){const o=document.createElement("option");o.value=i;o.textContent=`Slot ${i+1}`;el.appendChild(o)}});if($("compareB"))$("compareB").value="1"}
 async function comparePresetSlots(){const a=Number($("compareA").value),b=Number($("compareB").value),box=$("presetCompare");try{const ja=JSON.parse((await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot:a,action:"export"})})).json),jb=JSON.parse((await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot:b,action:"export"})})).json),d=diffs(ja,jb);box.classList.remove("hide");box.textContent=d.length?d.map(x=>`${presetPathLabel(x.path)}: ${displayValue(x.path,x.from)} -> ${displayValue(x.path,x.to)}`).join("\n"):"Preset slots match."}catch(e){box.classList.remove("hide");box.textContent=e.message}}
-async function loadDiagnostics(){const d=await api("/api/diagnostics");diagnosticsData=d;const sys=d.system||{},cpu=sys.cpu||{},mem=sys.memory||{},flash=sys.flash||{},body=$("diagnosticsBody");body.innerHTML=`<h2>Diagnostics</h2><div class="tool-grid"><div><h3>Build</h3><p>Firmware: ${esc(d.firmware)}</p><p>Build: ${esc(d.buildDate)}</p><p>Safe mode: ${d.safeMode?"yes":"no"}</p></div><div><h3>System</h3><p>CPU: core 0 ${Number(cpu.core0Percent||0).toFixed(0)}%, waveform ${Number(cpu.waveformPercent||0).toFixed(0)}%</p><p>Heap: ${bytesText(mem.heapUsedBytes)} used, ${bytesText(mem.heapFreeBytes)} free</p><p>Sketch: ${bytesText(flash.sketchUsedBytes)} / ${bytesText(flash.sketchCapacityBytes)}</p><p>Filesystem: ${flash.filesystemMounted?`${bytesText(flash.filesystemUsedBytes)} / ${bytesText(flash.filesystemTotalBytes)}`:"not mounted"}</p></div><div><h3>Network</h3><p>${esc(d.network.status)} ${esc(d.network.ip||"")}</p><p>RSSI: ${d.network.rssi} dBm</p><p>Clients: ${d.network.clients}</p><p>Standby: ${esc(d.network.standbyModeText||optionLabel("standbyMode",d.network.standbyMode??0))}${d.network.ecoStandbySuspended?" (Wi-Fi suspended)":""}</p><p>Read-only mode: ${d.network.readOnlyMode?"on":"off"}</p></div><div><h3>Amplifier</h3><p>${d.amp.enabled?`${Number(d.amp.temperatureC).toFixed(1)} C, thermal ${d.amp.thermalOk?"OK":"TRIPPED"}, warn ${Number(d.amp.warnC).toFixed(0)} C, shutdown ${Number(d.amp.shutdownC).toFixed(0)} C`:"not enabled"}</p></div></div><h3>Feature flags</h3><div class="log">${Object.keys(d.flags).map(k=>`${k}: ${d.flags[k]}`).join("\n")}</div><h3>Pins</h3><div class="log">${Object.keys(d.pins).map(k=>`${k}: GP${d.pins[k]}`).join("\n")}</div><h3>Files</h3><div class="log">settings: ${d.files.settings}\nnetwork: ${d.files.network}\nerrors: ${d.files.errors}\npresets: ${d.files.presets.map(p=>`slot ${p.slot+1}=${p.stored}`).join(", ")}</div>`;renderEventFeed();renderBench()}
+async function loadDiagnostics(){const d=await api("/api/diagnostics");diagnosticsData=d;const sys=d.system||{},cpu=sys.cpu||{},mem=sys.memory||{},flash=sys.flash||{},wave=sys.waveform||{},body=$("diagnosticsBody");body.innerHTML=`<h2>Diagnostics</h2><div class="tool-grid"><div><h3>Build</h3><p>Firmware: ${esc(d.firmware)}</p><p>Build: ${esc(d.buildDate)}</p><p>Safe mode: ${d.safeMode?"yes":"no"}</p></div><div><h3>System</h3><p>CPU: core 0 ${Number(cpu.core0Percent||0).toFixed(0)}%, waveform ${Number(cpu.waveformPercent||0).toFixed(0)}%</p><p>Waveform: fill age ${Number(wave.bufferFillAgeMs||0)} ms, DMA ${wave.dmaRunning?"running":"idle"}</p><p>Heap: ${bytesText(mem.heapUsedBytes)} used, ${bytesText(mem.heapFreeBytes)} free</p><p>Sketch: ${bytesText(flash.sketchUsedBytes)} / ${bytesText(flash.sketchCapacityBytes)}</p><p>Filesystem: ${flash.filesystemMounted?`${bytesText(flash.filesystemUsedBytes)} / ${bytesText(flash.filesystemTotalBytes)}`:"not mounted"}</p></div><div><h3>Network</h3><p>${esc(d.network.status)} ${esc(d.network.ip||"")}</p><p>RSSI: ${d.network.rssi} dBm</p><p>Clients: ${d.network.clients}</p><p>Standby: ${esc(d.network.standbyModeText||optionLabel("standbyMode",d.network.standbyMode??0))}${d.network.ecoStandbySuspended?" (Wi-Fi suspended)":""}</p><p>Read-only mode: ${d.network.readOnlyMode?"on":"off"}</p><p>Device lock: ${d.network.deviceLockEnabled?"on":"off"}</p></div><div><h3>Amplifier</h3><p>${d.amp.enabled?`${Number(d.amp.temperatureC).toFixed(1)} C, thermal ${d.amp.thermalOk?"OK":"TRIPPED"}, warn ${Number(d.amp.warnC).toFixed(0)} C, shutdown ${Number(d.amp.shutdownC).toFixed(0)} C`:"not enabled"}</p></div></div><h3>Feature flags</h3><div class="log">${Object.keys(d.flags).map(k=>`${k}: ${d.flags[k]}`).join("\n")}</div><h3>Pins</h3><div class="log">${Object.keys(d.pins).map(k=>`${k}: GP${d.pins[k]}`).join("\n")}</div><h3>Files</h3><div class="log">settings: ${d.files.settings}\nknown-good: ${d.files.knownGood}\nboot marker: ${d.files.bootMarker}\nnetwork: ${d.files.network}\nerrors: ${d.files.errors}\npresets: ${d.files.presets.map(p=>`slot ${p.slot+1}=${p.stored}`).join(", ")}</div>`;renderEventFeed();renderBench()}
 function relayStageOptions(){const count=statusData?.motor?.relayStageCount||1;let out="";for(let i=0;i<count;i++)out+=`<option value="${i}">Stage ${i}</option>`;return out}
 function benchReportText(){
 const m=statusData?.motor||{},n=statusData?.network||{},a=statusData?.amp||{},d=diagnosticsData,clObj=m.closedLoop||{},cl=closedLoopStatusText(clObj),met=clObj.metrics||{},tune=clObj.tuning||{},health=clObj.health||{},trend=clObj.trend||[],lastTrend=trend[trend.length-1]||{},lockPct=met.validSamples?Math.round((met.lockedSamples||0)*100/met.validSamples):0;
@@ -775,6 +775,14 @@ static void populateSystemMetrics(JsonObject target) {
     flash["filesystemTotalBytes"] = metrics.filesystemTotalBytes;
     flash["filesystemCapacityBytes"] = metrics.filesystemCapacityBytes;
     flash["filesystemMounted"] = metrics.filesystemMounted;
+
+    JsonObject waveformJson = target["waveform"].to<JsonObject>();
+    uint32_t now = millis();
+    uint32_t lastFillMs = waveform.getLastBufferFillMs();
+    waveformJson["lastBufferFillMs"] = lastFillMs;
+    waveformJson["bufferFillAgeMs"] = lastFillMs == 0 ? 0 : now - lastFillMs;
+    waveformJson["bufferFillCount"] = waveform.getBufferFillCount();
+    waveformJson["dmaRunning"] = waveform.isDmaRunning();
 }
 
 static void streamSystemMetrics(Print& out, bool& first) {
@@ -808,6 +816,16 @@ static void streamSystemMetrics(Print& out, bool& first) {
     writeUIntProp(out, nestedFirst, "filesystemTotalBytes", metrics.filesystemTotalBytes);
     writeUIntProp(out, nestedFirst, "filesystemCapacityBytes", metrics.filesystemCapacityBytes);
     writeBoolProp(out, nestedFirst, "filesystemMounted", metrics.filesystemMounted);
+    out.write('}');
+
+    beginObjectProp(out, objectFirst, "waveform");
+    nestedFirst = true;
+    uint32_t now = millis();
+    uint32_t lastFillMs = waveform.getLastBufferFillMs();
+    writeUIntProp(out, nestedFirst, "lastBufferFillMs", lastFillMs);
+    writeUIntProp(out, nestedFirst, "bufferFillAgeMs", lastFillMs == 0 ? 0 : now - lastFillMs);
+    writeUIntProp(out, nestedFirst, "bufferFillCount", waveform.getBufferFillCount());
+    writeBoolProp(out, nestedFirst, "dmaRunning", waveform.isDmaRunning());
     out.write('}');
 
     out.write('}');
@@ -1328,7 +1346,8 @@ static void streamNetworkFields(Print& out) {
     streamPasswordField(out, firstField, "apPassword", "Setup AP password", "Leave blank for an open setup network.", NETWORK_PASSWORD_MAX, 8);
     streamNumberField(out, firstField, "apChannel", "Setup AP channel", 1, 13, 1, "Wi-Fi channel used by the setup AP.");
     streamCheckboxField(out, firstField, "readOnlyMode", "Read-only guest mode", "When enabled, dashboard/status stay visible but controls and settings require the web PIN.");
-    streamPasswordField(out, firstField, "webPin", "Web PIN", "Leave blank to keep the saved PIN. Use 4 to 8 characters.", NETWORK_WEB_PIN_MAX, 4);
+    streamCheckboxField(out, firstField, "deviceLockEnabled", "Device UI lock", "Require the shared PIN before entering the OLED settings menu and before browser or serial writes.");
+    streamPasswordField(out, firstField, "webPin", "Shared PIN", "Leave blank to keep the saved PIN. Use 4 to 8 characters.", NETWORK_WEB_PIN_MAX, 4);
     streamSelectField(out, firstField, "webHomePage", "Web home page", "homePage", "Default page shown when the local browser interface opens.");
 }
 
@@ -1594,6 +1613,8 @@ void WebInterface::handleAuthGet() {
     const NetworkConfig& c = networkManager.getConfig();
     doc["required"] = networkManager.isWebAccessLocked();
     doc["readOnlyMode"] = c.readOnlyMode;
+    doc["deviceLockEnabled"] = c.deviceLockEnabled;
+    doc["deviceLocked"] = networkManager.isDeviceLocked();
     doc["pinSet"] = c.webPin[0] != 0;
     doc["unlocked"] = hasWriteAccess();
     doc["expiresMs"] = _authExpiresMs;
@@ -1609,6 +1630,7 @@ void WebInterface::handleAuthPost() {
     const char* action = doc["action"].as<const char*>();
     if (action && strcmp(action, "logout") == 0) {
         clearAuthToken();
+        networkManager.lockDevice();
         handleAuthGet();
         return;
     }
@@ -1626,10 +1648,14 @@ void WebInterface::handleAuthPost() {
         return;
     }
 
+    networkManager.unlockDevice(pin);
     issueAuthToken();
+    const NetworkConfig& c = networkManager.getConfig();
     JsonDocument out;
     out["required"] = true;
-    out["readOnlyMode"] = true;
+    out["readOnlyMode"] = c.readOnlyMode;
+    out["deviceLockEnabled"] = c.deviceLockEnabled;
+    out["deviceLocked"] = networkManager.isDeviceLocked();
     out["pinSet"] = true;
     out["unlocked"] = true;
     out["token"] = _authToken;
@@ -1808,6 +1834,13 @@ void WebInterface::populateStatus(JsonDocument& doc) {
 
     JsonObject system = doc["system"].to<JsonObject>();
     populateSystemMetrics(system);
+    JsonObject waveformJson = system["waveform"].to<JsonObject>();
+    uint32_t now = millis();
+    uint32_t lastFillMs = waveform.getLastBufferFillMs();
+    waveformJson["lastBufferFillMs"] = lastFillMs;
+    waveformJson["bufferFillAgeMs"] = lastFillMs == 0 ? 0 : now - lastFillMs;
+    waveformJson["bufferFillCount"] = waveform.getBufferFillCount();
+    waveformJson["dmaRunning"] = waveform.isDmaRunning();
 
     JsonObject amp = doc["amp"].to<JsonObject>();
 #if AMP_MONITOR_ENABLE
@@ -1848,6 +1881,8 @@ void WebInterface::populateStatus(JsonDocument& doc) {
     JsonObject auth = doc["auth"].to<JsonObject>();
     net["hiddenSsid"] = cfg.hiddenSsid;
     auth["readOnlyMode"] = cfg.readOnlyMode;
+    auth["deviceLockEnabled"] = cfg.deviceLockEnabled;
+    auth["deviceLocked"] = networkManager.isDeviceLocked();
     auth["required"] = networkManager.isWebAccessLocked();
     auth["unlocked"] = hasWriteAccess();
 }
@@ -2059,6 +2094,8 @@ void WebInterface::streamStatus(Print& out) {
     beginObjectProp(out, first, "auth");
     objectFirst = true;
     writeBoolProp(out, objectFirst, "readOnlyMode", cfg.readOnlyMode);
+    writeBoolProp(out, objectFirst, "deviceLockEnabled", cfg.deviceLockEnabled);
+    writeBoolProp(out, objectFirst, "deviceLocked", networkManager.isDeviceLocked());
     writeBoolProp(out, objectFirst, "required", networkManager.isWebAccessLocked());
     writeBoolProp(out, objectFirst, "unlocked", hasWriteAccess());
     out.write('}');
@@ -2398,7 +2435,7 @@ void WebInterface::handleSettingsPost() {
     settings.normalize();
     motor.applySettings();
     if (doc["save"].as<bool>()) {
-        settings.save();
+        settings.save(false, true);
     }
 
     handleSettingsGet();
@@ -2580,6 +2617,7 @@ void WebInterface::handleNetworkGet() {
     config["apPasswordSet"] = c.apPassword[0] != 0;
     config["apChannel"] = c.apChannel;
     config["readOnlyMode"] = c.readOnlyMode;
+    config["deviceLockEnabled"] = c.deviceLockEnabled;
     config["webPin"] = "";
     config["webPinSet"] = c.webPin[0] != 0;
     config["webHomePage"] = c.webHomePage;
@@ -2609,22 +2647,23 @@ void WebInterface::handleNetworkPost() {
     copyJsonString(c.apPassword, sizeof(c.apPassword), doc["apPassword"], true);
     if (!openSetup) {
         setBool(doc.as<JsonObject>(), "readOnlyMode", c.readOnlyMode);
+        bool deviceLockEnabled = c.deviceLockEnabled;
+        setBool(doc.as<JsonObject>(), "deviceLockEnabled", deviceLockEnabled);
+        networkManager.setDeviceLockEnabled(deviceLockEnabled);
         setByte(doc.as<JsonObject>(), "webHomePage", c.webHomePage, 0, WEB_HOME_PAGE_COUNT - 1);
         const char* pin = doc["webPin"].as<const char*>();
         if (pin && pin[0]) {
-            size_t pinLen = strlen(pin);
-            if (pinLen < 4 || pinLen > NETWORK_WEB_PIN_MAX) {
+            if (!networkManager.setWebPin(pin)) {
                 sendError(400, "Web PIN must be 4 to 8 characters");
                 return;
             }
-            copyJsonString(c.webPin, sizeof(c.webPin), doc["webPin"], false);
             clearAuthToken();
         }
-        if (c.readOnlyMode && c.webPin[0] == 0) {
+        if ((c.readOnlyMode || c.deviceLockEnabled) && c.webPin[0] == 0) {
             strncpy(c.webPin, NETWORK_DEFAULT_WEB_PIN, sizeof(c.webPin) - 1);
             c.webPin[sizeof(c.webPin) - 1] = 0;
         }
-        if (!c.readOnlyMode) clearAuthToken();
+        if (!c.readOnlyMode && !c.deviceLockEnabled) clearAuthToken();
     }
 
     if (!doc["staticIp"].isNull()) parseIpString(doc["staticIp"].as<const char*>(), c.staticIp);
@@ -2752,6 +2791,8 @@ void WebInterface::handleDiagnosticsGet() {
     network["rssi"] = networkManager.rssi();
     network["clients"] = networkManager.connectedClientCount();
     network["readOnlyMode"] = cfg.readOnlyMode;
+    network["deviceLockEnabled"] = cfg.deviceLockEnabled;
+    network["deviceLocked"] = networkManager.isDeviceLocked();
     network["hiddenSsid"] = cfg.hiddenSsid;
     network["standbyMode"] = cfg.standbyMode;
     network["standbyModeText"] = networkStandbyModeName(cfg.standbyMode);
@@ -2759,6 +2800,8 @@ void WebInterface::handleDiagnosticsGet() {
 
     JsonObject files = doc["files"].to<JsonObject>();
     files["settings"] = LittleFS.exists("/settings.bin");
+    files["knownGood"] = LittleFS.exists("/settings_good.bin");
+    files["bootMarker"] = LittleFS.exists("/settings_boot.bin");
     files["network"] = LittleFS.exists("/network.bin");
     files["errors"] = LittleFS.exists("/error.log");
     JsonArray presets = files["presets"].to<JsonArray>();
@@ -2824,7 +2867,7 @@ void WebInterface::handlePresetPost() {
             return;
         }
         motor.applySettings();
-        settings.save();
+        settings.save(false, true);
     } else if (strcmp(action, "save") == 0) {
         settings.savePreset(slot);
     } else if (strcmp(action, "rename") == 0) {

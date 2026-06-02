@@ -7,6 +7,7 @@
  */
 
 #include "settings.h"
+#include "error_handler.h"
 #include <ArduinoJson.h>
 
 namespace {
@@ -16,6 +17,22 @@ struct SettingsFileHeader {
     uint16_t headerSize;
     uint32_t schemaVersion;
     uint32_t payloadSize;
+    uint32_t crc32;
+};
+
+static const char* SETTINGS_KNOWN_GOOD_FILE = "/settings_good.bin";
+static const char* SETTINGS_BOOT_MARKER_FILE = "/settings_boot.bin";
+static const uint32_t SETTINGS_BOOT_MARKER_MAGIC = 0x54544253UL; // "TTBS"
+static const uint8_t SETTINGS_BOOT_MARKER_VERSION = 1;
+static const uint8_t SETTINGS_BOOT_NONE = 0;
+static const uint8_t SETTINGS_BOOT_PENDING = 1;
+static const uint8_t SETTINGS_BOOT_BOOTING = 2;
+
+struct SettingsBootMarker {
+    uint32_t magic;
+    uint8_t version;
+    uint8_t state;
+    uint16_t reserved;
     uint32_t crc32;
 };
 
@@ -747,6 +764,53 @@ bool writeSettingsBlob(const char* path, uint32_t magic, const GlobalSettings& s
     if (hadOriginal) LittleFS.remove(backupPath);
     return true;
 }
+
+uint8_t readBootMarkerState() {
+    File f = LittleFS.open(SETTINGS_BOOT_MARKER_FILE, "r");
+    if (!f) return SETTINGS_BOOT_NONE;
+
+    SettingsBootMarker marker;
+    bool ok = f.read((uint8_t*)&marker, sizeof(marker)) == sizeof(marker);
+    f.close();
+
+    if (!ok ||
+        marker.magic != SETTINGS_BOOT_MARKER_MAGIC ||
+        marker.version != SETTINGS_BOOT_MARKER_VERSION ||
+        marker.state > SETTINGS_BOOT_BOOTING) {
+        LittleFS.remove(SETTINGS_BOOT_MARKER_FILE);
+        return SETTINGS_BOOT_NONE;
+    }
+
+    uint32_t storedCrc = marker.crc32;
+    marker.crc32 = 0;
+    if (settingsCrc32((const uint8_t*)&marker, sizeof(marker)) != storedCrc) {
+        LittleFS.remove(SETTINGS_BOOT_MARKER_FILE);
+        return SETTINGS_BOOT_NONE;
+    }
+
+    return marker.state;
+}
+
+bool writeBootMarkerState(uint8_t state) {
+    if (state == SETTINGS_BOOT_NONE) {
+        LittleFS.remove(SETTINGS_BOOT_MARKER_FILE);
+        return true;
+    }
+
+    SettingsBootMarker marker;
+    memset(&marker, 0, sizeof(marker));
+    marker.magic = SETTINGS_BOOT_MARKER_MAGIC;
+    marker.version = SETTINGS_BOOT_MARKER_VERSION;
+    marker.state = state;
+    marker.crc32 = settingsCrc32((const uint8_t*)&marker, sizeof(marker));
+
+    File f = LittleFS.open(SETTINGS_BOOT_MARKER_FILE, "w");
+    if (!f) return false;
+    bool ok = f.write((const uint8_t*)&marker, sizeof(marker)) == sizeof(marker);
+    f.close();
+    if (!ok) LittleFS.remove(SETTINGS_BOOT_MARKER_FILE);
+    return ok;
+}
 }
 
 // --- Helper Functions for Preset Management ---
@@ -794,6 +858,8 @@ void Settings::resetTotalRuntime() {
 Settings::Settings() {
     _sessionRuntime = 0;
     _lastRuntimeUpdate = 0;
+    _rollbackApplied = false;
+    _bootCandidateActive = false;
 }
 
 void Settings::begin() {
@@ -830,9 +896,34 @@ void Settings::begin() {
         }
     }
 
+    handlePendingRollback();
     load(); // Normal operation
 
     _lastRuntimeUpdate = millis();
+}
+
+void Settings::handlePendingRollback() {
+    uint8_t markerState = readBootMarkerState();
+    if (markerState == SETTINGS_BOOT_BOOTING) {
+        GlobalSettings knownGood;
+        if (loadSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, knownGood)) {
+            if (writeSettingsBlob(_filename, SETTINGS_FILE_MAGIC, knownGood)) {
+                _rollbackApplied = true;
+                errorHandler.logEvent(ERR_SETTINGS_ROLLBACK, "Unconfirmed settings boot rolled back to known-good settings");
+            } else {
+                errorHandler.logEvent(ERR_SETTINGS_ROLLBACK, "Rollback requested but settings restore failed");
+            }
+        } else {
+            errorHandler.logEvent(ERR_SETTINGS_ROLLBACK, "Rollback requested but no known-good settings were available");
+        }
+        writeBootMarkerState(SETTINGS_BOOT_NONE);
+        return;
+    }
+
+    if (markerState == SETTINGS_BOOT_PENDING) {
+        _bootCandidateActive = true;
+        writeBootMarkerState(SETTINGS_BOOT_BOOTING);
+    }
 }
 
 void Settings::load() {
@@ -853,22 +944,49 @@ void Settings::load() {
     resetDefaults();
 }
 
-void Settings::save(bool verbose) {
+void Settings::save(bool verbose, bool rollbackProtected) {
+    if (rollbackProtected) {
+        GlobalSettings knownGood;
+        if (loadSettingsBlob(_filename, SETTINGS_FILE_MAGIC, knownGood)) {
+            writeSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, knownGood);
+        } else {
+            writeSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, _data);
+        }
+    }
+
     if (writeSettingsBlob(_filename, SETTINGS_FILE_MAGIC, _data)) {
+        if (rollbackProtected) {
+            _bootCandidateActive = true;
+            writeBootMarkerState(SETTINGS_BOOT_PENDING);
+        }
         if (verbose) Serial.println("Settings saved.");
     } else {
         if (verbose) Serial.println("Failed to save settings.");
     }
 }
 
+void Settings::markBootSuccessful() {
+    uint8_t markerState = readBootMarkerState();
+    if (markerState == SETTINGS_BOOT_NONE && !_bootCandidateActive) return;
+
+    if (writeSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, _data)) {
+        writeBootMarkerState(SETTINGS_BOOT_NONE);
+        _bootCandidateActive = false;
+        Serial.println("Settings boot confirmed.");
+    }
+}
+
 void Settings::resetDefaults() {
     setDefaults();
+    writeBootMarkerState(SETTINGS_BOOT_NONE);
     save();
 }
 
 void Settings::factoryReset() {
     // Format filesystem to clear all presets and logs
     LittleFS.format();
+    _rollbackApplied = false;
+    _bootCandidateActive = false;
     resetDefaults();
 }
 

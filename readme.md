@@ -271,6 +271,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
   7. **Flash:** Sketch flash usage and LittleFS usage.
 - **Runtime Tracking:** Optional Runtime tracking to track session and total runtime. Useful for monitoring stylus usage or turntable maintenance schedules.
 - **Status Cycling:** Status display cycling (speed, frequency, phase mode, phase angles, runtime) with user settings to toggle the available statuses.
+- **Device UI Lock:** Optional PIN lock using the same shared PIN as the browser write-access lock. When enabled, the OLED settings menu opens to a PIN entry page until unlocked. While locked, physical controls can still stop a running motor or enter standby for safety, but starting, speed changes, pitch changes, and settings edits are blocked.
 - **Scrolling Messages:**
   - **Welcome:** Scrolls "Welcome to TT Control" on boot.
   - **Goodbye:** Scrolls "Goodbye..." when entering standby, before the display turns off (if configured).
@@ -284,6 +285,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Commands:** Type `help` or `list` to see available commands. Supports `start`, `stop`, `speed`, `set`, `get`, `save`, `reboot`, `dump settings`, preset management, closed-loop status/reset/setup/tuning/health/trend when enabled, and diagnostics.
 - **Serial Wi-Fi Setup:** Wi-Fi builds add `wifi wizard` for guided Serial Monitor network setup, `wifi scan` for nearby SSIDs, `wifi connect <ssid> [password]` for quick DHCP station setup, and `wifi set ...` commands for hostname, mode, standby mode, hidden SSIDs, DHCP/static IP, setup AP, fallback, and web access options.
 - **Diagnostics:** Serial commands include `diag safety` for a non-actuating safety check, plus `brake test start`, `brake test stop`, and `relay test <stage|off>` for bench checks.
+- **PIN Lock Commands:** `lock`, `unlock <PIN>`, `ui lock <on|off>`, and `ui pin <PIN>` control the device UI lock from Serial Monitor. While the device is locked, serial write/control commands are rejected until `unlock <PIN>` succeeds.
 - **JSON Preset Export/Import:** Advanced configuration sharing.
   - `export preset <1-5>`: Dumps the entire layout of the requested preset, along with all global constraints and brake configurations, into a single minified JSON string.
   - `import preset <1-5> <json>`: Instantly parses and injects a shared JSON configuration string directly into the specified preset slot.
@@ -318,6 +320,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Calibration Stepper:** Calibration tasks are presented as a stepper so each workflow can be tuned without scanning every calibration field at once.
 - **Accessibility Preferences:** The browser UI includes a remembered home page, theme presets, large controls, visible focus states, live status announcements, semantic form grouping, and labels/error text for screen-reader navigation.
 - **Optional Read-Only Guest Mode:** Read-only mode is off by default. When enabled from the web Network page or OLED Network menu, dashboard/status pages remain visible but write actions require the configured web PIN. The PIN can be changed from both the OLED Network menu and the web Network page.
+- **Shared PIN Protection:** The same PIN also supports the device UI lock. Enabling Device UI Lock from the browser, OLED System menu, or Serial Monitor requires PIN unlock before browser or serial writes and before entering the OLED settings menu.
 - **Amplifier Status:** The web status API reports amplifier temperature and thermal state when `AMP_MONITOR_ENABLE` is compiled in; the dashboard and telemetry views show the same information.
 - **Closed-Loop Status:** When `CLOSED_LOOP_SPEED_ENABLE` is compiled in, the web status API, dashboard, telemetry, diagnostics, preset JSON, backups, and bench report include control mode, sensor mode, target/requested/ramp/reference RPM, pitch target mode, live RPM, correction state, saturation, amplitude recovery, direction, pin state, setup capture state, tuning guidance, stability metrics, sensor health, and recent trend samples.
 - **Diagnostics and Events:** The Diagnostics page shows firmware/build info, compile-time feature flags, active pin assignments, network state, amplifier state, stored-file presence, and a recent browser event feed.
@@ -348,6 +351,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Settings File Schema:**
   - **Storage Location:** Stored on LittleFS.
   - **File Integrity:** Settings and preset files include a firmware-specific magic value, file format version, settings schema version, payload size, and CRC32 before the binary settings payload.
+  - **Known-Good Rollback:** Explicit configuration saves keep the previous bootable settings in `/settings_good.bin` and mark the new settings as pending. On the next boot, the pending settings are confirmed only after Core 1 starts servicing waveform buffers. If a pending boot fails before confirmation, the next boot restores the known-good settings and logs `ERR_SETTINGS_ROLLBACK`.
   - **Schema Migration:** Schema 6 added the first closed-loop feedback settings. Schema 7 added control mode, startup engagement rules, ramp tracking, pitch target handling, saturation/plausibility/lock-timeout actions, amplitude recovery, and setup support. Schema 8 adds per-speed closed-loop tuning and migrates schema 7 payloads by copying the previous global tuning values into all three speed slots. Schema 9 adds the closed-loop pitch target mode and defaults migrated settings to Follow. Incompatible or invalid payloads are reset to defaults.
   - **Strict First-Release Format:** Schema, size, or CRC mismatch causes settings to reset to defaults rather than attempting to migrate older binary layouts.
 
@@ -399,6 +403,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **PIO Usage:** Maximize use of Pico state machines.
 - **FIFO Usage:** Optimal use of FIFO.
 - **Non-Blocking Design:** Non-blocking code, including delays, and timers and interrupt routines.
+- **Waveform Health Fault:** Core 0 monitors the Core 1 waveform heartbeat and DMA buffer-fill age. If waveform servicing stalls, the firmware logs `ERR_WAVEFORM_HEALTH`, performs the critical error stop path, and allows the watchdog to reset if Core 1 remains unhealthy.
 
 ---
 
@@ -411,6 +416,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Error Clearing:** Pressing encoder clears the error.
 - **Safety Shutdown:** Critical error paths call emergency stop, mute relays, disable waveform output, and drop standby power when standby support is enabled; warning and informational dialogs do not alter relay state.
 - **Amplifier Thermal Events:** Amplifier temperature warnings, thermal cutout trips, and amplifier over-temperature shutdowns are logged as `ERR_AMP_THERMAL`.
+- **Reset-Cause Events:** Each boot logs the best-effort reset cause reported by the Arduino-Pico core, including watchdog, soft reset, run-pin reset, power-on, brownout, debug, glitch, or unknown reset.
 
 ---
 
@@ -450,6 +456,10 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `save` | Save current RAM settings to flash |
 | `reboot` | Reboot via watchdog |
 | `dump settings` | Print a readable settings summary |
+| `lock` | Lock the device UI if Device UI Lock is enabled |
+| `unlock <PIN>` | Unlock OLED, serial, and browser write controls with the shared PIN |
+| `ui lock <on\|off>` | Enable or disable the device UI lock |
+| `ui pin <PIN>` | Set the shared 4-8 character PIN used by Device UI Lock and browser write unlock |
 | `preset list` | List preset slots |
 | `preset load <1-5>` | Load a preset into RAM and apply it |
 | `preset save <1-5>` | Save current RAM settings to a preset slot |
@@ -479,6 +489,8 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `wifi scan` | Scan nearby Wi-Fi networks |
 | `wifi connect <ssid> [password]` | Save station credentials, enable Station + setup AP mode, use DHCP, and reconnect |
 | `wifi set standby <network\|eco>` | Select Network standby or Eco standby |
+| `wifi set device_lock <on\|off>` | Enable or disable Device UI Lock in the network/PIN configuration |
+| `wifi set web_pin <PIN>` | Set the shared browser/device PIN |
 | `wifi set hidden <on\|off>` | Mark the configured station SSID as hidden or visible |
 | `wifi set <key> <value>` | Stage an individual network setting such as mode, standby mode, hostname, SSID, hidden SSID flag, DHCP, static IP, fallback, setup AP, web PIN, or read-only mode |
 | `wifi clear password\|ap_password\|ssid` | Clear saved station password, setup AP password, or station SSID |
@@ -587,7 +599,7 @@ The menu structure is data-driven and hierarchical. Short press selects, hold go
   - **Braking:** Brake mode, mode-specific brake parameters, and Brake Tune.
 - **Power Control:** Relays, auto standby, auto boot, and relay test.
 - **Display:** Sleep, dimming, screensaver, dashboard visibility, and error display settings.
-- **System:** Input direction, pitch behavior, 78 RPM availability, optional amplifier limits, logs, runtime reset, boot speed, and factory reset.
+- **System:** Input direction, pitch behavior, 78 RPM availability, optional amplifier limits, UI lock/PIN controls, logs, runtime reset, boot speed, and factory reset.
 - **Closed Loop:** Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
   - **Control:** Monitor/correct mode, target RPM, update interval, and RPM filter.
   - **Sensor:** Pulse/quadrature sensor settings, debounce, and timeout.
@@ -686,6 +698,7 @@ The menu structure is data-driven and hierarchical. Short press selects, hold go
 - **Amp Warn C:** Amplifier warning temperature. (If `AMP_MONITOR_ENABLE`)
 - **Amp Shut C:** Amplifier shutdown temperature. (If `AMP_MONITOR_ENABLE`)
 - **Boot Speed:** Select default speed on boot (0=33, 1=45, 2=78, 3=Last Used).
+- **UI Lock:** Opens shared PIN controls for Device UI Lock, including PIN save, enable/disable, and Lock Now.
 - **Error Log:** View and clear system error logs.
 - **Reset Runtime:** Reset the total runtime counter (with confirmation).
 - **Fact Reset:** Factory Reset.

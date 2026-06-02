@@ -40,11 +40,33 @@ volatile float currentFrequency = 50.0;
 volatile float currentPitchPercent = 0.0;
 volatile uint32_t core1HeartbeatMs = 0;
 
+static bool waveformHealthFaultReported = false;
+static bool settingsBootConfirmed = false;
+static const uint32_t WAVEFORM_CORE_STALL_MS = 1000;
+static const uint32_t WAVEFORM_BUFFER_STALL_MS = 250;
+
+static void checkWaveformHealth(uint32_t now) {
+    if (waveformHealthFaultReported) return;
+
+    if (core1HeartbeatMs != 0 && now - core1HeartbeatMs > WAVEFORM_CORE_STALL_MS) {
+        waveformHealthFaultReported = true;
+        errorHandler.report(ERR_WAVEFORM_HEALTH, "Waveform core heartbeat stalled", true);
+        return;
+    }
+
+    uint32_t lastFillMs = waveform.getLastBufferFillMs();
+    if (lastFillMs != 0 && now - lastFillMs > WAVEFORM_BUFFER_STALL_MS) {
+        waveformHealthFaultReported = true;
+        errorHandler.report(ERR_WAVEFORM_HEALTH, "Waveform DMA buffer service stalled", true);
+    }
+}
+
 // --- Core 0: UI & Control Logic ---
 // Handles user interaction, display, motor state machine, and serial comms.
 void setup() {
     // Initialize Hardware Abstraction Layer
     hal.begin();
+    ResetCause resetCause = hal.getResetCause();
 
     // Check for Hardware Safe Mode Boot
     // If the encoder button is held during power-on/reset, enter Safe Mode
@@ -61,6 +83,10 @@ void setup() {
 
     // Initialize Settings (Mounts LittleFS and loads config)
     settings.begin();
+    errorHandler.begin();
+    char resetMsg[48];
+    snprintf(resetMsg, sizeof(resetMsg), "Reset cause: %s", hal.resetCauseName(resetCause));
+    errorHandler.logEvent(ERR_RESET_CAUSE, resetMsg);
     systemMonitor.begin();
 
     // Initialize Display (I2C)
@@ -123,8 +149,13 @@ void loop() {
     
     // 6. Feed Watchdog only while Core 1 is actively servicing waveform work.
     uint32_t now = hal.getMillis();
+    checkWaveformHealth(now);
     uint32_t core1Age = now - core1HeartbeatMs;
     if (core1HeartbeatMs != 0 && core1Age < 1000) {
+        if (!settingsBootConfirmed && waveform.getLastBufferFillMs() != 0) {
+            settings.markBootSuccessful();
+            settingsBootConfirmed = true;
+        }
         hal.watchdogFeed();
     }
 }

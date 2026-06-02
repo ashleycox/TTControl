@@ -12,6 +12,17 @@
 #include <Arduino.h>
 #include "config.h"
 
+enum ResetCause {
+    RESET_CAUSE_UNKNOWN,
+    RESET_CAUSE_POWER_ON,
+    RESET_CAUSE_RUN_PIN,
+    RESET_CAUSE_SOFT,
+    RESET_CAUSE_WATCHDOG,
+    RESET_CAUSE_DEBUG,
+    RESET_CAUSE_GLITCH,
+    RESET_CAUSE_BROWNOUT
+};
+
 /**
  * @brief Hardware Abstraction Layer.
  * 
@@ -38,6 +49,8 @@ public:
     void watchdogEnable(int timeoutMs);
     void watchdogFeed();
     void watchdogReboot(); // Triggers immediate system reset
+    ResetCause getResetCause();
+    const char* resetCauseName(ResetCause cause);
     
     // --- Timing ---
     uint32_t getMicros();

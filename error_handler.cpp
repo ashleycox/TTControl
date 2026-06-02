@@ -23,22 +23,25 @@ void ErrorHandler::begin() {
     // Filesystem initialization is handled by Settings class
 }
 
+void ErrorHandler::logEvent(ErrorCode code, const char* message) {
+    Serial.print("ERROR ");
+    Serial.print(code);
+    Serial.print(": ");
+    Serial.println(message);
+
+    logToFile(code, message);
+}
+
 void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
     if (critical) {
         _criticalError = true;
         motor.emergencyStop();
     }
     
-    // 1. Log to Serial Console for debugging
-    Serial.print("ERROR ");
-    Serial.print(code);
-    Serial.print(": ");
-    Serial.println(message);
+    // 1. Log to Serial Console and persistent file
+    logEvent(code, message);
     
-    // 2. Append to persistent log file
-    logToFile(code, message);
-    
-    // 3. Display visual alert on UI
+    // 2. Display visual alert on UI
     if (settings.get().errorDisplayEnabled) {
         // Critical errors stay longer (10s) vs warnings (3s) -> Now Configurable
         uint32_t duration = settings.get().errorDisplayDuration * 1000;

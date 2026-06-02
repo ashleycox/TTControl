@@ -29,9 +29,11 @@ public:
     
     void begin();
     void load();
-    void save(bool verbose = false);
+    void save(bool verbose = false, bool rollbackProtected = false);
     void resetDefaults();
     void factoryReset();
+    void markBootSuccessful();
+    bool rollbackWasApplied() const { return _rollbackApplied; }
     
     // Accessor for the global settings struct
     GlobalSettings& get() { return _data; }
@@ -67,9 +69,12 @@ private:
     const char* _filename = "/settings.bin";
     uint32_t _lastRuntimeUpdate;
     uint32_t _sessionRuntime;
+    bool _rollbackApplied;
+    bool _bootCandidateActive;
     
     void validate();
     void setDefaults();
+    void handlePendingRollback();
     
     // Internal helpers
     void saveToSlot(uint8_t slot); // Legacy wrapper

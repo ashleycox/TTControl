@@ -48,6 +48,7 @@ NetworkManager::NetworkManager()
       _apActive(false),
       _staStarted(false),
       _ecoStandbySuspended(false),
+      _deviceUnlocked(true),
       _connectStartMs(0),
       _lastReconnectMs(0) {
     setDefaults();
@@ -148,6 +149,15 @@ void NetworkManager::stop() {
 void NetworkManager::save() {
     _config.magic = NETWORK_CONFIG_MAGIC;
     _config.version = NETWORK_CONFIG_VERSION;
+    if (_config.webPin[0] != 0) {
+        size_t pinLen = strlen(_config.webPin);
+        if (pinLen < 4 || pinLen > NETWORK_WEB_PIN_MAX) {
+            copyBounded(_config.webPin, sizeof(_config.webPin), NETWORK_DEFAULT_WEB_PIN);
+        }
+    }
+    if ((_config.readOnlyMode || _config.deviceLockEnabled) && _config.webPin[0] == 0) {
+        copyBounded(_config.webPin, sizeof(_config.webPin), NETWORK_DEFAULT_WEB_PIN);
+    }
 
     File f = LittleFS.open(NETWORK_CONFIG_FILE, "w");
     if (!f) return;
@@ -200,16 +210,55 @@ bool NetworkManager::hasStationCredentials() const {
     return _config.ssid[0] != 0;
 }
 
+bool NetworkManager::isDeviceLockEnabled() const {
+    return _config.deviceLockEnabled && _config.webPin[0] != 0;
+}
+
+bool NetworkManager::isDeviceLocked() const {
+    return isDeviceLockEnabled() && !_deviceUnlocked;
+}
+
 bool NetworkManager::isWebAccessLocked() const {
-    return _config.readOnlyMode && _config.webPin[0] != 0;
+    return (_config.readOnlyMode || _config.deviceLockEnabled) && _config.webPin[0] != 0;
 }
 
 bool NetworkManager::verifyWebPin(const char* pin) const {
-    if (!_config.readOnlyMode) return true;
+    if (!isWebAccessLocked()) return true;
     if (!_config.webPin[0]) return true;
     if (!pin) return false;
     if (strlen(pin) > NETWORK_WEB_PIN_MAX) return false;
     return strcmp(pin, _config.webPin) == 0;
+}
+
+bool NetworkManager::setWebPin(const char* pin) {
+    if (!pin) return false;
+    size_t pinLen = strlen(pin);
+    if (pinLen < 4 || pinLen > NETWORK_WEB_PIN_MAX) return false;
+    copyBounded(_config.webPin, sizeof(_config.webPin), pin);
+    if (_config.deviceLockEnabled) _deviceUnlocked = false;
+    return true;
+}
+
+void NetworkManager::setDeviceLockEnabled(bool enabled) {
+    _config.deviceLockEnabled = enabled;
+    if (enabled && _config.webPin[0] == 0) {
+        copyBounded(_config.webPin, sizeof(_config.webPin), NETWORK_DEFAULT_WEB_PIN);
+    }
+    _deviceUnlocked = !enabled;
+}
+
+bool NetworkManager::unlockDevice(const char* pin) {
+    if (!isDeviceLockEnabled()) {
+        _deviceUnlocked = true;
+        return true;
+    }
+    if (!verifyWebPin(pin)) return false;
+    _deviceUnlocked = true;
+    return true;
+}
+
+void NetworkManager::lockDevice() {
+    if (isDeviceLockEnabled()) _deviceUnlocked = false;
 }
 
 NetworkConfig& NetworkManager::getConfig() {
@@ -293,6 +342,8 @@ void NetworkManager::setDefaults() {
     _config.webHomePage = WEB_HOME_DASHBOARD;
     _config.hiddenSsid = false;
     _config.standbyMode = NETWORK_STANDBY_NETWORK;
+    _config.deviceLockEnabled = false;
+    _deviceUnlocked = true;
     copyBounded(_config.hostname, sizeof(_config.hostname), NETWORK_DEFAULT_HOSTNAME);
     copyBounded(_config.apSsid, sizeof(_config.apSsid), NETWORK_DEFAULT_AP_SSID);
     copyBounded(_config.apPassword, sizeof(_config.apPassword), NETWORK_DEFAULT_AP_PASSWORD);
@@ -334,22 +385,29 @@ void NetworkManager::load() {
         loaded.webHomePage = WEB_HOME_DASHBOARD;
         loaded.hiddenSsid = false;
         loaded.standbyMode = NETWORK_STANDBY_NETWORK;
+        loaded.deviceLockEnabled = false;
         loaded.version = NETWORK_CONFIG_VERSION;
         migrated = true;
     } else if (loaded.version == 2 && readSize >= offsetof(NetworkConfig, webHomePage)) {
         loaded.webHomePage = WEB_HOME_DASHBOARD;
         loaded.hiddenSsid = false;
         loaded.standbyMode = NETWORK_STANDBY_NETWORK;
+        loaded.deviceLockEnabled = false;
         loaded.version = NETWORK_CONFIG_VERSION;
         migrated = true;
     } else if (loaded.version == 3 && readSize >= offsetof(NetworkConfig, hiddenSsid)) {
         loaded.hiddenSsid = false;
         loaded.standbyMode = NETWORK_STANDBY_NETWORK;
+        loaded.deviceLockEnabled = false;
         loaded.version = NETWORK_CONFIG_VERSION;
         migrated = true;
-    } else if (loaded.version == NETWORK_CONFIG_VERSION && readSize >= offsetof(NetworkConfig, standbyMode)) {
-        if (readSize < offsetof(NetworkConfig, standbyMode) + sizeof(loaded.standbyMode)) {
-            loaded.standbyMode = NETWORK_STANDBY_NETWORK;
+    } else if (loaded.version == 4 && readSize >= offsetof(NetworkConfig, standbyMode)) {
+        loaded.deviceLockEnabled = false;
+        loaded.version = NETWORK_CONFIG_VERSION;
+        migrated = true;
+    } else if (loaded.version == NETWORK_CONFIG_VERSION && readSize >= offsetof(NetworkConfig, deviceLockEnabled)) {
+        if (readSize < offsetof(NetworkConfig, deviceLockEnabled) + sizeof(loaded.deviceLockEnabled)) {
+            loaded.deviceLockEnabled = false;
             migrated = true;
         }
     } else if (loaded.version != NETWORK_CONFIG_VERSION || readSize != sizeof(NetworkConfig)) {
@@ -372,6 +430,7 @@ void NetworkManager::load() {
     if (_config.hostname[0] == 0) copyBounded(_config.hostname, sizeof(_config.hostname), NETWORK_DEFAULT_HOSTNAME);
     if (_config.apSsid[0] == 0) copyBounded(_config.apSsid, sizeof(_config.apSsid), NETWORK_DEFAULT_AP_SSID);
     if (_config.webPin[0] == 0) copyBounded(_config.webPin, sizeof(_config.webPin), NETWORK_DEFAULT_WEB_PIN);
+    _deviceUnlocked = !_config.deviceLockEnabled;
     if (migrated) save();
 }
 

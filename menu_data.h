@@ -16,6 +16,7 @@
 extern MenuPage* pageMain;
 extern MenuPage* pagePresets;
 extern MenuPage* pageErrorLog;
+extern MenuPage* pageUnlock;
 
 // New Submenus
 extern MenuPage* pageSpeedTuning;
@@ -24,6 +25,7 @@ extern MenuPage* pagePower;
 extern MenuPage* pageMotor;
 extern MenuPage* pageDisplay;
 extern MenuPage* pageSystem;
+extern MenuPage* pageSecurity;
 extern MenuPage* pageBrakeTune;
 extern MenuPage* pageRelayTest;
 extern MenuPage* pageNetwork;

@@ -14,6 +14,7 @@
 #include "network_manager.h"
 #include "system_monitor.h"
 #include "speed_feedback.h"
+#include "waveform.h"
 
 extern UserInterface ui;
 
@@ -182,6 +183,62 @@ static bool parseBoolValue(String value, bool& out) {
         return true;
     }
     return false;
+}
+
+static bool isSerialCommandAllowedWhileLocked(const String& input) {
+    return input == "help" ||
+           input == "status" ||
+           input == "i" ||
+           input == "list" ||
+           input.startsWith("get ") ||
+           input == "dump settings" ||
+           input == "error dump" ||
+           input == "diag safety" ||
+           input == "lock" ||
+           input.startsWith("unlock ");
+}
+
+static void handleUiLockCommand(const String& input) {
+    if (input == "lock") {
+        networkManager.lockDevice();
+        Serial.println(networkManager.isDeviceLocked() ? "UI locked." : "UI lock is not enabled.");
+        return;
+    }
+
+    if (input.startsWith("unlock ")) {
+        String pin = input.substring(7);
+        pin.trim();
+        if (networkManager.unlockDevice(pin.c_str())) {
+            Serial.println("UI unlocked.");
+        } else {
+            Serial.println("Incorrect PIN.");
+        }
+        return;
+    }
+
+    if (input.startsWith("ui lock ")) {
+        bool enabled = false;
+        if (!parseBoolValue(input.substring(8), enabled)) {
+            Serial.println("Usage: ui lock <on|off>");
+            return;
+        }
+        networkManager.setDeviceLockEnabled(enabled);
+        networkManager.save();
+        Serial.print("UI lock ");
+        Serial.println(enabled ? "enabled." : "disabled.");
+        return;
+    }
+
+    if (input.startsWith("ui pin ")) {
+        String pin = input.substring(7);
+        pin.trim();
+        if (!networkManager.setWebPin(pin.c_str())) {
+            Serial.println("PIN must be 4 to 8 characters.");
+            return;
+        }
+        networkManager.save();
+        Serial.println("PIN saved.");
+    }
 }
 
 static bool parseNetworkMode(String value, uint8_t& mode) {
@@ -377,6 +434,12 @@ static void printWifiConfigSummary(const NetworkConfig& cfg) {
     Serial.println(cfg.apPassword[0] ? "(saved)" : "(open)");
     Serial.print("Setup AP channel: ");
     Serial.println(cfg.apChannel);
+    Serial.print("Read-only mode: ");
+    Serial.println(onOffText(cfg.readOnlyMode));
+    Serial.print("Device UI lock: ");
+    Serial.println(onOffText(cfg.deviceLockEnabled));
+    Serial.print("Shared PIN: ");
+    Serial.println(cfg.webPin[0] ? "(set)" : "(not set)");
 }
 
 static void promptWifiWizardStep();
@@ -1423,6 +1486,23 @@ void handleSerialCommands() {
         }
         
         if (input.length() == 0) return;
+
+        if ((input.startsWith("ui lock ") || input.startsWith("ui pin ")) &&
+            networkManager.isDeviceLocked()) {
+            Serial.println("UI locked. Use 'unlock <PIN>' first.");
+            return;
+        }
+
+        if (input == "lock" || input.startsWith("unlock ") ||
+            input.startsWith("ui lock ") || input.startsWith("ui pin ")) {
+            handleUiLockCommand(input);
+            return;
+        }
+
+        if (networkManager.isDeviceLocked() && !isSerialCommandAllowedWhileLocked(input)) {
+            Serial.println("UI locked. Use 'unlock <PIN>' first.");
+            return;
+        }
         
         // --- Standard Commands ---
         if (input == "start") {
@@ -1482,7 +1562,7 @@ void handleSerialCommands() {
             printHelp();
         }
         else if (input == "save") {
-            settings.save(true);
+            settings.save(true, true);
         }
         else if (input == "reboot") {
             Serial.println("Rebooting...");
@@ -1644,6 +1724,11 @@ void printStatus() {
     Serial.print("Brake: ");
     Serial.println(brakeModeName(settings.get().brakeMode));
 
+    Serial.print("UI Lock: ");
+    Serial.print(networkManager.isDeviceLockEnabled() ? "ON" : "OFF");
+    Serial.print(", State: ");
+    Serial.println(networkManager.isDeviceLocked() ? "LOCKED" : "OPEN");
+
 #if CLOSED_LOOP_SPEED_ENABLE
     printClosedLoopStatus();
 #endif
@@ -1680,6 +1765,14 @@ void printStatus() {
     Serial.print("%, Waveform ");
     Serial.print(metrics.core1LoadPercent, 0);
     Serial.println("%");
+
+    uint32_t lastFillMs = waveform.getLastBufferFillMs();
+    Serial.print("Waveform DMA: ");
+    Serial.print(waveform.isDmaRunning() ? "RUNNING" : "IDLE");
+    Serial.print(", fill age ");
+    Serial.print(lastFillMs == 0 ? 0 : (hal.getMillis() - lastFillMs));
+    Serial.print("ms, fills ");
+    Serial.println(waveform.getBufferFillCount());
 
     Serial.print("Heap: ");
     Serial.print(metrics.heapUsedBytes / 1024UL);
@@ -2193,6 +2286,7 @@ void printHelp() {
     Serial.println("set <key> <val> - Set setting");
     Serial.println("get <key> - Get setting");
     Serial.println("save, reboot, dump settings");
+    Serial.println("lock, unlock <PIN>, ui lock <on|off>, ui pin <PIN>");
     Serial.println("preset list|load <1-5>|save <1-5>");
     Serial.println("export preset <1-5> - Dump JSON");
     Serial.println("import preset <1-5> <json> - Load JSON");
@@ -2230,6 +2324,8 @@ static void printWifiHelp() {
     Serial.println("wifi set ap_ssid <ssid>");
     Serial.println("wifi set ap_password <password>");
     Serial.println("wifi set ap_channel <1-13>");
+    Serial.println("wifi set device_lock <on|off>");
+    Serial.println("wifi set web_pin <PIN>");
     Serial.println("wifi clear password|ap_password|ssid");
     Serial.println("wifi apply - Save staged settings and reconnect");
     Serial.println("wifi reset - Restore network defaults and reconnect");
@@ -2253,6 +2349,10 @@ static void printWifiStatus() {
     Serial.println(networkManager.modeText());
     Serial.print("Standby: ");
     Serial.println(networkStandbyModeName(cfg.standbyMode));
+    Serial.print("Device UI lock: ");
+    Serial.print(onOffText(cfg.deviceLockEnabled));
+    Serial.print(", state ");
+    Serial.println(networkManager.isDeviceLocked() ? "LOCKED" : "OPEN");
     Serial.print("Status: ");
     Serial.println(networkManager.statusText());
     Serial.print("Eco standby suspended: ");
@@ -2437,14 +2537,20 @@ static void handleWifiSetCommand(const std::vector<String>& args) {
         }
         cfg.readOnlyMode = parsedBool;
         markWifiConfigUpdated();
-    } else if (key == "web_pin") {
-        if (args[2].length() > 0 && (args[2].length() < 4 || args[2].length() > NETWORK_WEB_PIN_MAX)) {
-            Serial.print("Web PIN must be 4-");
-            Serial.print(NETWORK_WEB_PIN_MAX);
-            Serial.println(" characters, or blank to clear.");
+    } else if (key == "device_lock" || key == "ui_lock") {
+        if (!parseBoolValue(args[2], parsedBool)) {
+            Serial.println("Use on/off, yes/no, or true/false.");
             return;
         }
-        if (!copyConfigString(cfg.webPin, sizeof(cfg.webPin), args[2], "Web PIN")) return;
+        networkManager.setDeviceLockEnabled(parsedBool);
+        markWifiConfigUpdated();
+    } else if (key == "web_pin") {
+        if (args[2].length() == 0 || !networkManager.setWebPin(args[2].c_str())) {
+            Serial.print("Web PIN must be 4-");
+            Serial.print(NETWORK_WEB_PIN_MAX);
+            Serial.println(" characters.");
+            return;
+        }
         markWifiConfigUpdated();
     } else {
         Serial.println("Unknown Wi-Fi setting. Type 'wifi help'.");

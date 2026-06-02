@@ -13,6 +13,7 @@
 #include "hal.h" // Added HAL
 #include "waveform.h" // Added for Scope View
 #include "system_monitor.h"
+#include "network_manager.h"
 #include <Fonts/FreeSans12pt7b.h>
 
 static const char* dashboardStateLabel() {
@@ -239,7 +240,7 @@ void UserInterface::handleInput() {
             motor.stopSymmetricSweep();
             // The phase offsets in settings.getCurrentSpeedSettings() were dynamically updated by motor.cpp.
             // We just need to save them.
-            settings.save();
+            settings.save(false, true);
             showMessage("Locked & Saved!", 2000);
             exitMenu();
         }
@@ -261,6 +262,36 @@ void UserInterface::handleInput() {
             // Let's consume it to be safe.
             return;
         }
+    }
+
+    if (!_inMenu && networkManager.isDeviceLocked()) {
+        bool speedButton = _input.isSpeedButtonPressed();
+        bool startStopButton = _input.isStartStopPressed();
+        bool standbyButton = _input.isStandbyPressed();
+
+        if (evt == EVT_DOUBLE_CLICK) {
+            enterMenu();
+            return;
+        }
+
+        if ((evt == EVT_SELECT || startStopButton) && motor.isRunning()) {
+            motor.stop();
+            showMessage("Locked Stop", 1000);
+            return;
+        }
+
+        if ((evt == EVT_BACK || evt == EVT_EXIT || standbyButton) && !motor.isStandby()) {
+            motor.toggleStandby();
+            _showingGoodbye = true;
+            _goodbyeStartTime = millis();
+            display.ssd1306_command(SSD1306_DISPLAYON);
+            return;
+        }
+
+        if (evt != EVT_NONE || delta != 0 || speedButton || startStopButton || standbyButton) {
+            showMessage("UI Locked", 1000);
+        }
+        return;
     }
 
     // --- Global Button Handling ---
@@ -1138,7 +1169,7 @@ void UserInterface::enterMenu() {
     initMenuState();
     _menuStack.clear();
     _inMenu = true;
-    _currentPage = pageMain;
+    _currentPage = networkManager.isDeviceLocked() ? pageUnlock : pageMain;
 }
 
 void UserInterface::showMessage(const char* msg, uint32_t duration) {

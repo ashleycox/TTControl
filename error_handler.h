@@ -22,7 +22,10 @@ enum ErrorCode {
     ERR_I2C_FAILURE = 4,
     ERR_OUT_OF_MEMORY = 5,
     ERR_AMP_THERMAL = 6,
-    ERR_SPEED_FEEDBACK = 7
+    ERR_SPEED_FEEDBACK = 7,
+    ERR_RESET_CAUSE = 8,
+    ERR_WAVEFORM_HEALTH = 9,
+    ERR_SETTINGS_ROLLBACK = 10
 };
 
 /**
@@ -42,6 +45,9 @@ public:
     
     // Report an error occurrence
     void report(ErrorCode code, const char* message, bool critical = false);
+
+    // Record an event without triggering UI display or motor actions
+    void logEvent(ErrorCode code, const char* message);
     
     // Clear all persistent logs
     void clearLogs();

@@ -67,6 +67,34 @@ void HardwareAbstraction::watchdogReboot() {
     watchdog_reboot(0, 0, 0);
 }
 
+ResetCause HardwareAbstraction::getResetCause() {
+    switch (rp2040.getResetReason()) {
+        case RP2040::PWRON_RESET: return RESET_CAUSE_POWER_ON;
+        case RP2040::RUN_PIN_RESET: return RESET_CAUSE_RUN_PIN;
+        case RP2040::SOFT_RESET: return RESET_CAUSE_SOFT;
+        case RP2040::WDT_RESET: return RESET_CAUSE_WATCHDOG;
+        case RP2040::DEBUG_RESET: return RESET_CAUSE_DEBUG;
+        case RP2040::GLITCH_RESET: return RESET_CAUSE_GLITCH;
+        case RP2040::BROWNOUT_RESET: return RESET_CAUSE_BROWNOUT;
+        case RP2040::UNKNOWN_RESET:
+        default: return RESET_CAUSE_UNKNOWN;
+    }
+}
+
+const char* HardwareAbstraction::resetCauseName(ResetCause cause) {
+    switch (cause) {
+        case RESET_CAUSE_POWER_ON: return "power-on";
+        case RESET_CAUSE_RUN_PIN: return "run-pin";
+        case RESET_CAUSE_SOFT: return "soft-reset";
+        case RESET_CAUSE_WATCHDOG: return "watchdog";
+        case RESET_CAUSE_DEBUG: return "debug";
+        case RESET_CAUSE_GLITCH: return "glitch";
+        case RESET_CAUSE_BROWNOUT: return "brownout";
+        case RESET_CAUSE_UNKNOWN:
+        default: return "unknown";
+    }
+}
+
 uint32_t HardwareAbstraction::getMicros() {
     return micros();
 }

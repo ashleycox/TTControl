@@ -63,6 +63,7 @@ struct NetworkConfig {
     uint8_t webHomePage;
     bool hiddenSsid;
     uint8_t standbyMode;
+    bool deviceLockEnabled;
 };
 
 class NetworkManager {
@@ -84,8 +85,14 @@ public:
     bool isServerAvailable() const;
     bool isEcoStandbySuspended() const;
     bool hasStationCredentials() const;
+    bool isDeviceLockEnabled() const;
+    bool isDeviceLocked() const;
     bool isWebAccessLocked() const;
     bool verifyWebPin(const char* pin) const;
+    bool setWebPin(const char* pin);
+    void setDeviceLockEnabled(bool enabled);
+    bool unlockDevice(const char* pin);
+    void lockDevice();
 
     NetworkConfig& getConfig();
     const NetworkConfig& getConfig() const;
@@ -106,6 +113,7 @@ private:
     bool _apActive;
     bool _staStarted;
     bool _ecoStandbySuspended;
+    bool _deviceUnlocked;
     uint32_t _connectStartMs;
     uint32_t _lastReconnectMs;
     char _statusText[48];

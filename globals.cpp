@@ -15,12 +15,14 @@
 MenuPage* pageMain = nullptr;
 MenuPage* pagePresets = nullptr;
 MenuPage* pageErrorLog = nullptr;
+MenuPage* pageUnlock = nullptr;
 MenuPage* pageSpeedTuning = nullptr;
 MenuPage* pagePhase = nullptr;
 MenuPage* pagePower = nullptr;
 MenuPage* pageMotor = nullptr;
 MenuPage* pageDisplay = nullptr;
 MenuPage* pageSystem = nullptr;
+MenuPage* pageSecurity = nullptr;
 MenuPage* pageBrakeTune = nullptr;
 MenuPage* pageRelayTest = nullptr;
 

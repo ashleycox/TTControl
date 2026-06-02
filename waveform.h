@@ -60,6 +60,9 @@ public:
     
     // --- Dashboard Diagnostics ---
     int16_t getSample(int channel);
+    uint32_t getLastBufferFillMs() const;
+    uint32_t getBufferFillCount() const;
+    bool isDmaRunning() const;
 
 private:
     // Double Buffering State
@@ -115,6 +118,9 @@ private:
     uint _pwmSlice1;
     
     volatile int _currentBufferIndex; // 0 or 1
+    volatile uint32_t _lastBufferFillMs;
+    volatile uint32_t _bufferFillCount;
+    bool _dmaStarted;
     
     void generateLUT();
     void lockState();
