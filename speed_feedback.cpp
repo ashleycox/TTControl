@@ -48,6 +48,7 @@ SpeedFeedback::SpeedFeedback() {
     _filteredRpm = 0.0f;
     _rpmError = 0.0f;
     _lastCountDelta = 0;
+    _sampleSequence = 0;
     _signalValid = false;
     _locked = false;
     _setupActive = false;
@@ -127,6 +128,7 @@ void SpeedFeedback::resetMeasurements() {
     _filteredRpm = 0.0f;
     _rpmError = 0.0f;
     _lastCountDelta = 0;
+    _sampleSequence = 0;
     _signalValid = false;
     _locked = false;
 }
@@ -182,6 +184,7 @@ void SpeedFeedback::update(float targetRpm) {
     _lastCountDelta = delta;
     _lastSampleCount = count;
     _lastSampleMs = nowMs;
+    _sampleSequence++;
     _signalValid = signalValid;
 
     if (!signalValid || _countsPerRev == 0 || elapsedMs == 0) {
@@ -237,6 +240,8 @@ SpeedFeedbackStatus SpeedFeedback::getStatus() {
     status.rpmError = _rpmError;
     status.countDelta = _lastCountDelta;
     status.lastPulseAgeMs = lastPulseUs == 0 ? UINT32_MAX : (nowUs - lastPulseUs) / 1000UL;
+    status.sampleTimeMs = _lastSampleMs;
+    status.sampleSequence = _sampleSequence;
     return status;
 }
 

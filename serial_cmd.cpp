@@ -1748,6 +1748,35 @@ static void printClosedLoopStatus() {
     Serial.print(feedback.invalidTransitions);
     Serial.print(", Debounced: ");
     Serial.println(feedback.debouncedTransitions);
+
+    ClosedLoopTuningStatus tuning = motor.getClosedLoopTuningStatus();
+    ClosedLoopMetrics metrics = tuning.metrics;
+    uint32_t lockPercent = metrics.validSamples > 0 ? (metrics.lockedSamples * 100UL) / metrics.validSamples : 0;
+    Serial.print("CL Stability: samples ");
+    Serial.print(metrics.validSamples);
+    Serial.print(", lock ");
+    Serial.print(lockPercent);
+    Serial.print("%, avg abs ");
+    Serial.print(metrics.averageAbsErrorRpm, 4);
+    Serial.print(" RPM, peak ");
+    Serial.print(metrics.peakAbsErrorRpm, 4);
+    Serial.println(" RPM");
+    Serial.print("CL Events: dropouts ");
+    Serial.print(metrics.dropoutEvents);
+    Serial.print(", saturation ");
+    Serial.print(metrics.saturationEvents);
+    Serial.print(", direction ");
+    Serial.print(metrics.directionFaultEvents);
+    Serial.print(", plausibility ");
+    Serial.print(metrics.plausibilityEvents);
+    Serial.print(", lock timeout ");
+    Serial.print(metrics.lockTimeoutEvents);
+    Serial.print(", amp recovery ");
+    Serial.println(metrics.ampRecoveryEvents);
+    Serial.print("CL Tune: ");
+    Serial.print(tuning.stepName);
+    Serial.print(" - ");
+    Serial.println(tuning.recommendation);
 #endif
 }
 
@@ -1804,6 +1833,11 @@ static void handleClosedLoopCommand(const String& input) {
         Serial.println("cl setup status - Show captured count and direction");
         Serial.println("cl setup apply - Apply suggested counts/rev and reverse direction");
         Serial.println("cl setup stop - Cancel setup capture");
+        Serial.println("cl tune start - Start guided closed-loop tuning");
+        Serial.println("cl tune next - Advance tuning step");
+        Serial.println("cl tune status - Show tuning guidance and stability metrics");
+        Serial.println("cl tune suggest - Show current tuning recommendation");
+        Serial.println("cl tune stop - Stop guided tuning");
         return;
     }
 
@@ -1818,6 +1852,49 @@ static void handleClosedLoopCommand(const String& input) {
     if (command == "reset") {
         motor.resetClosedLoop();
         Serial.println("Closed-loop controller reset.");
+        return;
+    }
+
+    if (command == "tune") {
+        String tuneCommand = args.size() >= 2 ? args[1] : "status";
+        tuneCommand.toLowerCase();
+
+        if (tuneCommand == "start") {
+            motor.beginClosedLoopTuning();
+            Serial.println("Closed-loop tuning started.");
+        } else if (tuneCommand == "next") {
+            motor.advanceClosedLoopTuning();
+            Serial.println("Closed-loop tuning advanced.");
+        } else if (tuneCommand == "stop" || tuneCommand == "cancel") {
+            motor.cancelClosedLoopTuning();
+            Serial.println("Closed-loop tuning stopped.");
+        } else if (tuneCommand != "status" && tuneCommand != "suggest") {
+            Serial.println("Unknown tune command. Use start, next, status, suggest, or stop.");
+            return;
+        }
+
+        ClosedLoopTuningStatus tuning = motor.getClosedLoopTuningStatus();
+        ClosedLoopMetrics metrics = tuning.metrics;
+        uint32_t lockPercent = metrics.validSamples > 0 ? (metrics.lockedSamples * 100UL) / metrics.validSamples : 0;
+        Serial.print("Tune Step: ");
+        Serial.println(tuning.stepName);
+        if (tuneCommand != "suggest") {
+            Serial.print("Instruction: ");
+            Serial.println(tuning.instruction);
+        }
+        Serial.print("Recommendation: ");
+        Serial.println(tuning.recommendation);
+        if (tuneCommand != "suggest") {
+            Serial.print("Metrics: samples ");
+            Serial.print(metrics.validSamples);
+            Serial.print(", lock ");
+            Serial.print(lockPercent);
+            Serial.print("%, avg abs ");
+            Serial.print(metrics.averageAbsErrorRpm, 4);
+            Serial.print(" RPM, peak ");
+            Serial.print(metrics.peakAbsErrorRpm, 4);
+            Serial.println(" RPM");
+        }
         return;
     }
 
@@ -2013,6 +2090,7 @@ void printHelp() {
 #if CLOSED_LOOP_SPEED_ENABLE
     Serial.println("cl status|reset|help");
     Serial.println("cl setup start|status|apply|stop");
+    Serial.println("cl tune start|next|status|suggest|stop");
 #endif
     Serial.println("diag safety - Dry-run safety diagnostic");
     Serial.println("wifi help|status|wizard|scan|connect");

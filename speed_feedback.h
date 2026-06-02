@@ -35,6 +35,8 @@ struct SpeedFeedbackStatus {
     uint32_t invalidTransitions;
     uint32_t debouncedTransitions;
     uint32_t lastPulseAgeMs;
+    uint32_t sampleTimeMs;
+    uint32_t sampleSequence;
 };
 
 struct SpeedFeedbackSetupStatus {
@@ -110,6 +112,7 @@ private:
     float _filteredRpm;
     float _rpmError;
     int32_t _lastCountDelta;
+    uint32_t _sampleSequence;
     bool _signalValid;
     bool _locked;
 

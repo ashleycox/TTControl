@@ -486,6 +486,28 @@ void actionClosedLoopSetupStop() {
     ui.showMessage("Setup Stopped", 1200);
 }
 
+void actionClosedLoopTuneStart() {
+    motor.beginClosedLoopTuning();
+    ClosedLoopTuningStatus tuning = motor.getClosedLoopTuningStatus();
+    ui.showMessage(tuning.stepName, 1500);
+}
+
+void actionClosedLoopTuneNext() {
+    motor.advanceClosedLoopTuning();
+    ClosedLoopTuningStatus tuning = motor.getClosedLoopTuningStatus();
+    ui.showMessage(tuning.stepName, 1500);
+}
+
+void actionClosedLoopTuneStatus() {
+    ClosedLoopTuningStatus tuning = motor.getClosedLoopTuningStatus();
+    ui.showMessage(tuning.recommendation, 2500);
+}
+
+void actionClosedLoopTuneStop() {
+    motor.cancelClosedLoopTuning();
+    ui.showMessage("Tune Stopped", 1200);
+}
+
 void actionEnterClosedLoop() {
     if (!pageClosedLoop) pageClosedLoop = new MenuPage("Closed Loop");
     pageClosedLoop->clear();
@@ -705,6 +727,10 @@ void actionEnterClosedLoop() {
     pageClosedLoop->addItem(new MenuAction("Setup Stat", actionClosedLoopSetupStatus));
     pageClosedLoop->addItem(new MenuAction("Setup Apply", actionClosedLoopSetupApply));
     pageClosedLoop->addItem(new MenuAction("Setup Stop", actionClosedLoopSetupStop));
+    pageClosedLoop->addItem(new MenuAction("Tune Start", actionClosedLoopTuneStart));
+    pageClosedLoop->addItem(new MenuAction("Tune Next", actionClosedLoopTuneNext));
+    pageClosedLoop->addItem(new MenuAction("Tune Stat", actionClosedLoopTuneStatus));
+    pageClosedLoop->addItem(new MenuAction("Tune Stop", actionClosedLoopTuneStop));
     pageClosedLoop->addItem(new MenuAction("Back", [](){ ui.back(); }));
     ui.navigateTo(pageClosedLoop);
 }

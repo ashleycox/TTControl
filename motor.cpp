@@ -79,6 +79,15 @@ MotorController::MotorController() {
     _closedLoopAmpRecoveryLatched = false;
     _rampStartRpm = 0.0;
     _rampTargetRpm = 0.0;
+    memset(&_closedLoopMetrics, 0, sizeof(_closedLoopMetrics));
+    _closedLoopErrorSumRpm = 0.0f;
+    _closedLoopAbsErrorSumRpm = 0.0f;
+    _closedLoopMetricsLastSampleSequence = 0;
+    _closedLoopMetricsLastSampleMs = 0;
+    _closedLoopLastErrorSign = 0;
+    _closedLoopMetricsLastSignalValid = false;
+    _closedLoopMetricsWasSaturated = false;
+    _closedLoopTuneStep = CLOSED_LOOP_TUNE_IDLE;
     _powerOnDelayActive = true;
     _powerOnTime = 0;
     _isSweepingMode = false;
@@ -357,7 +366,11 @@ void MotorController::update() {
                 }
 
 #if CLOSED_LOOP_SPEED_ENABLE
-                updateClosedLoopAmpRecovery(now, speedFeedback.getStatus());
+                {
+                    SpeedFeedbackStatus feedback = speedFeedback.getStatus();
+                    updateClosedLoopAmpRecovery(now, feedback);
+                    recordClosedLoopMetrics(now, feedback);
+                }
 #endif
 
                 // 4. Update Runtime Counter
@@ -823,6 +836,179 @@ void MotorController::resetClosedLoop() {
     resetClosedLoopControl(true);
 }
 
+void MotorController::beginClosedLoopTuning() {
+#if CLOSED_LOOP_SPEED_ENABLE
+    settings.get().closedLoopEnabled = true;
+    settings.get().closedLoopControlMode = CLOSED_LOOP_CONTROL_MONITOR;
+    _closedLoopTuneStep = CLOSED_LOOP_TUNE_SENSOR;
+    resetClosedLoopControl(true);
+    speedFeedback.configure();
+    speedFeedback.beginSetupCapture();
+#endif
+}
+
+void MotorController::advanceClosedLoopTuning() {
+#if CLOSED_LOOP_SPEED_ENABLE
+    if (_closedLoopTuneStep == CLOSED_LOOP_TUNE_IDLE) {
+        beginClosedLoopTuning();
+        return;
+    }
+
+    if (_closedLoopTuneStep == CLOSED_LOOP_TUNE_SENSOR) {
+        SpeedFeedbackSetupStatus setup = speedFeedback.getSetupStatus();
+        if (setup.active && setup.suggestedCountsPerRev > 0) {
+            settings.get().closedLoopCountsPerRev = setup.suggestedCountsPerRev;
+            if (settings.get().closedLoopSensorMode == CLOSED_LOOP_SENSOR_QUADRATURE) {
+                settings.get().closedLoopReverseDirection = setup.suggestedReverseDirection;
+            }
+        }
+        speedFeedback.cancelSetupCapture();
+        speedFeedback.configure();
+    }
+
+    if (_closedLoopTuneStep < CLOSED_LOOP_TUNE_VERIFY) {
+        _closedLoopTuneStep++;
+    } else {
+        _closedLoopTuneStep = CLOSED_LOOP_TUNE_IDLE;
+    }
+
+    if (_closedLoopTuneStep == CLOSED_LOOP_TUNE_MONITOR) {
+        settings.get().closedLoopControlMode = CLOSED_LOOP_CONTROL_MONITOR;
+    } else if (_closedLoopTuneStep == CLOSED_LOOP_TUNE_KP) {
+        settings.get().closedLoopControlMode = CLOSED_LOOP_CONTROL_CORRECT;
+        ClosedLoopSpeedTuning& tuning = settings.getCurrentClosedLoopTuning();
+        tuning.ki = 0.0f;
+        tuning.kd = 0.0f;
+    }
+
+    resetClosedLoopControl(true);
+#endif
+}
+
+void MotorController::cancelClosedLoopTuning() {
+#if CLOSED_LOOP_SPEED_ENABLE
+    _closedLoopTuneStep = CLOSED_LOOP_TUNE_IDLE;
+    speedFeedback.cancelSetupCapture();
+#endif
+}
+
+const char* MotorController::closedLoopTuneStepName(uint8_t step) const {
+    switch (step) {
+        case CLOSED_LOOP_TUNE_SENSOR: return "Sensor setup";
+        case CLOSED_LOOP_TUNE_MONITOR: return "Monitor";
+        case CLOSED_LOOP_TUNE_KP: return "Kp tuning";
+        case CLOSED_LOOP_TUNE_KI: return "Ki tuning";
+        case CLOSED_LOOP_TUNE_LIMITS: return "Limits";
+        case CLOSED_LOOP_TUNE_VERIFY: return "Verify";
+        default: return "Idle";
+    }
+}
+
+const char* MotorController::closedLoopTuneInstruction(uint8_t step) const {
+    switch (step) {
+        case CLOSED_LOOP_TUNE_SENSOR:
+            return "Rotate exactly one platter revolution, then advance.";
+        case CLOSED_LOOP_TUNE_MONITOR:
+            return "Run the motor and confirm stable measured RPM.";
+        case CLOSED_LOOP_TUNE_KP:
+            return "Raise Kp until error falls without hunting.";
+        case CLOSED_LOOP_TUNE_KI:
+            return "Add Ki only for steady remaining error.";
+        case CLOSED_LOOP_TUNE_LIMITS:
+            return "Set correction, slew, and lock limits from the run.";
+        case CLOSED_LOOP_TUNE_VERIFY:
+            return "Run a full session and check lock, error, and dropouts.";
+        default:
+            return "Start tuning to begin the guided workflow.";
+    }
+}
+
+void MotorController::buildClosedLoopRecommendation(char* out, size_t outSize) {
+#if CLOSED_LOOP_SPEED_ENABLE
+    if (!out || outSize == 0) return;
+    GlobalSettings& g = settings.get();
+    ClosedLoopSpeedTuning& tuning = settings.getCurrentClosedLoopTuning();
+    SpeedFeedbackStatus feedback = speedFeedback.getStatus();
+    SpeedFeedbackSetupStatus setup = speedFeedback.getSetupStatus();
+
+    if (!g.closedLoopEnabled) {
+        snprintf(out, outSize, "Enable closed loop before tuning.");
+        return;
+    }
+    if (setup.active && setup.suggestedCountsPerRev > 0) {
+        snprintf(out, outSize, "Apply setup: %u counts/rev%s.",
+            setup.suggestedCountsPerRev,
+            setup.suggestedReverseDirection ? ", reverse direction" : "");
+        return;
+    }
+    if (setup.active) {
+        snprintf(out, outSize, "Rotate one full revolution; captured %ld counts.",
+            (long)setup.countDelta);
+        return;
+    }
+    if (!feedback.signalValid) {
+        snprintf(out, outSize, "No valid signal: check sensor wiring, edge/debounce, and counts/rev.");
+        return;
+    }
+    if (feedback.debouncedTransitions > 0 &&
+        feedback.debouncedTransitions > (uint32_t)(abs(feedback.countDelta) + 4)) {
+        snprintf(out, outSize, "Sensor is noisy: increase debounce or clean the feedback signal.");
+        return;
+    }
+    if (_closedLoopMetrics.validSamples < 5) {
+        snprintf(out, outSize, "Collect more samples at steady speed.");
+        return;
+    }
+    if (_closedLoopMetrics.dropoutEvents > 0) {
+        snprintf(out, outSize, "Dropouts seen: check sensor timeout, wiring, and target counts/rev.");
+        return;
+    }
+    if (_closedLoopMetrics.saturationEvents > 0 || _closedLoopSaturationStart != 0) {
+        snprintf(out, outSize, "Correction is saturating: retune base frequency or raise the correction limit carefully.");
+        return;
+    }
+    if (_closedLoopMetrics.errorSignChanges > (_closedLoopMetrics.validSamples / 3) &&
+        _closedLoopMetrics.peakAbsErrorRpm > tuning.lockToleranceRpm * 2.0f) {
+        snprintf(out, outSize, "Likely hunting: reduce Kp or increase RPM filtering.");
+        return;
+    }
+    if (fabs(_closedLoopMetrics.averageErrorRpm) > tuning.lockToleranceRpm * 2.0f &&
+        _closedLoopMetrics.averageAbsErrorRpm < _closedLoopMetrics.peakAbsErrorRpm * 0.75f) {
+        snprintf(out, outSize, "Steady offset remains: add a small Ki or adjust base frequency.");
+        return;
+    }
+    if (_closedLoopMetrics.averageAbsErrorRpm > tuning.lockToleranceRpm * 4.0f) {
+        snprintf(out, outSize, "Response is weak: increase Kp in small steps.");
+        return;
+    }
+    uint32_t lockPercent = _closedLoopMetrics.validSamples > 0 ?
+        (_closedLoopMetrics.lockedSamples * 100UL) / _closedLoopMetrics.validSamples : 0;
+    if (lockPercent >= 90 && _closedLoopMetrics.averageAbsErrorRpm <= tuning.lockToleranceRpm) {
+        snprintf(out, outSize, "Tuning looks stable: lock %lu%%, avg error %.3f RPM.",
+            (unsigned long)lockPercent,
+            _closedLoopMetrics.averageAbsErrorRpm);
+        return;
+    }
+    snprintf(out, outSize, "Keep observing: lock %lu%%, avg error %.3f RPM, peak %.3f RPM.",
+        (unsigned long)lockPercent,
+        _closedLoopMetrics.averageAbsErrorRpm,
+        _closedLoopMetrics.peakAbsErrorRpm);
+#else
+    if (out && outSize > 0) snprintf(out, outSize, "Closed loop is not compiled in.");
+#endif
+}
+
+ClosedLoopTuningStatus MotorController::getClosedLoopTuningStatus() {
+    ClosedLoopTuningStatus status;
+    status.active = _closedLoopTuneStep != CLOSED_LOOP_TUNE_IDLE;
+    status.step = _closedLoopTuneStep;
+    status.stepName = closedLoopTuneStepName(_closedLoopTuneStep);
+    snprintf(status.instruction, sizeof(status.instruction), "%s", closedLoopTuneInstruction(_closedLoopTuneStep));
+    buildClosedLoopRecommendation(status.recommendation, sizeof(status.recommendation));
+    status.metrics = _closedLoopMetrics;
+    return status;
+}
+
 float MotorController::calculateClosedLoopTargetRpm() const {
     return calculateClosedLoopTargetRpmForSpeed(_currentSpeedMode);
 }
@@ -881,6 +1067,7 @@ void MotorController::resetClosedLoopControl(bool resetFeedback) {
     _closedLoopAmpRecoveryLatched = false;
     if (resetFeedback) {
         speedFeedback.reset();
+        resetClosedLoopMetrics();
     }
 }
 
@@ -941,16 +1128,110 @@ void MotorController::resetClosedLoopPidState() {
     _closedLoopSaturationStart = 0;
 }
 
+void MotorController::resetClosedLoopMetrics() {
+    memset(&_closedLoopMetrics, 0, sizeof(_closedLoopMetrics));
+    _closedLoopErrorSumRpm = 0.0f;
+    _closedLoopAbsErrorSumRpm = 0.0f;
+    _closedLoopMetricsLastSampleSequence = 0;
+    _closedLoopMetricsLastSampleMs = 0;
+    _closedLoopLastErrorSign = 0;
+    _closedLoopMetricsLastSignalValid = false;
+    _closedLoopMetricsWasSaturated = false;
+}
+
+void MotorController::recordClosedLoopMetrics(uint32_t now, const SpeedFeedbackStatus& feedback) {
+#if CLOSED_LOOP_SPEED_ENABLE
+    bool saturated = _closedLoopSaturationStart != 0;
+    if (saturated && !_closedLoopMetricsWasSaturated) {
+        _closedLoopMetrics.saturationEvents++;
+    }
+    _closedLoopMetricsWasSaturated = saturated;
+
+    if (feedback.sampleSequence == _closedLoopMetricsLastSampleSequence) return;
+
+    uint32_t elapsedMs = 0;
+    if (_closedLoopMetricsLastSampleMs != 0 && feedback.sampleTimeMs >= _closedLoopMetricsLastSampleMs) {
+        elapsedMs = feedback.sampleTimeMs - _closedLoopMetricsLastSampleMs;
+    }
+    _closedLoopMetricsLastSampleMs = feedback.sampleTimeMs != 0 ? feedback.sampleTimeMs : now;
+    _closedLoopMetricsLastSampleSequence = feedback.sampleSequence;
+    _closedLoopMetrics.sampleCount++;
+
+    if (_closedLoopMetricsLastSignalValid && !feedback.signalValid) {
+        _closedLoopMetrics.dropoutEvents++;
+    }
+    _closedLoopMetricsLastSignalValid = feedback.signalValid;
+
+    if (saturated) {
+        _closedLoopMetrics.saturatedMs += elapsedMs;
+    }
+
+    if (!feedback.signalValid) return;
+
+    _closedLoopMetrics.validSamples++;
+    _closedLoopMetrics.validMs += elapsedMs;
+    if (feedback.locked) {
+        _closedLoopMetrics.lockedSamples++;
+        _closedLoopMetrics.lockedMs += elapsedMs;
+    }
+
+    float error = feedback.rpmError;
+    float absError = fabs(error);
+    _closedLoopMetrics.lastErrorRpm = error;
+    _closedLoopErrorSumRpm += error;
+    _closedLoopAbsErrorSumRpm += absError;
+    _closedLoopMetrics.averageErrorRpm = _closedLoopErrorSumRpm / (float)_closedLoopMetrics.validSamples;
+    _closedLoopMetrics.averageAbsErrorRpm = _closedLoopAbsErrorSumRpm / (float)_closedLoopMetrics.validSamples;
+    if (absError > _closedLoopMetrics.peakAbsErrorRpm) {
+        _closedLoopMetrics.peakAbsErrorRpm = absError;
+    }
+
+    ClosedLoopSpeedTuning& tuning = settings.getCurrentClosedLoopTuning();
+    int8_t sign = 0;
+    if (error > tuning.deadbandRpm) sign = 1;
+    else if (error < -tuning.deadbandRpm) sign = -1;
+    if (sign != 0 && _closedLoopLastErrorSign != 0 && sign != _closedLoopLastErrorSign) {
+        _closedLoopMetrics.errorSignChanges++;
+    }
+    if (sign != 0) {
+        _closedLoopLastErrorSign = sign;
+    }
+#else
+    (void)now;
+    (void)feedback;
+#endif
+}
+
 void MotorController::reportClosedLoopAction(const char* message, uint8_t action, bool& latch) {
+    reportClosedLoopAction(message, action, latch, nullptr);
+}
+
+void MotorController::reportClosedLoopAction(const char* message, uint8_t action, bool& latch, const SpeedFeedbackStatus* feedback) {
 #if CLOSED_LOOP_SPEED_ENABLE
     if (action == CLOSED_LOOP_FAULT_IGNORE || latch) return;
 
     latch = true;
-    errorHandler.report(ERR_SPEED_FEEDBACK, message, action == CLOSED_LOOP_FAULT_STOP);
+    char detail[180];
+    if (feedback) {
+        snprintf(detail, sizeof(detail),
+            "%s; target %.3f rpm, measured %.3f rpm, error %.3f rpm, correction %.3f Hz, signal %s, count %ld, direction %d",
+            message,
+            feedback->targetRpm,
+            feedback->filteredRpm,
+            feedback->rpmError,
+            _closedLoopCorrectionHz,
+            feedback->signalValid ? "valid" : "lost",
+            (long)feedback->count,
+            (int)feedback->direction);
+    } else {
+        snprintf(detail, sizeof(detail), "%s", message);
+    }
+    errorHandler.report(ERR_SPEED_FEEDBACK, detail, action == CLOSED_LOOP_FAULT_STOP);
 #else
     (void)message;
     (void)action;
     (void)latch;
+    (void)feedback;
 #endif
 }
 
@@ -968,7 +1249,10 @@ bool MotorController::closedLoopSafetyAllowsCorrection(uint32_t now, const Speed
         }
 
         if (implausible) {
-            reportClosedLoopAction("Speed feedback implausible", g.closedLoopPlausibilityAction, _closedLoopPlausibilityLatched);
+            if (!_closedLoopPlausibilityLatched && g.closedLoopPlausibilityAction != CLOSED_LOOP_FAULT_IGNORE) {
+                _closedLoopMetrics.plausibilityEvents++;
+            }
+            reportClosedLoopAction("Speed feedback implausible", g.closedLoopPlausibilityAction, _closedLoopPlausibilityLatched, &feedback);
             if (g.closedLoopPlausibilityAction == CLOSED_LOOP_FAULT_STOP) return false;
         } else {
             _closedLoopPlausibilityLatched = false;
@@ -983,7 +1267,10 @@ bool MotorController::closedLoopSafetyAllowsCorrection(uint32_t now, const Speed
             if (_closedLoopLockWaitStart == 0) {
                 _closedLoopLockWaitStart = now;
             } else if (now - _closedLoopLockWaitStart >= g.closedLoopLockTimeoutMs) {
-                reportClosedLoopAction("Speed feedback lock timeout", g.closedLoopLockTimeoutAction, _closedLoopLockTimeoutLatched);
+                if (!_closedLoopLockTimeoutLatched && g.closedLoopLockTimeoutAction != CLOSED_LOOP_FAULT_IGNORE) {
+                    _closedLoopMetrics.lockTimeoutEvents++;
+                }
+                reportClosedLoopAction("Speed feedback lock timeout", g.closedLoopLockTimeoutAction, _closedLoopLockTimeoutLatched, &feedback);
                 if (g.closedLoopLockTimeoutAction == CLOSED_LOOP_FAULT_STOP) return false;
             }
         }
@@ -1076,10 +1363,8 @@ float MotorController::applyClosedLoopCorrection(uint32_t now, float openLoopFre
         resetClosedLoopPidState();
 
         if (g.closedLoopDropoutAction == CLOSED_LOOP_DROPOUT_STOP) {
-            if (!_closedLoopDropoutLatched) {
-                _closedLoopDropoutLatched = true;
-                errorHandler.report(ERR_SPEED_FEEDBACK, "Speed feedback lost", true);
-            }
+            if (!_closedLoopDropoutLatched) _closedLoopMetrics.dropoutEvents++;
+            reportClosedLoopAction("Speed feedback lost", CLOSED_LOOP_FAULT_STOP, _closedLoopDropoutLatched, &feedback);
             return openLoopFreq;
         }
 
@@ -1111,10 +1396,9 @@ float MotorController::applyClosedLoopCorrection(uint32_t now, float openLoopFre
         feedback.direction == SPEED_FEEDBACK_DIR_REVERSE &&
         g.closedLoopDirectionFaultAction != CLOSED_LOOP_FAULT_IGNORE) {
         if (!_closedLoopDirectionFaultLatched) {
-            _closedLoopDirectionFaultLatched = true;
-            bool critical = g.closedLoopDirectionFaultAction == CLOSED_LOOP_FAULT_STOP;
-            errorHandler.report(ERR_SPEED_FEEDBACK, "Speed feedback reversed", critical);
+            _closedLoopMetrics.directionFaultEvents++;
         }
+        reportClosedLoopAction("Speed feedback reversed", g.closedLoopDirectionFaultAction, _closedLoopDirectionFaultLatched, &feedback);
         if (g.closedLoopDirectionFaultAction == CLOSED_LOOP_FAULT_STOP) {
             return openLoopFreq;
         }
@@ -1168,7 +1452,7 @@ float MotorController::applyClosedLoopCorrection(uint32_t now, float openLoopFre
             _closedLoopSaturationStart = now;
         } else if (g.closedLoopSaturationTimeMs > 0 &&
                    now - _closedLoopSaturationStart >= g.closedLoopSaturationTimeMs) {
-            reportClosedLoopAction("Speed correction saturated", g.closedLoopSaturationAction, _closedLoopSaturationLatched);
+            reportClosedLoopAction("Speed correction saturated", g.closedLoopSaturationAction, _closedLoopSaturationLatched, &feedback);
             if (g.closedLoopSaturationAction == CLOSED_LOOP_FAULT_STOP) {
                 _closedLoopActive = false;
                 return openLoopFreq;
@@ -1232,10 +1516,12 @@ void MotorController::updateClosedLoopAmpRecovery(uint32_t now, const SpeedFeedb
             _currentAmp = _targetAmp;
             waveform.setAmplitude(_currentAmp);
             _ampReductionStartTime = now;
+            _closedLoopMetrics.ampRecoveryEvents++;
         }
-        reportClosedLoopAction("Speed unlocked, full amplitude restored", CLOSED_LOOP_FAULT_WARN, _closedLoopAmpRecoveryLatched);
+        reportClosedLoopAction("Speed unlocked, full amplitude restored", CLOSED_LOOP_FAULT_WARN, _closedLoopAmpRecoveryLatched, &feedback);
     } else if (g.closedLoopAmpRecoveryMode == CLOSED_LOOP_AMP_RECOVERY_WARN) {
-        reportClosedLoopAction("Speed unlocked after amplitude reduction", CLOSED_LOOP_FAULT_WARN, _closedLoopAmpRecoveryLatched);
+        if (!_closedLoopAmpRecoveryLatched) _closedLoopMetrics.ampRecoveryEvents++;
+        reportClosedLoopAction("Speed unlocked after amplitude reduction", CLOSED_LOOP_FAULT_WARN, _closedLoopAmpRecoveryLatched, &feedback);
     }
 #else
     (void)now;
