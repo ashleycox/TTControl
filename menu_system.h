@@ -37,6 +37,7 @@ public:
     // --- Interaction Methods ---
     virtual void onSelect(MenuPage*& currentPage) {} // Called when Select button pressed
     virtual void onInput(int delta) {} // Called when Encoder rotated (if editing)
+    virtual bool onBack(MenuPage*& currentPage) { return false; } // Called when Back pressed
 
     // --- State Methods ---
     virtual bool isDirty() const { return false; } // Returns true if unsaved changes exist
@@ -157,6 +158,12 @@ public:
     bool isEditable() const override { return true; }
     bool isEditing() const override { return _editing; }
     bool isDirty() const override { return _temp != *_target; }
+    bool onBack(MenuPage*& currentPage) override {
+        if (!_editing) return false;
+        *_target = _temp;
+        _editing = false;
+        return true;
+    }
 
 protected:
     T* _target;
@@ -185,6 +192,7 @@ public:
              const char* const* labels, size_t labelCount, ChangeCallback callback);
     void onSelect(MenuPage*& currentPage) override;
     void onInput(int delta) override;
+    bool onBack(MenuPage*& currentPage) override;
     void getValueString(char* buffer, size_t size) const override;
     void setChangeCallback(ChangeCallback callback);
 
@@ -234,6 +242,7 @@ public:
     ~MenuText();
     void onSelect(MenuPage*& currentPage) override;
     void onInput(int delta) override;
+    bool onBack(MenuPage*& currentPage) override;
     void getValueString(char* buffer, size_t size) const override;
 
     bool isEditable() const override { return true; }

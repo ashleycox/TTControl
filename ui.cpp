@@ -235,7 +235,7 @@ void UserInterface::handleInput() {
 
     // --- Sweep UI Trap ---
     if (motor.isSweepingMode()) {
-        if (evt == EVT_SELECT || evt == EVT_DOUBLE_CLICK || evt == EVT_BACK) {
+        if (evt == EVT_SELECT || evt == EVT_DOUBLE_CLICK || evt == EVT_BACK || evt == EVT_EXIT) {
             motor.stopSymmetricSweep();
             // The phase offsets in settings.getCurrentSpeedSettings() were dynamically updated by motor.cpp.
             // We just need to save them.
@@ -400,8 +400,15 @@ void UserInterface::handleInput() {
             }
         }
 
-        // Hold in the menu commits the shadow speed settings and exits.
-        if (evt == EVT_BACK || evt == EVT_EXIT) saveMenuChangesAndExit();
+        if (evt == EVT_BACK) {
+            item = _currentPage->getItem(_currentPage->getSelection());
+            if (item && item->onBack(_currentPage)) return;
+            if (_currentPage == pageRelayTest) motor.endRelayTest();
+            if (_menuStack.empty()) cancelMenuChangesAndExit();
+            else back();
+        }
+
+        if (evt == EVT_EXIT) saveMenuChangesAndExit();
 
     } else {
         // Main Status Screen Logic
@@ -1093,6 +1100,8 @@ void UserInterface::drawError() {
 }
 
 void UserInterface::navigateTo(MenuPage* page) {
+    if (!page || page == _currentPage) return;
+
     if (_currentPage) _menuStack.push_back(_currentPage);
 
     // Trigger Transition

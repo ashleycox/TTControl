@@ -215,6 +215,14 @@ void MenuByte::onInput(int delta) {
     }
 }
 
+bool MenuByte::onBack(MenuPage*& currentPage) {
+    if (!_editing) return false;
+    *_target = (uint8_t)_temp;
+    if (_changeCallback) _changeCallback((uint8_t)_temp);
+    _editing = false;
+    return true;
+}
+
 void MenuByte::getValueString(char* buffer, size_t size) const {
     int value = _editing ? _temp : (int)*_target;
     if (_labels && value >= 0 && (size_t)value < _labelCount && _labels[value]) {
@@ -377,6 +385,13 @@ void MenuText::onInput(int delta) {
             _temp[_cursorPos + 1] = 0;
         }
     }
+}
+
+bool MenuText::onBack(MenuPage*& currentPage) {
+    if (!_editing) return false;
+    saveTempToTarget();
+    _editing = false;
+    return true;
 }
 
 void MenuText::getValueString(char* buffer, size_t size) const {

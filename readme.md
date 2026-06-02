@@ -244,7 +244,8 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
   - **Short Press:** Start/Stop Motor (or Wake from Standby).
   - **Double Press:** Enter Main Menu.
   - **Hold (Dashboard):** Enter Standby.
-  - **Hold (Menu):** Save & Exit Menu.
+  - **Hold (Menu):** Back one menu level; from Main Menu, cancel and exit.
+  - **Very Long Hold (Menu):** Save & Exit Menu.
   - **Rotate:** Change Speed (33/45/78).
   - **Press + Rotate:** Cycle Status Views (Standard -> Stats -> Dim).
 - **Status Modes:**
@@ -298,7 +299,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Setup-Only Safety:** When reached through an open setup AP, the hosted server only serves Wi-Fi configuration pages and network APIs. Motor controls, full settings, presets, and error logs are blocked until the device is reached through the configured Wi-Fi network, or through a protected setup access point.
 - **Guided Setup Wizard:** The open setup access point serves a network-only wizard for Wi-Fi mode, SSID/password, hidden SSID selection, DHCP/static addressing, fallback AP name/password, and AP channel. Leaving the setup AP password blank creates an open setup network.
 - **Serial Setup Wizard:** The Serial Monitor can configure the same network storage with `wifi wizard`, including Wi-Fi scanning, station credentials, hidden SSID selection, DHCP/static addressing, hostname, fallback setup AP settings, and immediate save/reconnect.
-- **Network Menu:** The OLED menu exposes Wi-Fi enable/disable, setup AP/station mode, standby mode, hostname, station SSID/password, hidden SSID selection, DHCP, AP fallback, AP SSID/password, AP channel, read-only guest mode, web PIN editing/reset, saved web home page, apply/reconnect, and setup AP actions.
+- **Network Menu:** The OLED menu groups network controls into overview, station credentials, IP/power, setup AP, and web access pages. It exposes Wi-Fi enable/disable, setup AP/station mode, standby mode, hostname, station SSID/password, hidden SSID selection, DHCP, AP fallback, AP SSID/password, AP channel, read-only guest mode, web PIN editing/reset, saved web home page, apply/reconnect, and force-setup-AP actions.
 - **Credential Characters:** Browser, serial, and OLED network entry support printable special characters in SSIDs and passwords, including `@`, `/`, `!`, `#`, `$`, and `£`. The OLED text editor includes a shift option for uppercase entry.
 - **Hosted Web App:** When the device has a station connection or setup AP active, it hosts a local browser interface on port 80.
 - **User-Selectable Home Page:** The device saves which page opens first, including Dashboard, Control, Settings, Calibrate, Network, Presets, Bench, Diagnostics, or Errors. The saved home page applies to any browser that opens the device UI.
@@ -310,7 +311,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Simple Control View:** A dedicated large-button control page exposes the day-to-day start/stop/standby/speed/pitch controls without the full settings surface.
 - **78 RPM Visibility:** Browser speed controls, bench speed controls, and calibration speed selectors hide 78 RPM while `Enable 78 RPM` is off. A stale 78 RPM browser action is rejected with a clear message.
 - **Complete Controls:** Browser controls include start, stop, emergency stop, standby/wake, speed switching, pitch reset/set, relay test, relay test off, closed-loop controller reset/setup when compiled in, runtime reset, factory reset, and API support for reboot.
-- **Schema-Driven Full Settings UI:** The web interface fetches `/api/schema` from firmware and builds the complete settings UI from that schema, including global phase, motor, brake, relay, display, system, network, optional closed-loop feedback, and all per-speed speed/phase/filter/startup/closed-loop tuning settings.
+- **Schema-Driven Full Settings UI:** The web interface fetches `/api/schema` from firmware and builds the complete settings UI from that schema, with shorter grouped panels for global phase, motor amplitude/ramping/braking, brake, relay, display, system, network, optional closed-loop feedback, and all per-speed speed/phase/filter/startup/closed-loop tuning settings.
 - **Settings Search and Contextual Help:** The full settings page includes search by label, key, or help text. Every schema-driven setting has a Help control with purpose, range, units, accepted choices, key name, and safety context where relevant.
 - **Staged Editing and Validation:** Browser settings and network forms track unsaved changes, highlight safety-related edits, provide discard buttons, show a review of pending changes before save, and validate ranges, required fields, frequency limits, password length, and static IPv4 fields before applying.
 - **Guided Calibration:** The Calibrate page provides task-based forms for speed frequency, phase offsets, startup kick, braking, and amplitude tuning.
@@ -425,7 +426,8 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 | **Cycle Status View** | Press + Turn encoder | Standard -> Stats -> Dim |
 | **Enter Menu** | Double press encoder | N/A |
 | **Enter Standby** | Hold encoder (Dashboard) | N/A |
-| **Save & Exit Menu** | Hold encoder (Menu) | N/A |
+| **Back / Cancel Menu** | Hold encoder (Menu) | Back one level; from Main Menu, cancel and exit |
+| **Save & Exit Menu** | Very long hold encoder (Menu) | Saves all pending menu edits |
 
 ---
 
@@ -570,21 +572,35 @@ Use these keys with `set` and `get`. Speed-specific settings apply to the **curr
 
 ### 3.3. Screens and Menus
 
-The menu structure is designed for a data-driven implementation.
+The menu structure is data-driven and hierarchical. Short press selects, hold goes back one level, and very long hold saves all pending changes and exits. Most pages also include an explicit **Back** item for single-press navigation.
 
 #### Main Menu
 
 - **Exit Safe Mode** (Only visible if currently in Safe Mode: forces watchdog reboot targetting normal flash load)
 - **Edit Speed: [33/45/78]** (Toggle speed context for submenus)
-- **Speed Tuning:** Frequency, Limits, Filters (Per-Speed).
-- **Phase Control:** Phase Mode (Global), Offsets (Per-Speed).
-- **Motor Control:** Amps/Kick (Per-Speed), Braking (Global).
-- **Power Control:** Relays, Auto Standby/Boot (Global).
-- **Display:** Sleep, Dim, Saver, Errors (Global).
-- **System:** Pitch Reset, 78RPM, Logs (Global).
-- **Closed Loop:** Optional pulse or quadrature speed feedback, monitor/correction control, per-speed tuning, safety actions, sensor setup, and guided tuning, visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
-- **Network:** Wi-Fi setup and local web interface connection flow (Wi-Fi builds only).
-- **Presets:** Load, Save, Rename, and Clear presets.
+- **Speed Tuning:** Frequency, limits, and filters for the selected speed context.
+- **Phase Control:** Global phase mode and per-speed phase offsets.
+- **Motor Control:**
+  - **Startup:** Soft start and startup kick for the selected speed context.
+  - **Amplitude:** Reduced amplitude, amplitude delay, global V/f boost, and maximum amplitude.
+  - **Ramping:** Ramp type, smooth speed switching, and auto-start.
+  - **Braking:** Brake mode, mode-specific brake parameters, and Brake Tune.
+- **Power Control:** Relays, auto standby, auto boot, and relay test.
+- **Display:** Sleep, dimming, screensaver, dashboard visibility, and error display settings.
+- **System:** Input direction, pitch behavior, 78 RPM availability, optional amplifier limits, logs, runtime reset, boot speed, and factory reset.
+- **Closed Loop:** Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
+  - **Control:** Monitor/correct mode, target RPM, update interval, and RPM filter.
+  - **Sensor:** Pulse/quadrature sensor settings, debounce, and timeout.
+  - **Engage:** Engagement delay and signal/near-target requirements.
+  - **Tuning:** PID, ramp correction, and pitch-target tuning subpages.
+  - **Safety:** Dropout, saturation, plausibility, lock timeout, and amplitude recovery actions.
+  - **Tools:** Immediate apply/reset/status actions, one-revolution setup, and guided tuning.
+- **Network:** Visible only on Wi-Fi builds.
+  - **Station:** Station SSID, hidden SSID flag, and station password.
+  - **IP/Power:** Hostname, DHCP, setup AP fallback, and network standby mode.
+  - **Setup AP:** Setup access point SSID/password/channel.
+  - **Web Access:** Read-only guest mode, web PIN, saved web home page, and PIN reset.
+- **Presets:** Load, save, rename, and clear presets.
 - **Save & Exit:** Saves all changes to flash and returns to dashboard.
 - **Cancel:** Discards changes and reloads from flash.
 
@@ -607,30 +623,34 @@ The menu structure is designed for a data-driven implementation.
 
 #### Motor Control
 
-- **Soft Start**: Adjustable duration (0.0s to 10.0s) to ramp up amplitude gently.
-- **Red. Amp %**: Automatically lower voltage after spin-up to reduce motor noise and heat (10-100%).
-- **Amp Delay**: Configurable delay before amplitude reduction (0s to 60s).
-- **Kick Mult**: Startup kick multiplier.
-- **Kick Dur**: Startup kick duration.
-- **Kick Ramp**: Ramp down duration from kick.
-- **V/f Blend%**: Voltage/Frequency intensity mix against the base amplitude.
-- **V/f LowHz**: Frequency defining the low-speed V/f boost point.
-- **V/f Low%**: Voltage boost % at LowHz.
-- **V/f MidHz**: Frequency defining the mid-speed V/f boost point.
-- **V/f Mid%**: Voltage boost % at MidHz.
-- **Max Amp %**: Global maximum amplitude limit.
-- **SS Curve**: Soft Start Profile (0=Linear, 1=Log, 2=Exp).
-- **Smooth Sw**: Enable smooth frequency ramping between speeds.
-- **Sw Ramp**: Duration (s) for speed switch ramp.
-- **Brake Mode**: Braking mechanism (0=Off, 1=Pulse, 2=Ramp, 3=SoftStop).
-- **Brake Dur**: Braking duration (s).
-- **Brk Pulse**: Gap between pulses in Pulse mode (s).
-- **Brk StartF**: Frequency ramp range start for Ramp mode.
-- **Brk StopF**: Frequency ramp range stop for Ramp mode.
-- **Brk Cutoff**: Frequency when power drops in SoftStop coasting.
-- **Ramp Type**: Frequency soft start style (0=Linear, 1=S-Curve).
-- **Auto Start**: Start motor immediately after boot/wake.
-- **Brake Tune:** Guided brake tuning page with mode-specific settings, explicit Start Motor and Brake Stop actions, and Save Brake.
+- **Startup**
+  - **Soft Start:** Adjustable duration (0.0s to 10.0s) to ramp up amplitude gently.
+  - **Kick Mult:** Startup kick multiplier.
+  - **Kick Dur:** Startup kick duration; visible when kick multiplier is greater than 1.
+  - **Kick Ramp:** Ramp-down duration from kick; visible when kick multiplier is greater than 1.
+- **Amplitude**
+  - **Red. Amp %:** Automatically lower voltage after spin-up to reduce motor noise and heat (10-100%).
+  - **Amp Delay:** Configurable delay before amplitude reduction (0s to 60s).
+  - **V/f Blend%:** Voltage/frequency intensity mix against the base amplitude.
+  - **V/f LowHz:** Frequency defining the low-speed V/f boost point.
+  - **V/f Low%:** Voltage boost percentage at LowHz.
+  - **V/f MidHz:** Frequency defining the mid-speed V/f boost point.
+  - **V/f Mid%:** Voltage boost percentage at MidHz.
+  - **Max Amp %:** Global maximum amplitude limit.
+- **Ramping**
+  - **Ramp Type:** Frequency soft start style (0=Linear, 1=S-Curve).
+  - **SS Curve:** Soft start profile (0=Linear, 1=Log, 2=Exp); visible for linear ramp type.
+  - **Smooth Sw:** Enable smooth frequency ramping between speeds.
+  - **Sw Ramp:** Duration for speed switch ramp.
+  - **Auto Start:** Start motor immediately after boot/wake.
+- **Braking**
+  - **Brake Mode:** Braking mechanism (0=Off, 1=Pulse, 2=Ramp, 3=SoftStop).
+  - **Brake Dur:** Braking duration.
+  - **Brk Pulse:** Gap between pulses in Pulse mode.
+  - **Brk StartF:** Frequency ramp range start for Ramp mode.
+  - **Brk StopF:** Frequency ramp range stop for Ramp mode.
+  - **Brk Cutoff:** Frequency when power drops in SoftStop coasting.
+  - **Brake Tune:** Guided brake tuning page with mode-specific settings, explicit Start Motor and Brake Stop actions, and Save Brake.
 
 #### Power Control
 
@@ -665,9 +685,7 @@ The menu structure is designed for a data-driven implementation.
 - **Enable 78:** Toggle availability of 78 RPM mode.
 - **Amp Warn C:** Amplifier warning temperature. (If `AMP_MONITOR_ENABLE`)
 - **Amp Shut C:** Amplifier shutdown temperature. (If `AMP_MONITOR_ENABLE`)
-- **Boot Speed:** Select default speed on boot (0=33, 1=45, 2=Last Used).
-- **Welcome Msg:** Configurable welcome message on boot.
-- **Goodbye Msg:** Configurable goodbye message on shutdown.
+- **Boot Speed:** Select default speed on boot (0=33, 1=45, 2=78, 3=Last Used).
 - **Error Log:** View and clear system error logs.
 - **Reset Runtime:** Reset the total runtime counter (with confirmation).
 - **Fact Reset:** Factory Reset.
@@ -678,82 +696,112 @@ When `AMP_MONITOR_ENABLE` is compiled in, amplifier monitoring runs automaticall
 
 Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
 
-- **Enable:** Turns closed-loop feedback on or off.
-- **Control:** Selects Monitor mode or Correct mode.
-- **Sensor:** Selects pulse tachometer or quadrature feedback.
-- **Target RPM:** Per-speed target for the currently selected speed context.
-- **Counts/Rev:** Sensor counts per platter revolution after pulse or quadrature decode.
-- **Pulse Edge:** Rising, falling, or change counting for pulse tach mode.
-- **Quad Decode:** x1, x2, or x4 decode for A/B quadrature mode.
-- **Reverse Dir:** Inverts quadrature direction.
-- **Dir Fault:** Ignore, warn, or stop when quadrature reports reverse motion.
-- **Debounce us:** Minimum accepted time between sensor transitions.
-- **Timeout ms:** Maximum time without a valid count before feedback is lost.
-- **Engage ms:** Delay after stable running before correction starts.
-- **Req Signal:** Wait for a valid sensor signal before allowing correction.
-- **Req Near:** Wait until measured RPM is near target before allowing correction.
-- **Eng Tol:** RPM tolerance used by near-target engagement.
-- **Update ms:** Controller update interval.
-- **Filter A:** RPM filter alpha.
-- **Dead RPM:** Error deadband ignored by the controller.
-- **Lock Tol:** RPM tolerance used to declare speed lock.
-- **Lock ms:** Time inside tolerance before lock is reported.
-- **Kp / Ki / Kd:** PID gains.
-- **I Lim Hz:** Integral contribution limit.
-- **Corr Hz:** Total frequency correction limit.
-- **Slew Hz/s:** Maximum correction change rate.
-- **Dropout:** Open-loop, hold correction, or stop on signal loss.
-- **Ramp CL:** Disabled or track the live smooth speed-change ramp target.
-- **Ramp Kp:** Proportional gain used only while tracking a smooth speed-change ramp.
-- **Ramp Lim:** Maximum correction while tracking a smooth speed-change ramp.
-- **Pitch Mode:** Fixed holds the configured RPM target. Follow applies the effective current pitch ratio to that target.
-- **Pitch Slew:** Maximum RPM target change rate when pitch changes.
-- **Pitch Reset:** Target RPM jump that resets controller state.
-- **Sat ms:** Time at correction limit before the saturation action runs.
-- **Sat Act:** Ignore, warn, or stop after correction saturation.
-- **Min RPM:** Minimum plausible measured RPM.
-- **Max RPM:** Maximum plausible measured RPM.
-- **Plaus Act:** Ignore, warn, or stop after implausible RPM readings.
-- **Lock To:** Time allowed after engagement to reach lock.
-- **Lock Act:** Ignore, warn, or stop after lock timeout.
-- **Amp Rec:** Off, warn, or restore full amplitude if reduced-amplitude mode cannot hold lock.
-- **Amp Rec ms:** Delay before amplitude recovery action runs.
-- **Apply:** Reconfigure feedback immediately without waiting for menu exit.
-- **Reset PID:** Clear controller state and feedback counters.
-- **Sensor Test:** Show current feedback signal and RPM status.
-- **Setup Start:** Begin a one-revolution setup capture.
-- **Setup Stat:** Show captured count, direction, and suggested counts/rev.
-- **Setup Apply:** Apply suggested counts/rev and quadrature reverse direction when relevant.
-- **Setup Stop:** Cancel the setup capture.
-- **Tune Start:** Start the guided closed-loop tuning workflow.
-- **Tune Next:** Advance to the next tuning step.
-- **Tune Stat:** Show the current recommendation.
-- **Tune Apply:** Apply the current safe tuning recommendation, when one is available.
-- **Tune Stop:** Stop the guided tuning workflow.
+- **Closed Loop**
+  - **Target:** Shows the speed context currently being edited.
+  - **Enable:** Turns closed-loop feedback on or off.
+  - **Control:** Opens the control settings page.
+  - **Sensor:** Opens the sensor settings page.
+  - **Engage:** Opens the engagement settings page.
+  - **Tuning:** Opens PID, ramp, and pitch tuning subpages.
+  - **Safety:** Opens safety and fault-response settings.
+  - **Tools:** Opens action, setup, and guided tuning subpages.
+  - **Apply:** Reconfigure feedback immediately without waiting for menu exit.
+- **Control**
+  - **Control:** Selects Monitor mode or Correct mode.
+  - **Target RPM:** Per-speed target for the currently selected speed context.
+  - **Update ms:** Controller update interval.
+  - **Filter A:** RPM filter alpha.
+- **Sensor**
+  - **Sensor:** Selects pulse tachometer or quadrature feedback.
+  - **Counts/Rev:** Sensor counts per platter revolution after pulse or quadrature decode.
+  - **Pulse Edge:** Rising, falling, or change counting for pulse tach mode.
+  - **Quad Decode:** x1, x2, or x4 decode for A/B quadrature mode.
+  - **Reverse Dir:** Inverts quadrature direction.
+  - **Dir Fault:** Ignore, warn, or stop when quadrature reports reverse motion.
+  - **Debounce us:** Minimum accepted time between sensor transitions.
+  - **Timeout ms:** Maximum time without a valid count before feedback is lost.
+- **Engage**
+  - **Engage ms:** Delay after stable running before correction starts.
+  - **Req Signal:** Wait for a valid sensor signal before allowing correction.
+  - **Req Near:** Wait until measured RPM is near target before allowing correction.
+  - **Eng Tol:** RPM tolerance used by near-target engagement.
+- **Tuning**
+  - **PID**
+    - **Dead RPM:** Error deadband ignored by the controller.
+    - **Lock Tol:** RPM tolerance used to declare speed lock.
+    - **Lock ms:** Time inside tolerance before lock is reported.
+    - **Kp / Ki / Kd:** PID gains.
+    - **I Lim Hz:** Integral contribution limit.
+    - **Corr Hz:** Total frequency correction limit.
+    - **Slew Hz/s:** Maximum correction change rate.
+  - **Ramp**
+    - **Ramp CL:** Disabled or track the live smooth speed-change ramp target.
+    - **Ramp Kp:** Proportional gain used only while tracking a smooth speed-change ramp.
+    - **Ramp Lim:** Maximum correction while tracking a smooth speed-change ramp.
+  - **Pitch**
+    - **Pitch Mode:** Fixed holds the configured RPM target. Follow applies the effective current pitch ratio to that target.
+    - **Pitch Slew:** Maximum RPM target change rate when pitch changes.
+    - **Pitch Reset:** Target RPM jump that resets controller state.
+- **Safety**
+  - **Dropout:** Open-loop, hold correction, or stop on signal loss.
+  - **Sat ms:** Time at correction limit before the saturation action runs.
+  - **Sat Act:** Ignore, warn, or stop after correction saturation.
+  - **Min RPM:** Minimum plausible measured RPM.
+  - **Max RPM:** Maximum plausible measured RPM.
+  - **Plaus Act:** Ignore, warn, or stop after implausible RPM readings.
+  - **Lock To:** Time allowed after engagement to reach lock.
+  - **Lock Act:** Ignore, warn, or stop after lock timeout.
+  - **Amp Rec:** Off, warn, or restore full amplitude if reduced-amplitude mode cannot hold lock.
+  - **Amp Rec ms:** Delay before amplitude recovery action runs.
+- **Tools**
+  - **Actions**
+    - **Apply:** Reconfigure feedback immediately.
+    - **Reset PID:** Clear controller state and feedback counters.
+    - **Sensor Test:** Show current feedback signal and RPM status.
+  - **Setup**
+    - **Setup Start:** Begin a one-revolution setup capture.
+    - **Setup Stat:** Show captured count, direction, and suggested counts/rev.
+    - **Setup Apply:** Apply suggested counts/rev and quadrature reverse direction when relevant.
+    - **Setup Stop:** Cancel the setup capture.
+  - **Tune**
+    - **Tune Start:** Start the guided closed-loop tuning workflow.
+    - **Tune Next:** Advance to the next tuning step.
+    - **Tune Stat:** Show the current recommendation.
+    - **Tune Apply:** Apply the current safe tuning recommendation, when one is available.
+    - **Tune Stop:** Stop the guided tuning workflow.
 
 #### Network
 
-- **Status:** Shows the current Wi-Fi connection state.
-- **Web:** Shows the active IP address for the browser interface.
-- **Wi-Fi:** Enable or disable network services.
-- **Mode:** Select Setup AP, Station, or Station plus setup AP.
-- **Host:** mDNS/DHCP hostname used by the device.
-- **SSID:** Station network SSID.
-- **Hidden SSID:** Connect to a network that does not advertise its name.
-- **Pass:** Station network password.
-- **DHCP:** Use DHCP for station networking.
-- **AP Fallback:** Start the setup AP if station connection fails.
-- **Standby:** Select Network standby, which keeps Wi-Fi enabled in standby, or Eco standby, which turns Wi-Fi off in standby and reconnects after physical wake.
-- **AP SSID:** Setup access point SSID.
-- **AP Pass:** Setup access point password.
-- **AP Channel:** Setup access point channel.
-- **ReadOnly:** Enables optional read-only guest mode for the web interface. Off by default.
-- **Web PIN:** Sets the 4-8 character PIN used to unlock web write actions when read-only mode is enabled.
-- **Web Home:** Selects the default page shown when the web interface opens.
-- **Reset PIN:** Restores the web PIN to `NETWORK_DEFAULT_WEB_PIN`.
-- **Apply:** Save network settings and reconnect.
-- **Setup AP:** Force the device into setup access point mode.
-- **Refresh:** Rebuild the Network page with current status.
+- **Network**
+  - **Status:** Shows the current Wi-Fi connection state.
+  - **Web:** Shows the active IP address for the browser interface.
+  - **Wi-Fi:** Enable or disable network services.
+  - **Mode:** Select Setup AP, Station, or Station plus setup AP.
+  - **Station:** Opens station network credentials.
+  - **IP/Power:** Opens hostname, DHCP, fallback, and standby options.
+  - **Setup AP:** Opens setup access point settings.
+  - **Web Access:** Opens browser access settings.
+  - **Apply:** Save network settings and reconnect.
+  - **Force AP:** Force the device into setup access point mode.
+  - **Refresh:** Rebuild the Network page with current status.
+- **Station**
+  - **SSID:** Station network SSID.
+  - **Hidden SSID:** Connect to a network that does not advertise its name.
+  - **Pass:** Station network password.
+- **IP/Power**
+  - **Host:** mDNS/DHCP hostname used by the device.
+  - **DHCP:** Use DHCP for station networking.
+  - **AP Fallback:** Start the setup AP if station connection fails.
+  - **Standby:** Select Network standby, which keeps Wi-Fi enabled in standby, or Eco standby, which turns Wi-Fi off in standby and reconnects after physical wake.
+- **Setup AP**
+  - **AP SSID:** Setup access point SSID.
+  - **AP Pass:** Setup access point password.
+  - **AP Channel:** Setup access point channel.
+- **Web Access**
+  - **ReadOnly:** Enables optional read-only guest mode for the web interface. Off by default.
+  - **Web PIN:** Sets the 4-8 character PIN used to unlock web write actions when read-only mode is enabled.
+  - **Web Home:** Selects the default page shown when the web interface opens.
+  - **Reset PIN:** Restores the web PIN to `NETWORK_DEFAULT_WEB_PIN`.
 
 #### Presets
 

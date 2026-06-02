@@ -24,6 +24,28 @@ char speedLabelBuffer[32];
 MenuItem* menuSpeedSelector = nullptr;
 MenuPage* pageNetwork = nullptr;
 MenuPage* pageClosedLoop = nullptr;
+static MenuPage* pageMotorStartup = nullptr;
+static MenuPage* pageMotorAmplitude = nullptr;
+static MenuPage* pageMotorRamping = nullptr;
+static MenuPage* pageMotorBraking = nullptr;
+static MenuPage* pageNetworkStation = nullptr;
+static MenuPage* pageNetworkIpPower = nullptr;
+static MenuPage* pageNetworkAccessPoint = nullptr;
+static MenuPage* pageNetworkWeb = nullptr;
+#if CLOSED_LOOP_SPEED_ENABLE
+static MenuPage* pageClosedLoopControl = nullptr;
+static MenuPage* pageClosedLoopSensor = nullptr;
+static MenuPage* pageClosedLoopEngage = nullptr;
+static MenuPage* pageClosedLoopTuning = nullptr;
+static MenuPage* pageClosedLoopPid = nullptr;
+static MenuPage* pageClosedLoopRamp = nullptr;
+static MenuPage* pageClosedLoopPitch = nullptr;
+static MenuPage* pageClosedLoopSafety = nullptr;
+static MenuPage* pageClosedLoopTools = nullptr;
+static MenuPage* pageClosedLoopActions = nullptr;
+static MenuPage* pageClosedLoopSetup = nullptr;
+static MenuPage* pageClosedLoopTune = nullptr;
+#endif
 
 // --- Sweep Diagnostic ---
 float sweepMinSep = 80.0;
@@ -78,6 +100,32 @@ static const char* const relayTestLabels[] = {"All Off"};
 #endif
 static const size_t relayTestLabelCount = sizeof(relayTestLabels) / sizeof(relayTestLabels[0]);
 static uint8_t relayTestStage = 0;
+
+static MenuPage* rebuildMenuPage(MenuPage*& page, const char* title) {
+    if (!page) page = new MenuPage(title);
+    page->clear();
+    return page;
+}
+
+static void addBackItem(MenuPage* page) {
+    page->addItem(new MenuAction("Back", [](){ ui.back(); }));
+}
+
+static void addNavItem(MenuPage* page,
+                       const char* label,
+                       MenuPage* target,
+                       MenuItem::VisibilityCallback visibleWhen = nullptr) {
+    MenuItem* item = new MenuNav(label, target);
+    if (visibleWhen) item->setVisibleWhen(visibleWhen);
+    page->addItem(item);
+}
+
+#if CLOSED_LOOP_SPEED_ENABLE
+static void addClosedLoopItem(MenuPage* page, MenuItem* item) {
+    item->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
+    page->addItem(item);
+}
+#endif
 
 void updateSpeedLabel() {
     if (menuShadowSpeedIndex == 0) snprintf(speedLabelBuffer, sizeof(speedLabelBuffer), "Edit Speed: 33");
@@ -375,8 +423,11 @@ void actionEnterNetwork() {
         return;
     }
 
-    if (!pageNetwork) pageNetwork = new MenuPage("Network");
-    pageNetwork->clear();
+    rebuildMenuPage(pageNetwork, "Network");
+    rebuildMenuPage(pageNetworkStation, "Wi-Fi Station");
+    rebuildMenuPage(pageNetworkIpPower, "Net IP/Power");
+    rebuildMenuPage(pageNetworkAccessPoint, "Setup AP");
+    rebuildMenuPage(pageNetworkWeb, "Web Access");
 
     NetworkConfig& cfg = networkManager.getConfig();
     char status[32];
@@ -389,32 +440,44 @@ void actionEnterNetwork() {
 
     pageNetwork->addItem(new MenuBool("Wi-Fi", &cfg.enabled));
     pageNetwork->addItem(new MenuByte("Mode", &cfg.mode, NETWORK_MODE_AP, NETWORK_MODE_STA_AP, networkModeLabels, 3));
-    pageNetwork->addItem(new MenuText("Host", cfg.hostname, NETWORK_HOSTNAME_MAX));
-    pageNetwork->addItem(new MenuText("SSID", cfg.ssid, NETWORK_SSID_MAX));
-    pageNetwork->addItem(new MenuBool("Hidden SSID", &cfg.hiddenSsid));
-    pageNetwork->addItem(new MenuText("Pass", cfg.password, NETWORK_PASSWORD_MAX));
-    pageNetwork->addItem(new MenuBool("DHCP", &cfg.dhcp));
-    pageNetwork->addItem(new MenuBool("AP Fallback", &cfg.apFallback));
-    pageNetwork->addItem(new MenuByte("Standby", &cfg.standbyMode, NETWORK_STANDBY_NETWORK, NETWORK_STANDBY_ECO, networkStandbyLabels, 2));
-    pageNetwork->addItem(new MenuText("AP SSID", cfg.apSsid, NETWORK_SSID_MAX));
-    pageNetwork->addItem(new MenuText("AP Pass", cfg.apPassword, NETWORK_PASSWORD_MAX));
-    pageNetwork->addItem(new MenuByte("AP Channel", &cfg.apChannel, 1, 13));
-    pageNetwork->addItem(new MenuBool("ReadOnly", &cfg.readOnlyMode));
-    pageNetwork->addItem(new MenuText("Web PIN", cfg.webPin, NETWORK_WEB_PIN_MAX));
-    pageNetwork->addItem(new MenuByte("Web Home", &cfg.webHomePage, 0, WEB_HOME_PAGE_COUNT - 1, webHomeLabels, WEB_HOME_PAGE_COUNT));
-    pageNetwork->addItem(new MenuAction("Reset PIN", [](){
+    addNavItem(pageNetwork, "Station", pageNetworkStation);
+    addNavItem(pageNetwork, "IP/Power", pageNetworkIpPower);
+    addNavItem(pageNetwork, "Setup AP", pageNetworkAccessPoint);
+    addNavItem(pageNetwork, "Web Access", pageNetworkWeb);
+
+    pageNetworkStation->addItem(new MenuText("SSID", cfg.ssid, NETWORK_SSID_MAX));
+    pageNetworkStation->addItem(new MenuBool("Hidden SSID", &cfg.hiddenSsid));
+    pageNetworkStation->addItem(new MenuText("Pass", cfg.password, NETWORK_PASSWORD_MAX));
+    addBackItem(pageNetworkStation);
+
+    pageNetworkIpPower->addItem(new MenuText("Host", cfg.hostname, NETWORK_HOSTNAME_MAX));
+    pageNetworkIpPower->addItem(new MenuBool("DHCP", &cfg.dhcp));
+    pageNetworkIpPower->addItem(new MenuBool("AP Fallback", &cfg.apFallback));
+    pageNetworkIpPower->addItem(new MenuByte("Standby", &cfg.standbyMode, NETWORK_STANDBY_NETWORK, NETWORK_STANDBY_ECO, networkStandbyLabels, 2));
+    addBackItem(pageNetworkIpPower);
+
+    pageNetworkAccessPoint->addItem(new MenuText("AP SSID", cfg.apSsid, NETWORK_SSID_MAX));
+    pageNetworkAccessPoint->addItem(new MenuText("AP Pass", cfg.apPassword, NETWORK_PASSWORD_MAX));
+    pageNetworkAccessPoint->addItem(new MenuByte("AP Channel", &cfg.apChannel, 1, 13));
+    addBackItem(pageNetworkAccessPoint);
+
+    pageNetworkWeb->addItem(new MenuBool("ReadOnly", &cfg.readOnlyMode));
+    pageNetworkWeb->addItem(new MenuText("Web PIN", cfg.webPin, NETWORK_WEB_PIN_MAX));
+    pageNetworkWeb->addItem(new MenuByte("Web Home", &cfg.webHomePage, 0, WEB_HOME_PAGE_COUNT - 1, webHomeLabels, WEB_HOME_PAGE_COUNT));
+    pageNetworkWeb->addItem(new MenuAction("Reset PIN", [](){
         NetworkConfig& cfg = networkManager.getConfig();
         strncpy(cfg.webPin, NETWORK_DEFAULT_WEB_PIN, NETWORK_WEB_PIN_MAX);
         cfg.webPin[NETWORK_WEB_PIN_MAX] = 0;
         ui.showMessage("PIN Reset", 1200);
     }));
+    addBackItem(pageNetworkWeb);
 
     pageNetwork->addItem(new MenuAction("Apply", [](){
         networkManager.save();
         networkManager.restart();
         ui.showMessage("Network Applied", 1500);
     }));
-    pageNetwork->addItem(new MenuAction("Setup AP", [](){
+    pageNetwork->addItem(new MenuAction("Force AP", [](){
         NetworkConfig& cfg = networkManager.getConfig();
         cfg.enabled = true;
         cfg.mode = NETWORK_MODE_AP;
@@ -423,7 +486,7 @@ void actionEnterNetwork() {
         ui.showMessage("Setup AP On", 1500);
     }));
     pageNetwork->addItem(new MenuAction("Refresh", actionEnterNetwork));
-    pageNetwork->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    addBackItem(pageNetwork);
     ui.navigateTo(pageNetwork);
 }
 
@@ -516,30 +579,56 @@ void actionClosedLoopTuneStop() {
 }
 
 void actionEnterClosedLoop() {
-    if (!pageClosedLoop) pageClosedLoop = new MenuPage("Closed Loop");
-    pageClosedLoop->clear();
+    rebuildMenuPage(pageClosedLoop, "Closed Loop");
+    rebuildMenuPage(pageClosedLoopControl, "CL Control");
+    rebuildMenuPage(pageClosedLoopSensor, "CL Sensor");
+    rebuildMenuPage(pageClosedLoopEngage, "CL Engage");
+    rebuildMenuPage(pageClosedLoopTuning, "CL Tuning");
+    rebuildMenuPage(pageClosedLoopPid, "CL PID");
+    rebuildMenuPage(pageClosedLoopRamp, "CL Ramp");
+    rebuildMenuPage(pageClosedLoopPitch, "CL Pitch");
+    rebuildMenuPage(pageClosedLoopSafety, "CL Safety");
+    rebuildMenuPage(pageClosedLoopTools, "CL Tools");
+    rebuildMenuPage(pageClosedLoopActions, "CL Actions");
+    rebuildMenuPage(pageClosedLoopSetup, "CL Setup");
+    rebuildMenuPage(pageClosedLoopTune, "CL Tune");
 
     uint8_t speedIndex = menuShadowSpeedIndex >= 0 && menuShadowSpeedIndex <= 2 ? (uint8_t)menuShadowSpeedIndex : SPEED_33;
     ClosedLoopSpeedTuning& tuning = settings.get().closedLoopTuning[speedIndex];
     pageClosedLoop->addItem(new MenuDynamicInfo(String("Target: ") + (speedIndex == SPEED_33 ? "33" : speedIndex == SPEED_45 ? "45" : "78")));
     pageClosedLoop->addItem(new MenuBool("Enable", &settings.get().closedLoopEnabled));
+    addNavItem(pageClosedLoop, "Control", pageClosedLoopControl, [](){ return settings.get().closedLoopEnabled; });
+    addNavItem(pageClosedLoop, "Sensor", pageClosedLoopSensor, [](){ return settings.get().closedLoopEnabled; });
+    addNavItem(pageClosedLoop, "Engage", pageClosedLoopEngage, [](){ return settings.get().closedLoopEnabled; });
+    addNavItem(pageClosedLoop, "Tuning", pageClosedLoopTuning, [](){ return settings.get().closedLoopEnabled; });
+    addNavItem(pageClosedLoop, "Safety", pageClosedLoopSafety, [](){ return settings.get().closedLoopEnabled; });
+    addNavItem(pageClosedLoop, "Tools", pageClosedLoopTools, [](){ return settings.get().closedLoopEnabled; });
+    pageClosedLoop->addItem(new MenuAction("Apply", actionApplyClosedLoopSettings));
+    addBackItem(pageClosedLoop);
+
+    addNavItem(pageClosedLoopTuning, "PID", pageClosedLoopPid);
+    addNavItem(pageClosedLoopTuning, "Ramp", pageClosedLoopRamp);
+    addNavItem(pageClosedLoopTuning, "Pitch", pageClosedLoopPitch);
+    addBackItem(pageClosedLoopTuning);
+
+    addNavItem(pageClosedLoopTools, "Actions", pageClosedLoopActions);
+    addNavItem(pageClosedLoopTools, "Setup", pageClosedLoopSetup);
+    addNavItem(pageClosedLoopTools, "Tune", pageClosedLoopTune);
+    addBackItem(pageClosedLoopTools);
+
     MenuItem* controlMode = new MenuByte("Control", &settings.get().closedLoopControlMode,
         CLOSED_LOOP_CONTROL_MONITOR, CLOSED_LOOP_CONTROL_CORRECT, closedLoopControlLabels, 2);
-    controlMode->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(controlMode);
+    addClosedLoopItem(pageClosedLoopControl, controlMode);
 
     MenuItem* sensorMode = new MenuByte("Sensor", &settings.get().closedLoopSensorMode,
         CLOSED_LOOP_SENSOR_PULSE, CLOSED_LOOP_SENSOR_QUADRATURE, closedLoopSensorLabels, 2);
-    sensorMode->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(sensorMode);
+    addClosedLoopItem(pageClosedLoopSensor, sensorMode);
 
     MenuItem* targetRpm = new MenuFloat("Target RPM", &settings.get().closedLoopTargetRpm[speedIndex], 0.01, 1.0, 120.0);
-    targetRpm->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(targetRpm);
+    addClosedLoopItem(pageClosedLoopControl, targetRpm);
 
     MenuItem* counts = new MenuUInt16("Counts/Rev", &settings.get().closedLoopCountsPerRev, 1, 1, 20000);
-    counts->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(counts);
+    addClosedLoopItem(pageClosedLoopSensor, counts);
 
     MenuItem* edge = new MenuByte("Pulse Edge", &settings.get().closedLoopPulseEdge,
         CLOSED_LOOP_EDGE_RISING, CLOSED_LOOP_EDGE_CHANGE, closedLoopEdgeLabels, 3);
@@ -547,7 +636,7 @@ void actionEnterClosedLoop() {
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopSensorMode == CLOSED_LOOP_SENSOR_PULSE;
     });
-    pageClosedLoop->addItem(edge);
+    pageClosedLoopSensor->addItem(edge);
 
     MenuItem* quadMode = new MenuByte("Quad Decode", &settings.get().closedLoopQuadratureMode,
         CLOSED_LOOP_QUAD_X1, CLOSED_LOOP_QUAD_X4, closedLoopQuadLabels, 3);
@@ -555,14 +644,14 @@ void actionEnterClosedLoop() {
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopSensorMode == CLOSED_LOOP_SENSOR_QUADRATURE;
     });
-    pageClosedLoop->addItem(quadMode);
+    pageClosedLoopSensor->addItem(quadMode);
 
     MenuItem* reverse = new MenuBool("Reverse Dir", &settings.get().closedLoopReverseDirection);
     reverse->setVisibleWhen([](){
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopSensorMode == CLOSED_LOOP_SENSOR_QUADRATURE;
     });
-    pageClosedLoop->addItem(reverse);
+    pageClosedLoopSensor->addItem(reverse);
 
     MenuItem* dirFault = new MenuByte("Dir Fault", &settings.get().closedLoopDirectionFaultAction,
         CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP, closedLoopFaultLabels, 3);
@@ -570,119 +659,97 @@ void actionEnterClosedLoop() {
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopSensorMode == CLOSED_LOOP_SENSOR_QUADRATURE;
     });
-    pageClosedLoop->addItem(dirFault);
+    pageClosedLoopSensor->addItem(dirFault);
 
     MenuItem* debounce = new MenuUInt16("Debounce us", &settings.get().closedLoopDebounceUs, 10, 0, 50000);
-    debounce->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(debounce);
+    addClosedLoopItem(pageClosedLoopSensor, debounce);
 
     MenuItem* timeout = new MenuUInt16("Timeout ms", &settings.get().closedLoopTimeoutMs, 100, 100, 10000);
-    timeout->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(timeout);
+    addClosedLoopItem(pageClosedLoopSensor, timeout);
 
     MenuItem* engage = new MenuUInt16("Engage ms", &settings.get().closedLoopEngageDelayMs, 100, 0, 30000);
-    engage->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(engage);
+    addClosedLoopItem(pageClosedLoopEngage, engage);
 
     MenuItem* requireSignal = new MenuBool("Req Signal", &settings.get().closedLoopRequireSignalBeforeEngage);
-    requireSignal->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(requireSignal);
+    addClosedLoopItem(pageClosedLoopEngage, requireSignal);
 
     MenuItem* requireNear = new MenuBool("Req Near", &settings.get().closedLoopRequireNearTargetBeforeEngage);
-    requireNear->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(requireNear);
+    addClosedLoopItem(pageClosedLoopEngage, requireNear);
 
     MenuItem* engageTol = new MenuFloat("Eng Tol", &settings.get().closedLoopEngageToleranceRpm, 0.01, 0.01, 20.0);
     engageTol->setVisibleWhen([](){
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopRequireNearTargetBeforeEngage;
     });
-    pageClosedLoop->addItem(engageTol);
+    pageClosedLoopEngage->addItem(engageTol);
 
     MenuItem* update = new MenuUInt16("Update ms", &settings.get().closedLoopUpdateIntervalMs, 10, 20, 1000);
-    update->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(update);
+    addClosedLoopItem(pageClosedLoopControl, update);
 
     MenuItem* alpha = new MenuFloat("Filter A", &settings.get().closedLoopFilterAlpha, 0.01, 0.01, 1.0);
-    alpha->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(alpha);
+    addClosedLoopItem(pageClosedLoopControl, alpha);
 
     MenuItem* deadband = new MenuFloat("Dead RPM", &tuning.deadbandRpm, 0.01, 0.0, 5.0);
-    deadband->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(deadband);
+    addClosedLoopItem(pageClosedLoopPid, deadband);
 
     MenuItem* lockTol = new MenuFloat("Lock Tol", &tuning.lockToleranceRpm, 0.01, 0.01, 5.0);
-    lockTol->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(lockTol);
+    addClosedLoopItem(pageClosedLoopPid, lockTol);
 
     MenuItem* lockMs = new MenuUInt16("Lock ms", &tuning.lockTimeMs, 100, 0, 30000);
-    lockMs->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(lockMs);
+    addClosedLoopItem(pageClosedLoopPid, lockMs);
 
     MenuItem* kp = new MenuFloat("Kp", &tuning.kp, 0.01, 0.0, 20.0);
-    kp->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(kp);
+    addClosedLoopItem(pageClosedLoopPid, kp);
 
     MenuItem* ki = new MenuFloat("Ki", &tuning.ki, 0.01, 0.0, 20.0);
-    ki->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(ki);
+    addClosedLoopItem(pageClosedLoopPid, ki);
 
     MenuItem* kd = new MenuFloat("Kd", &tuning.kd, 0.01, 0.0, 20.0);
-    kd->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(kd);
+    addClosedLoopItem(pageClosedLoopPid, kd);
 
     MenuItem* iLimit = new MenuFloat("I Lim Hz", &tuning.integralLimitHz, 0.1, 0.0, 50.0);
-    iLimit->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(iLimit);
+    addClosedLoopItem(pageClosedLoopPid, iLimit);
 
     MenuItem* correction = new MenuFloat("Corr Hz", &tuning.correctionLimitHz, 0.1, 0.0, 100.0);
-    correction->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(correction);
+    addClosedLoopItem(pageClosedLoopPid, correction);
 
     MenuItem* slew = new MenuFloat("Slew Hz/s", &tuning.slewLimitHzPerSec, 0.1, 0.0, 100.0);
-    slew->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(slew);
+    addClosedLoopItem(pageClosedLoopPid, slew);
 
     MenuItem* dropout = new MenuByte("Dropout", &settings.get().closedLoopDropoutAction,
         CLOSED_LOOP_DROPOUT_OPEN_LOOP, CLOSED_LOOP_DROPOUT_STOP, closedLoopDropLabels, 3);
-    dropout->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(dropout);
+    addClosedLoopItem(pageClosedLoopSafety, dropout);
 
     MenuItem* rampMode = new MenuByte("Ramp CL", &settings.get().closedLoopRampMode,
         CLOSED_LOOP_RAMP_DISABLED, CLOSED_LOOP_RAMP_TRACK, closedLoopRampLabels, 2);
-    rampMode->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(rampMode);
+    addClosedLoopItem(pageClosedLoopRamp, rampMode);
 
     MenuItem* rampKp = new MenuFloat("Ramp Kp", &tuning.rampKp, 0.01, 0.0, 5.0);
     rampKp->setVisibleWhen([](){
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopRampMode == CLOSED_LOOP_RAMP_TRACK;
     });
-    pageClosedLoop->addItem(rampKp);
+    pageClosedLoopRamp->addItem(rampKp);
 
     MenuItem* rampLimit = new MenuFloat("Ramp Lim", &tuning.rampCorrectionLimitHz, 0.1, 0.0, 20.0);
     rampLimit->setVisibleWhen([](){
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopRampMode == CLOSED_LOOP_RAMP_TRACK;
     });
-    pageClosedLoop->addItem(rampLimit);
+    pageClosedLoopRamp->addItem(rampLimit);
 
     MenuItem* pitchMode = new MenuByte("Pitch Mode", &settings.get().closedLoopPitchTargetMode,
         CLOSED_LOOP_PITCH_TARGET_FIXED, CLOSED_LOOP_PITCH_TARGET_FOLLOW, closedLoopPitchTargetLabels, 2);
-    pitchMode->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(pitchMode);
+    addClosedLoopItem(pageClosedLoopPitch, pitchMode);
 
     MenuItem* pitchSlew = new MenuFloat("Pitch Slew", &settings.get().closedLoopPitchSlewRpmPerSec, 0.1, 0.0, 200.0);
-    pitchSlew->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(pitchSlew);
+    addClosedLoopItem(pageClosedLoopPitch, pitchSlew);
 
     MenuItem* pitchReset = new MenuFloat("Pitch Reset", &settings.get().closedLoopPitchResetThresholdRpm, 0.1, 0.0, 20.0);
-    pitchReset->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(pitchReset);
+    addClosedLoopItem(pageClosedLoopPitch, pitchReset);
 
     MenuItem* satMs = new MenuUInt16("Sat ms", &settings.get().closedLoopSaturationTimeMs, 100, 0, 60000);
-    satMs->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(satMs);
+    addClosedLoopItem(pageClosedLoopSafety, satMs);
 
     MenuItem* satAction = new MenuByte("Sat Act", &settings.get().closedLoopSaturationAction,
         CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP, closedLoopFaultLabels, 3);
@@ -690,24 +757,20 @@ void actionEnterClosedLoop() {
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopSaturationTimeMs > 0;
     });
-    pageClosedLoop->addItem(satAction);
+    pageClosedLoopSafety->addItem(satAction);
 
     MenuItem* minRpm = new MenuFloat("Min RPM", &settings.get().closedLoopPlausibilityMinRpm, 1.0, 0.0, 120.0);
-    minRpm->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(minRpm);
+    addClosedLoopItem(pageClosedLoopSafety, minRpm);
 
     MenuItem* maxRpm = new MenuFloat("Max RPM", &settings.get().closedLoopPlausibilityMaxRpm, 1.0, 1.0, 200.0);
-    maxRpm->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(maxRpm);
+    addClosedLoopItem(pageClosedLoopSafety, maxRpm);
 
     MenuItem* plausAction = new MenuByte("Plaus Act", &settings.get().closedLoopPlausibilityAction,
         CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP, closedLoopFaultLabels, 3);
-    plausAction->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(plausAction);
+    addClosedLoopItem(pageClosedLoopSafety, plausAction);
 
     MenuItem* lockTimeout = new MenuUInt16("Lock To", &settings.get().closedLoopLockTimeoutMs, 100, 0, 60000);
-    lockTimeout->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(lockTimeout);
+    addClosedLoopItem(pageClosedLoopSafety, lockTimeout);
 
     MenuItem* lockAction = new MenuByte("Lock Act", &settings.get().closedLoopLockTimeoutAction,
         CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP, closedLoopFaultLabels, 3);
@@ -715,36 +778,47 @@ void actionEnterClosedLoop() {
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopLockTimeoutMs > 0;
     });
-    pageClosedLoop->addItem(lockAction);
+    pageClosedLoopSafety->addItem(lockAction);
 
     MenuItem* ampRecovery = new MenuByte("Amp Rec", &settings.get().closedLoopAmpRecoveryMode,
         CLOSED_LOOP_AMP_RECOVERY_OFF, CLOSED_LOOP_AMP_RECOVERY_RESTORE, closedLoopAmpRecoveryLabels, 3);
-    ampRecovery->setVisibleWhen([](){ return settings.get().closedLoopEnabled; });
-    pageClosedLoop->addItem(ampRecovery);
+    addClosedLoopItem(pageClosedLoopSafety, ampRecovery);
 
     MenuItem* ampRecoveryDelay = new MenuUInt16("Amp Rec ms", &settings.get().closedLoopAmpRecoveryDelayMs, 100, 0, 30000);
     ampRecoveryDelay->setVisibleWhen([](){
         return settings.get().closedLoopEnabled &&
                settings.get().closedLoopAmpRecoveryMode != CLOSED_LOOP_AMP_RECOVERY_OFF;
     });
-    pageClosedLoop->addItem(ampRecoveryDelay);
+    pageClosedLoopSafety->addItem(ampRecoveryDelay);
 
-    pageClosedLoop->addItem(new MenuAction("Apply", actionApplyClosedLoopSettings));
-    pageClosedLoop->addItem(new MenuAction("Reset PID", [](){
+    pageClosedLoopActions->addItem(new MenuAction("Apply", actionApplyClosedLoopSettings));
+    pageClosedLoopActions->addItem(new MenuAction("Reset PID", [](){
         motor.resetClosedLoop();
         ui.showMessage("PID Reset", 1000);
     }));
-    pageClosedLoop->addItem(new MenuAction("Sensor Test", actionClosedLoopStatus));
-    pageClosedLoop->addItem(new MenuAction("Setup Start", actionClosedLoopSetupStart));
-    pageClosedLoop->addItem(new MenuAction("Setup Stat", actionClosedLoopSetupStatus));
-    pageClosedLoop->addItem(new MenuAction("Setup Apply", actionClosedLoopSetupApply));
-    pageClosedLoop->addItem(new MenuAction("Setup Stop", actionClosedLoopSetupStop));
-    pageClosedLoop->addItem(new MenuAction("Tune Start", actionClosedLoopTuneStart));
-    pageClosedLoop->addItem(new MenuAction("Tune Next", actionClosedLoopTuneNext));
-    pageClosedLoop->addItem(new MenuAction("Tune Stat", actionClosedLoopTuneStatus));
-    pageClosedLoop->addItem(new MenuAction("Tune Apply", actionClosedLoopTuneApply));
-    pageClosedLoop->addItem(new MenuAction("Tune Stop", actionClosedLoopTuneStop));
-    pageClosedLoop->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    pageClosedLoopActions->addItem(new MenuAction("Sensor Test", actionClosedLoopStatus));
+
+    pageClosedLoopSetup->addItem(new MenuAction("Setup Start", actionClosedLoopSetupStart));
+    pageClosedLoopSetup->addItem(new MenuAction("Setup Stat", actionClosedLoopSetupStatus));
+    pageClosedLoopSetup->addItem(new MenuAction("Setup Apply", actionClosedLoopSetupApply));
+    pageClosedLoopSetup->addItem(new MenuAction("Setup Stop", actionClosedLoopSetupStop));
+
+    pageClosedLoopTune->addItem(new MenuAction("Tune Start", actionClosedLoopTuneStart));
+    pageClosedLoopTune->addItem(new MenuAction("Tune Next", actionClosedLoopTuneNext));
+    pageClosedLoopTune->addItem(new MenuAction("Tune Stat", actionClosedLoopTuneStatus));
+    pageClosedLoopTune->addItem(new MenuAction("Tune Apply", actionClosedLoopTuneApply));
+    pageClosedLoopTune->addItem(new MenuAction("Tune Stop", actionClosedLoopTuneStop));
+
+    addBackItem(pageClosedLoopControl);
+    addBackItem(pageClosedLoopSensor);
+    addBackItem(pageClosedLoopEngage);
+    addBackItem(pageClosedLoopPid);
+    addBackItem(pageClosedLoopRamp);
+    addBackItem(pageClosedLoopPitch);
+    addBackItem(pageClosedLoopSafety);
+    addBackItem(pageClosedLoopActions);
+    addBackItem(pageClosedLoopSetup);
+    addBackItem(pageClosedLoopTune);
     ui.navigateTo(pageClosedLoop);
 }
 #endif
@@ -784,61 +858,76 @@ void buildMenuSystem() {
     pagePhase->addItem(sweepDiag);
     pagePhase->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
-    // --- Motor Page (Mixed) ---
+    // --- Motor Pages (Mixed) ---
     pageMotor = new MenuPage("Motor Control");
-    // Per-Speed
-    pageMotor->addItem(new MenuFloat("Soft Start", &menuShadowSettings.softStartDuration, 0.1, 0.0, 10.0));
-    pageMotor->addItem(new MenuByte("Red. Amp %", &menuShadowSettings.reducedAmplitude, 10, 100));
-    pageMotor->addItem(new MenuByte("Amp Delay", &menuShadowSettings.amplitudeDelay, 0, 60));
-    pageMotor->addItem(new MenuByte("Kick Mult", &menuShadowSettings.startupKick, 1, 4));
+    pageMotorStartup = new MenuPage("Motor Start");
+    pageMotorAmplitude = new MenuPage("Motor Amp");
+    pageMotorRamping = new MenuPage("Motor Ramp");
+    pageMotorBraking = new MenuPage("Motor Brake");
+
+    addNavItem(pageMotor, "Startup", pageMotorStartup);
+    addNavItem(pageMotor, "Amplitude", pageMotorAmplitude);
+    addNavItem(pageMotor, "Ramping", pageMotorRamping);
+    addNavItem(pageMotor, "Braking", pageMotorBraking);
+    addBackItem(pageMotor);
+
+    pageMotorStartup->addItem(new MenuFloat("Soft Start", &menuShadowSettings.softStartDuration, 0.1, 0.0, 10.0));
+    pageMotorStartup->addItem(new MenuByte("Kick Mult", &menuShadowSettings.startupKick, 1, 4));
     MenuItem* kickDuration = new MenuByte("Kick Dur", &menuShadowSettings.startupKickDuration, 0, 15);
     kickDuration->setVisibleWhen([](){ return menuShadowSettings.startupKick > 1; });
-    pageMotor->addItem(kickDuration);
+    pageMotorStartup->addItem(kickDuration);
     MenuItem* kickRamp = new MenuFloat("Kick Ramp", &menuShadowSettings.startupKickRampDuration, 0.1, 0.0, 15.0);
     kickRamp->setVisibleWhen([](){ return menuShadowSettings.startupKick > 1; });
-    pageMotor->addItem(kickRamp);
-    // Global
-    pageMotor->addItem(new MenuByte("V/f Blend%", &settings.get().freqDependentAmplitude, 0, 100));
+    pageMotorStartup->addItem(kickRamp);
+    addBackItem(pageMotorStartup);
+
+    pageMotorAmplitude->addItem(new MenuByte("Red. Amp %", &menuShadowSettings.reducedAmplitude, 10, 100));
+    pageMotorAmplitude->addItem(new MenuByte("Amp Delay", &menuShadowSettings.amplitudeDelay, 0, 60));
+    pageMotorAmplitude->addItem(new MenuByte("V/f Blend%", &settings.get().freqDependentAmplitude, 0, 100));
     MenuItem* vfLowHz = new MenuFloat("V/f LowHz", &settings.get().vfLowFreq, 1.0, 0.0, 50.0);
     vfLowHz->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
-    pageMotor->addItem(vfLowHz);
+    pageMotorAmplitude->addItem(vfLowHz);
     MenuItem* vfLowBoost = new MenuByte("V/f Low%", &settings.get().vfLowBoost, 0, 100);
     vfLowBoost->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
-    pageMotor->addItem(vfLowBoost);
+    pageMotorAmplitude->addItem(vfLowBoost);
     MenuItem* vfMidHz = new MenuFloat("V/f MidHz", &settings.get().vfMidFreq, 1.0, 0.0, 100.0);
     vfMidHz->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
-    pageMotor->addItem(vfMidHz);
+    pageMotorAmplitude->addItem(vfMidHz);
     MenuItem* vfMidBoost = new MenuByte("V/f Mid%", &settings.get().vfMidBoost, 0, 100);
     vfMidBoost->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
-    pageMotor->addItem(vfMidBoost);
-    pageMotor->addItem(new MenuByte("Max Amp %", &settings.get().maxAmplitude, 0, 100));
-    pageMotor->addItem(new MenuByte("Ramp Type", &settings.get().rampType, 0, 1, rampTypeLabels, 2));
+    pageMotorAmplitude->addItem(vfMidBoost);
+    pageMotorAmplitude->addItem(new MenuByte("Max Amp %", &settings.get().maxAmplitude, 0, 100));
+    addBackItem(pageMotorAmplitude);
+
+    pageMotorRamping->addItem(new MenuByte("Ramp Type", &settings.get().rampType, 0, 1, rampTypeLabels, 2));
     MenuItem* softStartCurve = new MenuByte("SS Curve", &settings.get().softStartCurve, 0, 2, softStartCurveLabels, 3);
     softStartCurve->setVisibleWhen([](){ return settings.get().rampType == RAMP_LINEAR; });
-    pageMotor->addItem(softStartCurve);
-    pageMotor->addItem(new MenuBool("Smooth Sw", &settings.get().smoothSwitching));
+    pageMotorRamping->addItem(softStartCurve);
+    pageMotorRamping->addItem(new MenuBool("Smooth Sw", &settings.get().smoothSwitching));
     MenuItem* switchRamp = new MenuByte("Sw Ramp", &settings.get().switchRampDuration, 1, 5);
     switchRamp->setVisibleWhen([](){ return settings.get().smoothSwitching; });
-    pageMotor->addItem(switchRamp);
-    pageMotor->addItem(new MenuByte("Brake Mode", &settings.get().brakeMode, 0, 3, brakeModeLabels, 4));
+    pageMotorRamping->addItem(switchRamp);
+    pageMotorRamping->addItem(new MenuBool("Auto Start", &settings.get().autoStart));
+    addBackItem(pageMotorRamping);
+
+    pageMotorBraking->addItem(new MenuByte("Brake Mode", &settings.get().brakeMode, 0, 3, brakeModeLabels, 4));
     MenuItem* brakeDuration = new MenuFloat("Brake Dur", &settings.get().brakeDuration, 0.1, 0.0, 10.0);
     brakeDuration->setVisibleWhen([](){ return settings.get().brakeMode != BRAKE_OFF; });
-    pageMotor->addItem(brakeDuration);
+    pageMotorBraking->addItem(brakeDuration);
     MenuItem* brakePulse = new MenuFloat("Brk Pulse", &settings.get().brakePulseGap, 0.1, 0.1, 2.0);
     brakePulse->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_PULSE; });
-    pageMotor->addItem(brakePulse);
+    pageMotorBraking->addItem(brakePulse);
     MenuItem* brakeStart = new MenuFloat("Brk StartF", &settings.get().brakeStartFreq, 1.0, 10.0, 200.0);
     brakeStart->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_RAMP; });
-    pageMotor->addItem(brakeStart);
+    pageMotorBraking->addItem(brakeStart);
     MenuItem* brakeStop = new MenuFloat("Brk StopF", &settings.get().brakeStopFreq, 1.0, 0.0, 50.0);
     brakeStop->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_RAMP; });
-    pageMotor->addItem(brakeStop);
+    pageMotorBraking->addItem(brakeStop);
     MenuItem* brakeCutoff = new MenuFloat("Brk Cutoff", &settings.get().softStopCutoff, 1.0, 0.0, 50.0);
     brakeCutoff->setVisibleWhen([](){ return settings.get().brakeMode == BRAKE_SOFT_STOP; });
-    pageMotor->addItem(brakeCutoff);
-    pageMotor->addItem(new MenuBool("Auto Start", &settings.get().autoStart));
-    pageMotor->addItem(new MenuAction("Brake Tune", actionEnterBrakeTune));
-    pageMotor->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    pageMotorBraking->addItem(brakeCutoff);
+    pageMotorBraking->addItem(new MenuAction("Brake Tune", actionEnterBrakeTune));
+    addBackItem(pageMotorBraking);
 
     // --- Power Page (Global) ---
     pagePower = new MenuPage("Power Control");
