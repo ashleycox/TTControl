@@ -179,15 +179,18 @@ When `CLOSED_LOOP_SPEED_ENABLE` is `1`, GP6/GP7 become optional speed feedback i
 
 - **Sensor Support:** GP6 can read a pulse tachometer. GP6/GP7 can read A/B quadrature feedback with x1, x2, or x4 decode, reverse-direction correction, raw/corrected direction reporting, and configurable reverse-motion fault handling.
 - **Control Modes:** Monitor mode reports measured RPM and lock state without changing the generated frequency. Correct mode applies bounded feedback correction against the selected speed's target RPM.
-- **Per-Speed Targets:** 33, 45, and 78 RPM each have independent target RPM values. The active target includes pitch adjustment when pitch control is in use.
+- **Per-Speed Targets And Tuning:** 33, 45, and 78 RPM each have independent target RPM values, PID gains, lock tolerance/time, correction limits, slew limits, deadband, and ramp-tracking gain/limit. The active target includes pitch adjustment when pitch control is in use.
 - **Startup Engagement:** Feedback correction is held off during soft start, startup kick, kick ramp-down, and braking. It can require a valid signal and measured RPM near target before engaging after the configured delay.
 - **Smooth Speed Changes:** During speed-switch ramps, the controller can remain open-loop until the ramp completes, or track the live ramp target with a separate proportional gain and correction limit. Feedback state is reset when the ramp settles.
 - **Pitch Changes:** Pitch adjustments update the closed-loop target. A configurable target slew rate can smooth the change, and a reset threshold clears controller state after large target jumps.
 - **Reduced Amplitude Recovery:** If reduced-amplitude mode loses speed lock after its delay, the firmware can warn or restore full amplitude after the configured recovery delay.
-- **Controller Limits:** Update interval, RPM filter alpha, deadband, lock tolerance/time, PID gains, integral limit, total correction limit, and correction slew rate are configurable.
+- **Controller Limits:** Update interval and RPM filter alpha are global. Deadband, lock tolerance/time, PID gains, integral limit, total correction limit, correction slew rate, and ramp-tracking gain/limit are configurable per speed.
+- **Guided Tuning:** OLED, Serial Monitor, and web bench controls provide a guided sequence for sensor setup, monitor-only validation, Kp tuning, Ki tuning, limit selection, and verification. The firmware reports a current recommendation such as checking the sensor signal, increasing Kp, adding small Ki, reducing hunting, or reviewing correction saturation.
+- **Stability Metrics:** Runtime metrics track valid and locked samples/time, average and peak RPM error, correction saturation time, dropout events, direction faults, plausibility faults, lock timeouts, amplitude recovery events, and error sign changes.
 - **Safety Actions:** Signal dropout, correction saturation, implausible RPM readings, lock timeout, and quadrature reverse direction can be ignored, warned, held/open-loop where applicable, or escalated to motor stop depending on the configured action.
+- **Fault Detail:** Closed-loop error log entries include target RPM, measured RPM, RPM error, correction Hz, signal state, count, and direction where a feedback sample is available.
 - **Sensor Setup:** OLED, Serial Monitor, and web bench controls can capture one manual platter revolution and apply suggested counts-per-revolution. Quadrature setup can also suggest the reverse-direction setting.
-- **Status Surfaces:** OLED status action, `cl status`, web dashboard, telemetry, bench report, diagnostics, status API, preset JSON, and full backup include closed-loop configuration and live RPM/correction state when compiled in.
+- **Status Surfaces:** OLED status action, `cl status`, web dashboard, telemetry, bench report, diagnostics, status API, preset JSON, and full backup include closed-loop configuration, live RPM/correction state, tuning guidance, and stability metrics when compiled in.
 
 ---
 
@@ -302,7 +305,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Simple Control View:** A dedicated large-button control page exposes the day-to-day start/stop/standby/speed/pitch controls without the full settings surface.
 - **78 RPM Visibility:** Browser speed controls, bench speed controls, and calibration speed selectors hide 78 RPM while `Enable 78 RPM` is off. A stale 78 RPM browser action is rejected with a clear message.
 - **Complete Controls:** Browser controls include start, stop, emergency stop, standby/wake, speed switching, pitch reset/set, relay test, relay test off, closed-loop controller reset/setup when compiled in, runtime reset, factory reset, and API support for reboot.
-- **Schema-Driven Full Settings UI:** The web interface fetches `/api/schema` from firmware and builds the complete settings UI from that schema, including global phase, motor, brake, relay, display, system, network, optional closed-loop feedback, and all per-speed speed/phase/filter/startup settings.
+- **Schema-Driven Full Settings UI:** The web interface fetches `/api/schema` from firmware and builds the complete settings UI from that schema, including global phase, motor, brake, relay, display, system, network, optional closed-loop feedback, and all per-speed speed/phase/filter/startup/closed-loop tuning settings.
 - **Settings Search and Contextual Help:** The full settings page includes search by label, key, or help text. Every schema-driven setting has a Help control with purpose, range, units, accepted choices, key name, and safety context where relevant.
 - **Staged Editing and Validation:** Browser settings and network forms track unsaved changes, highlight safety-related edits, provide discard buttons, show a review of pending changes before save, and validate ranges, required fields, frequency limits, password length, and static IPv4 fields before applying.
 - **Guided Calibration:** The Calibrate page provides task-based forms for speed frequency, phase offsets, startup kick, braking, and amplitude tuning.
@@ -310,9 +313,9 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Accessibility Preferences:** The browser UI includes a remembered home page, theme presets, large controls, visible focus states, live status announcements, semantic form grouping, and labels/error text for screen-reader navigation.
 - **Optional Read-Only Guest Mode:** Read-only mode is off by default. When enabled from the web Network page or OLED Network menu, dashboard/status pages remain visible but write actions require the configured web PIN. The PIN can be changed from both the OLED Network menu and the web Network page.
 - **Amplifier Status:** The web status API reports amplifier temperature and thermal state when `AMP_MONITOR_ENABLE` is compiled in; the dashboard and telemetry views show the same information.
-- **Closed-Loop Status:** When `CLOSED_LOOP_SPEED_ENABLE` is compiled in, the web status API, dashboard, telemetry, diagnostics, preset JSON, backups, and bench report include control mode, sensor mode, target/requested/ramp RPM, live RPM, correction state, saturation, amplitude recovery, direction, pin state, and setup capture state.
+- **Closed-Loop Status:** When `CLOSED_LOOP_SPEED_ENABLE` is compiled in, the web status API, dashboard, telemetry, diagnostics, preset JSON, backups, and bench report include control mode, sensor mode, target/requested/ramp RPM, live RPM, correction state, saturation, amplitude recovery, direction, pin state, setup capture state, tuning guidance, and stability metrics.
 - **Diagnostics and Events:** The Diagnostics page shows firmware/build info, compile-time feature flags, active pin assignments, network state, amplifier state, stored-file presence, and a recent browser event feed.
-- **Bench Test Page:** The Bench page groups live pre-checks, relay output testing, brake start/stop checks, speed and pitch checks, closed-loop setup capture/apply actions, amplifier status, and a generated bench report in one place.
+- **Bench Test Page:** The Bench page groups live pre-checks, relay output testing, brake start/stop checks, speed and pitch checks, closed-loop setup capture/apply actions, guided tuning actions, stability metrics, amplifier status, and a generated bench report in one place.
 - **Presets and Logs:** Preset load/save/rename/clear/import/export and error log viewing/clearing are available from the browser. Preset load and import actions include validation reports and preview diffs against the current motor settings before applying or storing JSON, and preset slots can be compared with each other.
 - **Full Backup:** The Diagnostics page can export, validate, and import a full JSON backup containing motor settings, presets, non-secret network metadata, and the error log. Wi-Fi and web PIN passwords are intentionally not exported.
 - **SSE Status Stream:** The dashboard uses a lightweight Server-Sent Events status stream when available, with normal status requests retained for direct refreshes and compatibility.
@@ -325,6 +328,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Configurable Presets:** Multiple configurable presets (5 by default, the number defined in configuration flag).
 - **Preset Management:** Presets can be reverted to defaults, loaded, renamed and duplicated.
 - **Preset Naming:** Presets can have names up to 16 characters, a-z 0-9.
+- **Closed-Loop Preset Data:** Preset JSON includes `clTune`, a three-entry closed-loop tuning array for 33, 45, and 78 RPM. Older single-value closed-loop tuning keys are still accepted on import and copied into all three speed slots.
 - **Non-Volatile Storage:** Non-volatile settings storage in Pico flash FS.
 - **Flash Capacity:** The Pimoroni Pico+2 has 16MB of flash, which can be split at compile time. A standard Pico has more than enough flash for this application also.
 - **Wear Levelling:** Flash wear levelling.
@@ -337,7 +341,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Settings File Schema:**
   - **Storage Location:** Stored on LittleFS.
   - **File Integrity:** Settings and preset files include a firmware-specific magic value, file format version, settings schema version, payload size, and CRC32 before the binary settings payload.
-  - **Schema Migration:** Schema 6 added the first closed-loop feedback settings. Schema 7 adds control mode, startup engagement rules, ramp tracking, pitch target handling, saturation/plausibility/lock-timeout actions, amplitude recovery, and setup support while migrating schema 6 payloads. Incompatible or invalid payloads are reset to defaults.
+  - **Schema Migration:** Schema 6 added the first closed-loop feedback settings. Schema 7 added control mode, startup engagement rules, ramp tracking, pitch target handling, saturation/plausibility/lock-timeout actions, amplitude recovery, and setup support. Schema 8 adds per-speed closed-loop tuning and migrates schema 7 payloads by copying the previous global tuning values into all three speed slots. Incompatible or invalid payloads are reset to defaults.
   - **Strict First-Release Format:** Schema, size, or CRC mismatch causes settings to reset to defaults rather than attempting to migrate older binary layouts.
 
 ---
@@ -448,6 +452,11 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `cl setup status` | Show captured counts, rejected transitions, pin state, direction, and suggested counts/rev |
 | `cl setup apply` | Apply suggested counts/rev, and suggested quadrature reverse direction when relevant |
 | `cl setup stop` | Cancel the active closed-loop setup capture |
+| `cl tune start` | Start the guided closed-loop tuning workflow |
+| `cl tune next` | Advance to the next tuning step, applying setup capture when available |
+| `cl tune status` | Show current tuning step, instruction, recommendation, and stability metrics |
+| `cl tune suggest` | Show the current closed-loop tuning recommendation only |
+| `cl tune stop` | Stop the guided tuning workflow |
 | `diag safety` | Run a non-actuating safety diagnostic covering settings ranges, thermal thresholds, and expected start/stop/emergency/standby outcomes |
 | `wifi help` | List Serial Monitor Wi-Fi setup commands when network support is enabled |
 | `wifi status` | Show current network state, active IP address, SSID, AP status, MAC, and RSSI |
@@ -509,19 +518,19 @@ Use these keys with `set` and `get`. Speed-specific settings apply to the **curr
 | `cl_engage_tol` | RPM tolerance used by near-target engagement | Float |
 | `cl_update_ms` | Controller update interval in milliseconds | Int |
 | `cl_filter` | RPM filter alpha | Float |
-| `cl_deadband` | RPM error deadband | Float |
-| `cl_lock_tol` | RPM tolerance used to declare lock | Float |
-| `cl_lock_ms` | Time inside tolerance before lock is reported | Int |
-| `cl_kp` | Proportional gain in Hz per RPM error | Float |
-| `cl_ki` | Integral gain | Float |
-| `cl_kd` | Derivative gain | Float |
-| `cl_i_limit` | Integral contribution limit in Hz | Float |
-| `cl_corr_limit` | Total correction limit in Hz | Float |
-| `cl_slew` | Correction slew limit in Hz/s | Float |
+| `cl_deadband` | Current-speed RPM error deadband | Float |
+| `cl_lock_tol` | Current-speed RPM tolerance used to declare lock | Float |
+| `cl_lock_ms` | Current-speed time inside tolerance before lock is reported | Int |
+| `cl_kp` | Current-speed proportional gain in Hz per RPM error | Float |
+| `cl_ki` | Current-speed integral gain | Float |
+| `cl_kd` | Current-speed derivative gain | Float |
+| `cl_i_limit` | Current-speed integral contribution limit | Float |
+| `cl_corr_limit` | Current-speed total correction limit in Hz | Float |
+| `cl_slew` | Current-speed correction slew limit in Hz/s | Float |
 | `cl_dropout` | Signal-loss action (0=open-loop, 1=hold correction, 2=stop) | Int |
 | `cl_ramp_mode` | Smooth speed-ramp correction mode (0=disabled, 1=track ramp target) | Int |
-| `cl_ramp_kp` | Proportional gain used only during smooth speed-change ramps | Float |
-| `cl_ramp_limit` | Maximum correction allowed during smooth speed-change ramps | Float |
+| `cl_ramp_kp` | Current-speed proportional gain used only during smooth speed-change ramps | Float |
+| `cl_ramp_limit` | Current-speed maximum correction allowed during smooth speed-change ramps | Float |
 | `cl_pitch_slew` | Maximum closed-loop target change rate for pitch changes in RPM/s | Float |
 | `cl_pitch_reset` | Target RPM jump that resets closed-loop controller state | Float |
 | `cl_sat_ms` | Time at correction limit before the saturation action runs; 0 disables it | Int |
@@ -559,7 +568,7 @@ The menu structure is designed for a data-driven implementation.
 - **Power Control:** Relays, Auto Standby/Boot (Global).
 - **Display:** Sleep, Dim, Saver, Errors (Global).
 - **System:** Pitch Reset, 78RPM, Logs (Global).
-- **Closed Loop:** Optional pulse or quadrature speed feedback, monitor/correction control, safety actions, and sensor setup, visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
+- **Closed Loop:** Optional pulse or quadrature speed feedback, monitor/correction control, per-speed tuning, safety actions, sensor setup, and guided tuning, visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
 - **Network:** Wi-Fi setup and local web interface connection flow (Wi-Fi builds only).
 - **Presets:** Load, Save, Rename, and Clear presets.
 - **Save & Exit:** Saves all changes to flash and returns to dashboard.
@@ -694,6 +703,10 @@ Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
 - **Setup Stat:** Show captured count, direction, and suggested counts/rev.
 - **Setup Apply:** Apply suggested counts/rev and quadrature reverse direction when relevant.
 - **Setup Stop:** Cancel the setup capture.
+- **Tune Start:** Start the guided closed-loop tuning workflow.
+- **Tune Next:** Advance to the next tuning step.
+- **Tune Stat:** Show the current recommendation.
+- **Tune Stop:** Stop the guided tuning workflow.
 
 ### Network
 - **Status:** Shows the current Wi-Fi connection state.
@@ -781,7 +794,7 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Thermal Limits**| `AMP_TEMP_WARN_HYSTERESIS_C` | Temperature drop required to re-arm the warning. | `5.0` | Warning-only hysteresis. |
 | **Display Msg** | `STANDBY_MESSAGE` | Sets the message displayed while the system is in standby, if enabled in the menu. | `message` | Controls message display logic. |
 | **Display Msg** | `WELCOME_MESSAGE` | Sets the message displayed on boot. | `"Welcome to TT Control"` | |
-| **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `7` | Use for compatibility checks when firmware is updated. |
+| **Storage** | `SETTINGS_SCHEMA_VERSION` | Tag for settings file schema. | `8` | Use for compatibility checks when firmware is updated. |
 | **Storage** | `SETTINGS_FILE_FORMAT_VERSION` | Tag for the binary settings/preset file wrapper. | `1` | Change only when the on-flash header format changes. |
 | **Storage** | `SETTINGS_FILE_MAGIC` / `PRESET_FILE_MAGIC` | Magic values for settings and preset files. | `TTCS` / `TTCP` | Prevents a preset file from being loaded as global settings, or vice versa. |
 | **Defaults** | `DEFAULT_PHASE_MODE` | Default phase mode. | `3` (3-phase) | |
