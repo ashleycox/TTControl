@@ -11,12 +11,10 @@
 #include "system_monitor.h"
 #include <math.h>
 
-// Global pointer for ISR access. Only one WaveformGenerator exists in this
-// sketch, so a static thunk is simpler than passing context through the IRQ API.
+// Global pointer for ISR access. Only one WaveformGenerator exists in this sketch, so a static thunk is simpler than passing context through the IRQ API.
 static WaveformGenerator* _waveformInstance = nullptr;
 
-// FIR coefficients are normalized to roughly unity gain so filtering does not
-// change the requested output amplitude.
+// FIR coefficients are normalized to roughly unity gain so filtering does not change the requested output amplitude.
 const float FIR_COEFFS_GENTLE[8] = {0.0, 0.0, 0.1, 0.4, 0.4, 0.1, 0.0, 0.0};
 const float FIR_COEFFS_MEDIUM[8] = {0.05, 0.05, 0.1, 0.3, 0.3, 0.1, 0.05, 0.05};
 const float FIR_COEFFS_AGGRESSIVE[8] = {0.1, 0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 0.1};
@@ -40,8 +38,7 @@ WaveformGenerator::WaveformGenerator() {
     _stateA.firProfile = FIR_GENTLE;
     for(int i=0; i<4; i++) _stateA.phaseOffsets[i] = 0;
     
-    // Start pending and active states identical so the first swap is safe even
-    // before any settings have been applied.
+    // Start pending and active states identical so the first swap is safe even before any settings have been applied.
     *_pendingState = *((WaveformState*)_activeState);
     
     _lutSize = LUT_MAX_SIZE;
@@ -69,24 +66,24 @@ void WaveformGenerator::begin() {
     setupPWM();
     setupDMA();
     
-    // Pre-fill both ping-pong buffers before DMA starts so PWM never reads
-    // uninitialized sample memory.
+    // Pre-fill both ping-pong buffers before DMA starts so PWM never reads uninitialized sample memory.
     fillBuffer(0);
     fillBuffer(1);
     
-    // Start one channel per PWM slice. Chaining keeps the paired ping-pong
-    // channels running after this point.
+    // Start one channel per PWM slice. Chaining keeps the paired ping-pong channels running after this point.
     dma_channel_start(_dmaChan0);
     dma_channel_start(_dmaChan2);
     _dmaStarted = true;
 }
 
 void WaveformGenerator::setupPWM() {
-    // RP2040 GPIO to PWM Slice Mapping:
-    // GPIO 0 -> Slice 0 A
-    // GPIO 1 -> Slice 0 B
-    // GPIO 2 -> Slice 1 A
-    // GPIO 3 -> Slice 1 B
+    /*
+     * RP2040 GPIO to PWM Slice Mapping:
+     * GPIO 0 -> Slice 0 A
+     * GPIO 1 -> Slice 0 B
+     * GPIO 2 -> Slice 1 A
+     * GPIO 3 -> Slice 1 B
+     */
     
     gpio_set_function(PIN_PWM_PHASE_A, GPIO_FUNC_PWM);
     gpio_set_function(PIN_PWM_PHASE_B, GPIO_FUNC_PWM);
@@ -100,11 +97,13 @@ void WaveformGenerator::setupPWM() {
     
     pwm_config config = pwm_get_default_config();
     
-    // Set PWM frequency to approximately 50 kHz. The DDS phase increment below
-    // assumes this sample rate.
-    // SysClock = 125MHz (usually)
-    // Wrap = 1023 (10-bit)
-    // Div = 125000000 / (50000 * 1024) = ~2.44
+    /*
+     * Set PWM frequency to approximately 50 kHz. The DDS phase increment below
+     * assumes this sample rate.
+     * SysClock = 125MHz (usually)
+     * Wrap = 1023 (10-bit)
+     * Div = 125000000 / (50000 * 1024) = ~2.44
+     */
     pwm_config_set_wrap(&config, 1023);
     pwm_config_set_clkdiv(&config, 2.44f);
     
@@ -181,8 +180,10 @@ void WaveformGenerator::setupDMA() {
         false
     );
     
-    // Slice 0 and slice 1 run in lockstep from the same PWM settings, so slice 0
-    // interrupts are enough to know which buffer in both slices is free.
+    /*
+     * Slice 0 and slice 1 run in lockstep from the same PWM settings, so slice 0
+     * interrupts are enough to know which buffer in both slices is free.
+     */
     dma_channel_set_irq0_enabled(_dmaChan0, true);
     dma_channel_set_irq0_enabled(_dmaChan1, true);
     
@@ -196,8 +197,10 @@ void __not_in_flash_func(WaveformGenerator::dmaInterruptHandler)() {
         if (dma_hw->ints0 & (1u << _waveformInstance->_dmaChan0)) {
             dma_hw->ints0 = (1u << _waveformInstance->_dmaChan0); // Clear IRQ
             
-            // Chan 0 (and Chan 2) finished. Chan 1 (and Chan 3) are now running.
-            // Reset read addresses for Chan 0 and Chan 2 so they are ready when chained back.
+            /*
+             * Chan 0 (and Chan 2) finished. Chan 1 (and Chan 3) are now running.
+             * Reset read addresses for Chan 0 and Chan 2 so they are ready when chained back.
+             */
             dma_channel_set_read_addr(_waveformInstance->_dmaChan0, _waveformInstance->_dmaBufferSlice0[0], false);
             dma_channel_set_read_addr(_waveformInstance->_dmaChan2, _waveformInstance->_dmaBufferSlice1[0], false);
             
@@ -207,8 +210,10 @@ void __not_in_flash_func(WaveformGenerator::dmaInterruptHandler)() {
         if (dma_hw->ints0 & (1u << _waveformInstance->_dmaChan1)) {
             dma_hw->ints0 = (1u << _waveformInstance->_dmaChan1); // Clear IRQ
             
-            // Chan 1 (and Chan 3) finished. Chan 0 (and Chan 2) are now running.
-            // Reset read addresses for Chan 1 and Chan 3.
+            /*
+             * Chan 1 (and Chan 3) finished. Chan 0 (and Chan 2) are now running.
+             * Reset read addresses for Chan 1 and Chan 3.
+             */
             dma_channel_set_read_addr(_waveformInstance->_dmaChan1, _waveformInstance->_dmaBufferSlice0[1], false);
             dma_channel_set_read_addr(_waveformInstance->_dmaChan3, _waveformInstance->_dmaBufferSlice1[1], false);
             
@@ -219,9 +224,11 @@ void __not_in_flash_func(WaveformGenerator::dmaInterruptHandler)() {
 }
 
 void __not_in_flash_func(WaveformGenerator::update)() {
-    // Refill only the buffer not currently being read by DMA. The DMA IRQ also
-    // records the freed buffer, but the busy check is the final guard against
-    // overwriting active sample memory.
+    /*
+     * Refill only the buffer not currently being read by DMA. The DMA IRQ also
+     * records the freed buffer, but the busy check is the final guard against
+     * overwriting active sample memory.
+     */
     
     bool chan0Busy = dma_channel_is_busy(_dmaChan0);
     bool chan1Busy = dma_channel_is_busy(_dmaChan1);
@@ -249,8 +256,7 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
     _bufferFillCount++;
 
     if (!_enabled) {
-        // Fill with zero duty while disabled. MotorController ramps amplitude to
-        // zero before disabling for normal stops.
+        // Fill with zero duty while disabled. MotorController ramps amplitude to zero before disabling for normal stops.
         for (int i = 0; i < DMA_BUFFER_SIZE; i++) {
             _dmaBufferSlice0[bufferIndex][i] = 0;
             _dmaBufferSlice1[bufferIndex][i] = 0;
@@ -258,8 +264,7 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
         return;
     }
 
-    // Apply a pending Core 0 settings update between buffers so every sample in
-    // the buffer uses one coherent state.
+    // Apply a pending Core 0 settings update between buffers so every sample in the buffer uses one coherent state.
     if (_swapPending) {
         lockState();
         WaveformState* temp = (WaveformState*)_activeState;
@@ -273,21 +278,21 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
     const volatile WaveformState* state = _activeState;
     
     for (int i = 0; i < DMA_BUFFER_SIZE; i++) {
-        // Calculate samples for enabled phases; unused channels stay at the
-        // neutral sample before the 512 PWM offset is applied.
+        // Calculate samples for enabled phases; unused channels stay at the neutral sample before the 512 PWM offset is applied.
         int16_t samples[4];
         for (int ch = 0; ch < 4; ch++) {
             samples[ch] = (ch < MAX_ACTIVE_PHASE_OUTPUTS) ? generateSample(ch) : 0;
             _lastSamples[ch] = samples[ch];
         }
         
-        // Advance the master phase once per sample. Per-channel phase offsets are
-        // added inside generateSample().
+        // Advance the master phase once per sample. Per-channel phase offsets are added inside generateSample().
         _phaseAcc[0] += state->phaseInc;
         
-        // Pack into 32-bit words for DMA
-        // Slice 0: Phase A (GPIO 0) -> Channel A (Low 16), Phase B (GPIO 1) -> Channel B (High 16)
-        // Slice 1: Phase C (GPIO 2) -> Channel A (Low 16), Phase D (GPIO 3) -> Channel B (High 16)
+        /*
+         * Pack into 32-bit words for DMA
+         * Slice 0: Phase A (GPIO 0) -> Channel A (Low 16), Phase B (GPIO 1) -> Channel B (High 16)
+         * Slice 1: Phase C (GPIO 2) -> Channel A (Low 16), Phase D (GPIO 3) -> Channel B (High 16)
+         */
         
         // Offset to 0-1023 range (Center 512)
         uint16_t valA = (uint16_t)(512 + samples[0]);
@@ -307,8 +312,7 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
 }
 
 void WaveformGenerator::generateLUT() {
-    // Full-scale LUT entries are +/-511 so adding the 512 PWM midpoint produces
-    // legal 10-bit duty values after clamping.
+    // Full-scale LUT entries are +/-511 so adding the 512 PWM midpoint produces legal 10-bit duty values after clamping.
     for (int i = 0; i < _lutSize; i++) {
         float angle = (2.0 * PI * i) / _lutSize;
         _lut[i] = (int16_t)(sin(angle) * 511.0);
@@ -352,10 +356,12 @@ void WaveformGenerator::setFrequency(float freq) {
     if (freq < -MAX_OUTPUT_FREQUENCY_HZ) freq = -MAX_OUTPUT_FREQUENCY_HZ;
     lockState();
     _pendingState->frequency = freq;
-    // Recalculate phase increment based on the 50 kHz PWM/sample rate.
-    // Inc = Freq * (1/50000) * 2^32
-    // Inc = Freq * 0.00002 * 4294967296.0
-    // Inc = Freq * 85899.34592
+    /*
+     * Recalculate phase increment based on the 50 kHz PWM/sample rate.
+     * Inc = Freq * (1/50000) * 2^32
+     * Inc = Freq * 0.00002 * 4294967296.0
+     * Inc = Freq * 85899.34592
+     */
     double inc = freq * 85899.34592;
     _pendingState->phaseInc = (uint32_t)inc;
     _swapPending = true;
@@ -363,8 +369,7 @@ void WaveformGenerator::setFrequency(float freq) {
 }
 
 void WaveformGenerator::setAmplitude(float amp) {
-    // Public amplitude is normalized; MotorController applies settings limits
-    // before calling this function.
+    // Public amplitude is normalized; MotorController applies settings limits before calling this function.
     if (amp < 0.0) amp = 0.0;
     if (amp > 1.0) amp = 1.0;
     lockState();
@@ -374,8 +379,7 @@ void WaveformGenerator::setAmplitude(float amp) {
 }
 
 void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s) {
-    // Atomically publish a complete waveform tune: frequency, filters, and phase
-    // offsets. This is the preferred path during speed changes.
+    // Atomically publish a complete waveform tune: frequency, filters, and phase offsets. This is the preferred path during speed changes.
     if (freq > MAX_OUTPUT_FREQUENCY_HZ) freq = MAX_OUTPUT_FREQUENCY_HZ;
     if (freq < -MAX_OUTPUT_FREQUENCY_HZ) freq = -MAX_OUTPUT_FREQUENCY_HZ;
     lockState();
@@ -401,8 +405,7 @@ void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s) {
 void WaveformGenerator::setEnabled(bool e) {
     _enabled = e;
     if (!e) {
-        // Leave DMA/PWM running and let subsequent buffers go to zero. That keeps
-        // output shutdown deterministic without reconfiguring timing hardware.
+        // Leave DMA/PWM running and let subsequent buffers go to zero. That keeps output shutdown deterministic without reconfiguring timing hardware.
     }
 }
 
@@ -428,8 +431,7 @@ bool WaveformGenerator::isDmaRunning() const {
 int16_t __not_in_flash_func(WaveformGenerator::generateSample)(int channel) {
     const volatile WaveformState* state = _activeState;
     
-    // Use the upper accumulator bits for the LUT index and the next ten bits for
-    // linear interpolation between adjacent LUT samples.
+    // Use the upper accumulator bits for the LUT index and the next ten bits for linear interpolation between adjacent LUT samples.
     uint32_t phase = _phaseAcc[0] + state->phaseOffsets[channel];
     uint16_t index = phase >> _lutShift;
     uint16_t frac = (phase >> (_lutShift - 10)) & 0x3FF; 

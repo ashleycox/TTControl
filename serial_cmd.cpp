@@ -18,10 +18,12 @@
 
 extern UserInterface ui;
 
-// --- CLI Registry ---
-// Registry-backed settings share one list command, one get command, and one set
-// command. Each setter is responsible for clamping and applying live side
-// effects such as waveform reconfiguration.
+/*
+ * --- CLI Registry ---
+ * Registry-backed settings share one list command, one get command, and one set
+ * command. Each setter is responsible for clamping and applying live side
+ * effects such as waveform reconfiguration.
+ */
 struct SettingItem {
     String name;
     std::function<String()> get;
@@ -175,8 +177,7 @@ static String ipBytesToString(const uint8_t bytes[4]) {
 }
 
 static bool parseBoolValue(String value, bool& out) {
-    // Accept common serial-friendly forms instead of forcing users to remember
-    // numeric booleans.
+    // Accept common serial-friendly forms instead of forcing users to remember numeric booleans.
     value.trim();
     value.toLowerCase();
     if (value == "1" || value == "on" || value == "yes" || value == "true" || value == "y") {
@@ -205,8 +206,7 @@ static bool isSerialCommandAllowedWhileLocked(const String& input) {
 }
 
 static void handleUiLockCommand(const String& input) {
-    // The device lock is backed by NetworkManager because web and serial share
-    // the same PIN/access policy.
+    // The device lock is backed by NetworkManager because web and serial share the same PIN/access policy.
     if (input == "lock") {
         networkManager.lockDevice();
         Serial.println(networkManager.isDeviceLocked() ? "UI locked." : "UI lock is not enabled.");
@@ -286,8 +286,7 @@ static bool parseNetworkStandbyMode(String value, uint8_t& mode) {
 }
 
 static bool parseIpv4(const String& value, uint8_t out[4]) {
-    // Strict dotted decimal parser. String::toInt() alone would accept partial
-    // tokens, so each character is checked before conversion.
+    // Strict dotted decimal parser. String::toInt() alone would accept partial tokens, so each character is checked before conversion.
     int start = 0;
     for (int part = 0; part < 4; part++) {
         int dot = value.indexOf('.', start);
@@ -310,8 +309,7 @@ static bool parseIpv4(const String& value, uint8_t out[4]) {
 }
 
 static bool copyConfigString(char* target, size_t targetSize, const String& value, const char* label) {
-    // NetworkConfig uses fixed-size char arrays. Reject overlong serial input
-    // instead of truncating credentials silently.
+    // NetworkConfig uses fixed-size char arrays. Reject overlong serial input instead of truncating credentials silently.
     if (!target || targetSize == 0) return false;
     if (value.length() >= targetSize) {
         Serial.print(label);
@@ -326,8 +324,7 @@ static bool copyConfigString(char* target, size_t targetSize, const String& valu
 }
 
 static void parseCommandArgs(const String& text, std::vector<String>& args) {
-    // Splits serial commands into tokens while preserving quoted SSIDs/passwords
-    // and allowing simple backslash escapes inside quotes.
+    // Splits serial commands into tokens while preserving quoted SSIDs/passwords and allowing simple backslash escapes inside quotes.
     args.clear();
 
     String current;
@@ -374,8 +371,7 @@ static void parseCommandArgs(const String& text, std::vector<String>& args) {
 }
 
 enum WifiWizardStep : uint8_t {
-    // Ordered wizard states. State transitions are handled explicitly below so
-    // station-only, AP-only, and mixed modes can skip irrelevant prompts.
+    // Ordered wizard states. State transitions are handled explicitly below so station-only, AP-only, and mixed modes can skip irrelevant prompts.
     WIFI_WIZARD_IDLE = 0,
     WIFI_WIZARD_MODE,
     WIFI_WIZARD_SCAN_CHOICE,
@@ -407,8 +403,7 @@ static bool wifiScanForWizard = false;
 static uint32_t wifiScanStartedMs = 0;
 
 static bool wizardNeedsStation() {
-    // Station prompts are only needed when the selected mode will connect to an
-    // existing Wi-Fi network.
+    // Station prompts are only needed when the selected mode will connect to an existing Wi-Fi network.
     return wifiWizardConfig.mode == NETWORK_MODE_STA || wifiWizardConfig.mode == NETWORK_MODE_STA_AP;
 }
 
@@ -465,8 +460,7 @@ static void printWifiConfigSummary(const NetworkConfig& cfg) {
 static void promptWifiWizardStep();
 
 static void setWifiWizardStep(WifiWizardStep step) {
-    // Every state transition immediately prints the next prompt so the serial UI
-    // stays usable without a separate redraw loop.
+    // Every state transition immediately prints the next prompt so the serial UI stays usable without a separate redraw loop.
     wifiWizardStep = step;
     promptWifiWizardStep();
 }
@@ -611,8 +605,7 @@ static void promptWifiWizardStep() {
 }
 
 static void startWifiWizard() {
-    // Work on a temporary config copy until the user confirms, so cancelling the
-    // wizard cannot partially change the live network.
+    // Work on a temporary config copy until the user confirms, so cancelling the wizard cannot partially change the live network.
     if (!networkManager.isAvailable()) {
         Serial.println("Network support is not enabled in this build.");
         return;
@@ -641,8 +634,7 @@ static void startWifiWizard() {
 
 static bool startWifiScan(bool forWizard) {
 #if NETWORK_ENABLE
-    // Wi-Fi scans are asynchronous. updateWifiSerialTasks() prints results later
-    // so motor/UI polling is not blocked by a scan.
+    // Wi-Fi scans are asynchronous. updateWifiSerialTasks() prints results later so motor/UI polling is not blocked by a scan.
     if (!networkManager.isAvailable()) {
         Serial.println("Network support is not enabled in this build.");
         return false;
@@ -675,8 +667,7 @@ static bool startWifiScan(bool forWizard) {
 
 static void finishWifiScan(int count) {
 #if NETWORK_ENABLE
-    // Store only unique named SSIDs for wizard selection; hidden networks can
-    // still be typed manually.
+    // Store only unique named SSIDs for wizard selection; hidden networks can still be typed manually.
     wifiScanActive = false;
     wifiWizardScanCount = 0;
 
@@ -748,8 +739,7 @@ static void updateWifiSerialTasks() {
 }
 
 static void handleWifiWizardInput(String input) {
-    // Handle one wizard response at a time. Blank input usually means "keep the
-    // current/default value" except where a station SSID is required.
+    // Handle one wizard response at a time. Blank input usually means "keep the current/default value" except where a station SSID is required.
     input.trim();
 
     String lowered = input;
@@ -992,8 +982,10 @@ static void handleWifiWizardInput(String input) {
 void initCLI() {
     if (cliInitialized) return;
     
-    // --- Global Settings ---
-    // Keep registry names short and script-friendly; help/list expose the keys.
+    /*
+     * --- Global Settings ---
+     * Keep registry names short and script-friendly; help/list expose the keys.
+     */
     registry.push_back({ "brightness", 
         []() { return String(settings.get().displayBrightness); },
         [](String v) { settings.get().displayBrightness = (uint8_t)clampInt(v.toInt(), 0, 255); }
@@ -1415,9 +1407,11 @@ void initCLI() {
         [](String v) { settings.get().powerOnRelayDelay = (uint8_t)clampInt(v.toInt(), 0, 10); }
     });
     
-    // --- Current Speed Settings ---
-    // These access the currently active speed only. Scripts that tune all speeds
-    // should switch speed first, then set these keys for that speed.
+    /*
+     * --- Current Speed Settings ---
+     * These access the currently active speed only. Scripts that tune all speeds
+     * should switch speed first, then set these keys for that speed.
+     */
     
     registry.push_back({ "freq", 
         []() { return String(settings.getCurrentSpeedSettings().frequency); },
@@ -1515,8 +1509,7 @@ void handleSerialCommands() {
         input.trim();
 
         if (wifiWizardActive) {
-            // While the wizard is active, every line is wizard input until cancel
-            // or confirmation.
+            // While the wizard is active, every line is wizard input until cancel or confirmation.
             handleWifiWizardInput(input);
             return;
         }
@@ -1540,9 +1533,11 @@ void handleSerialCommands() {
             return;
         }
         
-        // --- Standard Commands ---
-        // Action commands are handled before registry keys so short aliases keep
-        // working even if a future setting name overlaps.
+        /*
+         * --- Standard Commands ---
+         * Action commands are handled before registry keys so short aliases keep
+         * working even if a future setting name overlaps.
+         */
         if (input == "start") {
             if (motor.isRelayTestMode()) {
                 Serial.println("Exit relay test before starting.");
@@ -1652,8 +1647,10 @@ void handleSerialCommands() {
             printSafetyDiagnostic();
         }
         
-        // --- Registry Commands ---
-        // Registry setters change RAM only. Users persist changes with save.
+        /*
+         * --- Registry Commands ---
+         * Registry setters change RAM only. Users persist changes with save.
+         */
         else if (input == "list") {
             Serial.println("--- Settings List ---");
             for (const auto& item : registry) {
@@ -1698,8 +1695,10 @@ void handleSerialCommands() {
             if (!found) Serial.println("Unknown setting key");
         }
         
-        // --- Preset Import/Export ---
-        // Preset JSON is line-oriented for serial monitor compatibility.
+        /*
+         * --- Preset Import/Export ---
+         * Preset JSON is line-oriented for serial monitor compatibility.
+         */
         else if (input.startsWith("export preset ")) {
             int slot = input.substring(14).toInt() - 1; // 1-based to 0-based
             if (slot >= 0 && slot < MAX_PRESET_SLOTS) {
@@ -1733,8 +1732,10 @@ void handleSerialCommands() {
             }
         }
         
-        // --- UI Injection ---
-        // Test hooks mirror encoder/button input without requiring hardware.
+        /*
+         * --- UI Injection ---
+         * Test hooks mirror encoder/button input without requiring hardware.
+         */
         else if (input == "j") ui.injectInput(-1, false);
         else if (input == "l") ui.injectInput(1, false);
         else if (input == "k") ui.injectInput(0, true);
@@ -1747,8 +1748,7 @@ void handleSerialCommands() {
 }
 
 void printStatus() {
-    // Status is intentionally concise enough for repeated serial polling but
-    // still includes safety-critical thermal, waveform, and lock state.
+    // Status is intentionally concise enough for repeated serial polling but still includes safety-critical thermal, waveform, and lock state.
     Serial.println("--- TT Control Status ---");
     Serial.print("State: ");
     Serial.println(motorStateName());
@@ -1844,8 +1844,7 @@ void printStatus() {
 
 static void printClosedLoopStatus() {
 #if CLOSED_LOOP_SPEED_ENABLE
-    // Closed-loop status combines sensor health, controller output, and tuning
-    // recommendations so a single command is enough for bench diagnosis.
+    // Closed-loop status combines sensor health, controller output, and tuning recommendations so a single command is enough for bench diagnosis.
     SpeedFeedbackStatus feedback = speedFeedback.getStatus();
 
     Serial.print("Closed Loop: ");
@@ -2046,8 +2045,7 @@ static void printClosedLoopSetupStatus() {
 
 static void handleClosedLoopCommand(const String& input) {
 #if CLOSED_LOOP_SPEED_ENABLE
-    // Closed-loop commands are parsed with quoted args for consistency with the
-    // Wi-Fi command parser, even though most subcommands are single words.
+    // Closed-loop commands are parsed with quoted args for consistency with the Wi-Fi command parser, even though most subcommands are single words.
     String rest = input.length() > 2 ? input.substring(2) : "";
     rest.trim();
 
@@ -2198,8 +2196,7 @@ static void handleClosedLoopCommand(const String& input) {
 }
 
 static void printSafetyDiagnostic() {
-    // Dry-run only: verifies configuration ranges and reports what action
-    // commands would do without touching relays, PWM, or motor state.
+    // Dry-run only: verifies configuration ranges and reports what action commands would do without touching relays, PWM, or motor state.
     bool ok = true;
     GlobalSettings& g = settings.get();
 
@@ -2355,8 +2352,7 @@ void printHelp() {
 }
 
 static void printWifiHelp() {
-    // Keep Wi-Fi help separate from the main help so the common command list
-    // stays compact.
+    // Keep Wi-Fi help separate from the main help so the common command list stays compact.
     Serial.println("Wi-Fi Commands:");
     Serial.println("wifi status - Show current network state");
     Serial.println("wifi config - Show saved network configuration");
@@ -2436,8 +2432,7 @@ static void printWifiStatus() {
 }
 
 static void markWifiConfigUpdated() {
-    // Wi-Fi set/clear commands stage changes in RAM. apply/save persists and
-    // restarts services.
+    // Wi-Fi set/clear commands stage changes in RAM. apply/save persists and restarts services.
     Serial.println("Network configuration updated. Use 'wifi apply' to save and reconnect.");
 }
 
@@ -2448,8 +2443,7 @@ static bool requireWifiAvailable() {
 }
 
 static void handleWifiSetCommand(const std::vector<String>& args) {
-    // Direct Wi-Fi setters edit the live config object but do not restart Wi-Fi
-    // until wifi apply/save is run.
+    // Direct Wi-Fi setters edit the live config object but do not restart Wi-Fi until wifi apply/save is run.
     if (args.size() < 3) {
         Serial.println("Usage: wifi set <key> <value>");
         return;
@@ -2638,8 +2632,7 @@ static void handleWifiClearCommand(const std::vector<String>& args) {
 }
 
 static void handleWifiConnectCommand(const std::vector<String>& args) {
-    // Convenience path for the common case: save station credentials and keep
-    // setup AP fallback enabled so recovery remains possible.
+    // Convenience path for the common case: save station credentials and keep setup AP fallback enabled so recovery remains possible.
     if (args.size() < 2) {
         Serial.println("Usage: wifi connect <ssid> [password]");
         return;
@@ -2739,8 +2732,7 @@ static void printPresetList() {
 }
 
 static void printSettingsDump() {
-    // Dump is human-readable rather than machine JSON; use export preset for a
-    // serial-safe structured payload.
+    // Dump is human-readable rather than machine JSON; use export preset for a serial-safe structured payload.
     GlobalSettings& g = settings.get();
 
     Serial.println("--- Settings Dump ---");
@@ -2876,8 +2868,7 @@ static void handlePresetCommand(const String& input) {
 }
 
 static void handleRelayTestCommand(const String& input) {
-    // Relay test energizes exactly one stage at a time and refuses to start while
-    // the motor is in motion.
+    // Relay test energizes exactly one stage at a time and refuses to start while the motor is in motion.
     String arg = "";
     if (input.length() > 10) {
         arg = input.substring(10);

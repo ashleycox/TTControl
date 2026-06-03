@@ -13,8 +13,7 @@
 #include "speed_feedback.h"
 #include "error_handler.h"
 
-// The waveform generator accepts signed frequencies for braking, but all public
-// settings still need to remain inside the hardware-safe output limit.
+// The waveform generator accepts signed frequencies for braking, but all public settings still need to remain inside the hardware-safe output limit.
 static float clampOutputFrequency(float freq) {
     if (freq > MAX_OUTPUT_FREQUENCY_HZ) return MAX_OUTPUT_FREQUENCY_HZ;
     if (freq < -MAX_OUTPUT_FREQUENCY_HZ) return -MAX_OUTPUT_FREQUENCY_HZ;
@@ -135,8 +134,7 @@ void MotorController::begin() {
 
     _state = (ENABLE_STANDBY && !settings.get().autoBoot) ? STATE_STANDBY : STATE_STOPPED;
 
-    // Load initial speed settings. "Last used" is stored separately from the
-    // user's boot preference so changing speed during use survives restart.
+    // Load initial speed settings. "Last used" is stored separately from the user's boot preference so changing speed during use survives restart.
     if (settings.get().bootSpeed <= 2) {
         _currentSpeedMode = (SpeedMode)settings.get().bootSpeed;
     } else {
@@ -180,8 +178,7 @@ void MotorController::startSymmetricSweep(float minSep, float maxSep, float spee
 
 void MotorController::stopSymmetricSweep(bool keepCurrentPhase) {
     if (keepCurrentPhase) {
-        // A UI "lock" intentionally keeps the swept offsets in RAM so the
-        // caller can save them. Other exits restore the pre-sweep values.
+        // A UI "lock" intentionally keeps the swept offsets in RAM so the caller can save them. Other exits restore the pre-sweep values.
         _sweepHasOriginalPhase = false;
     } else {
         restoreSweepPhaseOffsets();
@@ -207,8 +204,7 @@ void MotorController::update() {
             break;
 
         case STATE_STARTING:
-            // Motor is accelerating. Startup kick can briefly overdrive
-            // frequency for torque, then soft-start controls amplitude.
+            // Motor is accelerating. Startup kick can briefly overdrive frequency for torque, then soft-start controls amplitude.
 
             // 1. Startup Kick Logic (High torque start)
             if (_isKicking) {
@@ -262,9 +258,11 @@ void MotorController::update() {
                     _currentAmp = calculateSoftStartAmp(elapsed, duration);
                 }
 
-                // Apply frequency-dependent amplitude scaling during startup.
-                // This approximates a V/f curve so low-frequency starts can get
-                // extra torque without overdriving the running amplitude.
+                /*
+                 * Apply frequency-dependent amplitude scaling during startup.
+                 * This approximates a V/f curve so low-frequency starts can get
+                 * extra torque without overdriving the running amplitude.
+                 */
                 if (settings.get().freqDependentAmplitude > 0) {
                     float fdaRatio = (float)settings.get().freqDependentAmplitude / 100.0;
                     // 3-Point V/f Curve Interpolation
@@ -285,8 +283,7 @@ void MotorController::update() {
                     if (fMid >= fHigh) fHigh = fMid + 0.1;
 
                     if (currentF <= fLow) {
-                        // Point 1 - Flat line up to fLow (or linear ramp from 0 to vLow)
-                        // Most motors need instant boost at 0Hz to break friction
+                        // Point 1 - Flat line up to fLow (or linear ramp from 0 to vLow) Most motors need instant boost at 0Hz to break friction
                         scaleFactor = vLow;
                     } else if (currentF > fLow && currentF <= fMid) {
                         // Segment 1: Low to Mid
@@ -299,8 +296,7 @@ void MotorController::update() {
                         scaleFactor = vMid + ((vHigh - vMid) * segmentProgress);
                     }
 
-                    // The FDA master percentage can act as an overall multiplier/mix for the curve
-                    // If FDA = 100%, we use the full calculated curve. If FDA = 50%, we blend it halfway towards 1.0.
+                    // The FDA master percentage can act as an overall multiplier/mix for the curve If FDA = 100%, we use the full calculated curve. If FDA = 50%, we blend it halfway towards 1.0.
                     float blendFDA = fdaRatio * scaleFactor + (1.0 - fdaRatio);
 
                     // Apply this factor to the current amplitude state
@@ -312,8 +308,7 @@ void MotorController::update() {
             break;
 
         case STATE_RUNNING:
-            // Motor is running at target speed. Pitch, speed ramps, closed-loop
-            // correction, reduced amplitude, and diagnostics are handled here.
+            // Motor is running at target speed. Pitch, speed ramps, closed-loop correction, reduced amplitude, and diagnostics are handled here.
 
             // 1. Pitch Control / Frequency Update
             {
@@ -323,8 +318,7 @@ void MotorController::update() {
                 float requestedTargetRpm = calculateClosedLoopTargetRpm();
 #endif
 
-                // Smooth switching ramps frequency between speeds. Closed-loop
-                // correction can either stay off during the ramp or track lightly.
+                // Smooth switching ramps frequency between speeds. Closed-loop correction can either stay off during the ramp or track lightly.
                 if (_isSpeedRamping) {
                     float elapsed = now - _rampStartTime;
                     if (elapsed >= _rampDuration) {
@@ -378,8 +372,7 @@ void MotorController::update() {
                     }
                 }
 
-                // Reduced amplitude saves heat/noise after the platter has had
-                // time to settle at speed.
+                // Reduced amplitude saves heat/noise after the platter has had time to settle at speed.
                 if (!_isReducedAmp) {
                     uint32_t delaySec = settings.getCurrentSpeedSettings().amplitudeDelay;
                     uint32_t delayMs = delaySec * 1000;
@@ -403,8 +396,7 @@ void MotorController::update() {
                 // Runtime is counted only while the motor is running.
                 settings.updateRuntime();
 
-                // Diagnostic resonance sweep temporarily changes phase offsets
-                // in RAM, then restoreSweepPhaseOffsets() puts them back.
+                // Diagnostic resonance sweep temporarily changes phase offsets in RAM, then restoreSweepPhaseOffsets() puts them back.
                 if (_isSweepingMode) {
                     float timeSec = now / 1000.0;
                     float range = _sweepMaxSeparation - _sweepMinSeparation;
@@ -453,9 +445,11 @@ void MotorController::update() {
         }
     }
 
-    // --- Relay Staggering Logic ---
-    // Relay activation is deliberately staggered to avoid current spikes and
-    // contact chatter when unmuting several phase outputs.
+    /*
+     * --- Relay Staggering Logic ---
+     * Relay activation is deliberately staggered to avoid current spikes and
+     * contact chatter when unmuting several phase outputs.
+     */
     if (!_relayTestMode && ENABLE_MUTE_RELAYS && _relaysActive) {
         bool activeHigh = settings.get().relayActiveHigh;
 
@@ -506,9 +500,11 @@ void MotorController::update() {
         }
     }
 
-    // --- Deferred Settings Save ---
-    // Persist speed selection after a quiet period rather than on every button
-    // press or encoder step.
+    /*
+     * --- Deferred Settings Save ---
+     * Persist speed selection after a quiet period rather than on every button
+     * press or encoder step.
+     */
     if (_settingsDirty && (now - _lastSettingsChange > 2000)) {
         settings.save();
         _settingsDirty = false;
@@ -540,8 +536,7 @@ void MotorController::start() {
     _currentAmp = 0.0;
     _isReducedAmp = false;
 
-    // Startup kick starts above target frequency for extra torque, optionally
-    // ramping down into the normal target frequency.
+    // Startup kick starts above target frequency for extra torque, optionally ramping down into the normal target frequency.
     SpeedSettings& s = settings.getCurrentSpeedSettings();
     if (s.startupKick > 1) {
         _isKicking = true;
@@ -552,8 +547,7 @@ void MotorController::start() {
         waveform.setFrequency(_targetFreq);
     }
 
-    // Unmute relays if linked to start/stop. The actual relay writes may be
-    // delayed/staggered by setRelays().
+    // Unmute relays if linked to start/stop. The actual relay writes may be delayed/staggered by setRelays().
     if (settings.get().muteRelayLinkStartStop) {
         setRelays(true);
     }
@@ -600,8 +594,7 @@ void MotorController::handleBraking(uint32_t now) {
             setRelays(false); // Mute
         }
 
-        // Reset frequency to positive so the next start does not inherit reverse
-        // braking direction.
+        // Reset frequency to positive so the next start does not inherit reverse braking direction.
         waveform.setFrequency(abs(_targetFreq));
         return;
     }
@@ -660,8 +653,7 @@ void MotorController::handleBraking(uint32_t now) {
 }
 
 float MotorController::calculateSoftStartAmp(float elapsed, float duration) {
-    // All curves map elapsed time to 0..target amplitude; waveform amplitude
-    // clamping is still handled by WaveformGenerator.
+    // All curves map elapsed time to 0..target amplitude; waveform amplitude clamping is still handled by WaveformGenerator.
     float t = elapsed / duration;
     if (t > 1.0) t = 1.0;
 
@@ -697,8 +689,7 @@ void MotorController::toggleStandby() {
         _state = STATE_STOPPED;
         setStandbyRelay(true);
 
-        // If linked to standby, unmute.
-        // BUT if also linked to Start/Stop, we should stay muted until Start.
+        // If linked to standby, unmute. BUT if also linked to Start/Stop, we should stay muted until Start.
         if (settings.get().muteRelayLinkStandby && !settings.get().muteRelayLinkStartStop) {
              setRelays(true);
         } else {
@@ -823,8 +814,7 @@ void MotorController::setSpeed(SpeedMode mode) {
 }
 
 void MotorController::setPitch(float percent) {
-    // Pitch is a shared percentage; frequency is recalculated from it in update()
-    // so changing pitch does not immediately do waveform work from input code.
+    // Pitch is a shared percentage; frequency is recalculated from it in update() so changing pitch does not immediately do waveform work from input code.
     if (percent > _pitchRange) percent = _pitchRange;
     if (percent < -_pitchRange) percent = -_pitchRange;
     currentPitchPercent = percent;
@@ -855,8 +845,7 @@ void MotorController::adjustPitchFreq(float deltaHz) {
 }
 
 void MotorController::applySettings() {
-    // Apply the current speed's base waveform tune. Running mode will fold pitch
-    // and closed-loop correction in on the next update.
+    // Apply the current speed's base waveform tune. Running mode will fold pitch and closed-loop correction in on the next update.
     SpeedSettings& s = settings.getCurrentSpeedSettings();
 
     _targetFreq = clampOutputFrequency(s.frequency);
@@ -878,8 +867,7 @@ void MotorController::resetClosedLoop() {
 
 void MotorController::beginClosedLoopTuning() {
 #if CLOSED_LOOP_SPEED_ENABLE
-    // Tuning begins in monitor mode so sensor setup can be verified before the
-    // controller is allowed to adjust motor frequency.
+    // Tuning begins in monitor mode so sensor setup can be verified before the controller is allowed to adjust motor frequency.
     settings.get().closedLoopEnabled = true;
     settings.get().closedLoopControlMode = CLOSED_LOOP_CONTROL_MONITOR;
     _closedLoopTuneStep = CLOSED_LOOP_TUNE_SENSOR;
@@ -1183,8 +1171,7 @@ float MotorController::calculateClosedLoopTargetRpmForSpeed(SpeedMode speed) con
 
     float targetRpm = settings.get().closedLoopTargetRpm[index];
     if (settings.get().closedLoopPitchTargetMode == CLOSED_LOOP_PITCH_TARGET_FOLLOW) {
-        // Follow mode scales the RPM target by the effective pitch ratio so
-        // closed-loop control does not fight deliberate pitch changes.
+        // Follow mode scales the RPM target by the effective pitch ratio so closed-loop control does not fight deliberate pitch changes.
         SpeedSettings& s = settings.get().speeds[index];
         if (s.frequency > 0.001f) {
             targetRpm *= calculatePitchAdjustedFrequencyForSpeed((SpeedMode)index) / s.frequency;
@@ -1218,8 +1205,7 @@ float MotorController::clampToCurrentSpeedRange(float freq) const {
 }
 
 void MotorController::scheduleClosedLoopEngage(uint32_t now) {
-    // Delay engagement after starts and speed changes so feedback has time to
-    // settle and the PID state starts from clean measurements.
+    // Delay engagement after starts and speed changes so feedback has time to settle and the PID state starts from clean measurements.
     _closedLoopActive = false;
     _closedLoopCorrectionHz = 0.0f;
     resetClosedLoopPidState();
@@ -1284,8 +1270,7 @@ float MotorController::updateClosedLoopTarget(uint32_t now, float requestedRpm) 
         resetClosedLoopPidState();
     }
 
-    // Slew the target for smooth pitch changes. Large target jumps can still
-    // reset the PID state to avoid integral wind-up.
+    // Slew the target for smooth pitch changes. Large target jumps can still reset the PID state to avoid integral wind-up.
     float maxStep = g.closedLoopPitchSlewRpmPerSec * (elapsedMs / 1000.0f);
     if (maxStep <= 0.0f || fabs(delta) <= maxStep) {
         _closedLoopTargetRpm = requestedRpm;
@@ -1357,8 +1342,7 @@ void MotorController::recordClosedLoopTrend(const SpeedFeedbackStatus& feedback)
 
 void MotorController::recordClosedLoopMetrics(uint32_t now, const SpeedFeedbackStatus& feedback) {
 #if CLOSED_LOOP_SPEED_ENABLE
-    // Metrics use feedback.sampleSequence so a fast UI/API poll cannot count the
-    // same speed sample multiple times.
+    // Metrics use feedback.sampleSequence so a fast UI/API poll cannot count the same speed sample multiple times.
     bool saturated = _closedLoopSaturationStart != 0;
     if (saturated && !_closedLoopMetricsWasSaturated) {
         _closedLoopMetrics.saturationEvents++;
@@ -1427,8 +1411,7 @@ void MotorController::reportClosedLoopAction(const char* message, uint8_t action
 
 void MotorController::reportClosedLoopAction(const char* message, uint8_t action, bool& latch, const SpeedFeedbackStatus* feedback) {
 #if CLOSED_LOOP_SPEED_ENABLE
-    // Latches avoid persistent log spam from a continuing fault. STOP actions are
-    // reported critical so the error handler can force the appropriate response.
+    // Latches avoid persistent log spam from a continuing fault. STOP actions are reported critical so the error handler can force the appropriate response.
     if (action == CLOSED_LOOP_FAULT_IGNORE || latch) return;
 
     latch = true;
@@ -1460,8 +1443,7 @@ bool MotorController::closedLoopSafetyAllowsCorrection(uint32_t now, const Speed
 #if CLOSED_LOOP_SPEED_ENABLE
     GlobalSettings& g = settings.get();
 
-    // Plausibility and lock timeout checks can warn or stop without changing the
-    // rest of the PID calculation code.
+    // Plausibility and lock timeout checks can warn or stop without changing the rest of the PID calculation code.
     if (feedback.signalValid) {
         bool implausible = false;
         if (g.closedLoopPlausibilityMinRpm > 0.0f && feedback.filteredRpm < g.closedLoopPlausibilityMinRpm) {
@@ -1710,8 +1692,7 @@ float MotorController::applyClosedLoopCorrection(uint32_t now, float openLoopFre
 
 void MotorController::updateClosedLoopAmpRecovery(uint32_t now, const SpeedFeedbackStatus& feedback) {
 #if CLOSED_LOOP_SPEED_ENABLE
-    // If reduced amplitude causes speed to fall out of lock, optionally restore
-    // full amplitude or warn the user depending on settings.
+    // If reduced amplitude causes speed to fall out of lock, optionally restore full amplitude or warn the user depending on settings.
     GlobalSettings& g = settings.get();
     if (g.closedLoopAmpRecoveryMode == CLOSED_LOOP_AMP_RECOVERY_OFF || !_isReducedAmp) {
         _closedLoopAmpOutOfLockStart = 0;
@@ -1784,8 +1765,7 @@ void MotorController::setRelays(bool active) {
     bool activeHigh = settings.get().relayActiveHigh;
     bool requestedActive = active;
 
-    // Safety: enforce power-on delay before any unmute request can energize
-    // downstream hardware.
+    // Safety: enforce power-on delay before any unmute request can energize downstream hardware.
     if (active && _powerOnDelayActive) {
         uint32_t delayMs = settings.get().powerOnRelayDelay * 1000;
         if (hal.getMillis() - _powerOnTime < delayMs) {
@@ -1870,8 +1850,7 @@ void MotorController::setRelayTestStage(uint8_t stage) {
     if (stage >= count) stage = count - 1;
     _relayTestStage = stage;
 
-    // Start each test stage from all relays off, then energize exactly one
-    // output so wiring can be checked safely.
+    // Start each test stage from all relays off, then energize exactly one output so wiring can be checked safely.
     writeRelayOutput(PIN_RELAY_STANDBY, false);
 
     if (ENABLE_MUTE_RELAYS) {

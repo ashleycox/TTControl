@@ -25,8 +25,7 @@ SystemMonitor::SystemMonitor()
 }
 
 void SystemMonitor::begin() {
-    // Start a fresh utilization window and publish an initial memory snapshot so
-    // dashboards have sensible values before the first one-second update.
+    // Start a fresh utilization window and publish an initial memory snapshot so dashboards have sensible values before the first one-second update.
     _windowStartUs = micros();
     _core0LoopStartUs = 0;
     _core0WindowBusyUs = 0;
@@ -71,8 +70,7 @@ SystemMetricsSnapshot SystemMonitor::snapshot() const {
 }
 
 void SystemMonitor::refreshMemoryAndFlash() {
-    // Arduino-Pico reports -1/0 for unavailable heaps on some boards. Clamp
-    // those to zero so JSON and OLED code never display wrapped uint32_t values.
+    // Arduino-Pico reports -1/0 for unavailable heaps on some boards. Clamp those to zero so JSON and OLED code never display wrapped uint32_t values.
     int heapTotal = rp2040.getTotalHeap();
     int heapUsed = rp2040.getUsedHeap();
     int heapFree = rp2040.getFreeHeap();
@@ -95,8 +93,7 @@ void SystemMonitor::refreshMemoryAndFlash() {
 
     uintptr_t sketchStart = (uintptr_t)&__flash_binary_start;
     uintptr_t sketchEnd = (uintptr_t)&__flash_binary_end;
-    // Linker symbols give the actual image size in flash, which is more useful
-    // than estimating from the filesystem partition.
+    // Linker symbols give the actual image size in flash, which is more useful than estimating from the filesystem partition.
     _snapshot.sketchUsedBytes = sketchEnd > sketchStart ? (uint32_t)(sketchEnd - sketchStart) : 0;
 
 #ifdef FS_START

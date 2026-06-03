@@ -24,8 +24,7 @@ void ErrorHandler::begin() {
 }
 
 void ErrorHandler::logEvent(ErrorCode code, const char* message) {
-    // logEvent is for informational boot/runtime entries. It does not trigger
-    // UI alerts or motor actions.
+    // logEvent is for informational boot/runtime entries. It does not trigger UI alerts or motor actions.
     Serial.print("ERROR ");
     Serial.print(code);
     Serial.print(": ");
@@ -36,8 +35,7 @@ void ErrorHandler::logEvent(ErrorCode code, const char* message) {
 
 void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
     if (critical) {
-        // Stop outputs before doing file/UI work so safety action is not delayed
-        // by flash or display operations.
+        // Stop outputs before doing file/UI work so safety action is not delayed by flash or display operations.
         _criticalError = true;
         motor.emergencyStop();
     }
@@ -55,8 +53,7 @@ void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
 }
 
 void ErrorHandler::logToFile(ErrorCode code, const char* message) {
-    // Keep the log bounded. A small log is enough for bench diagnostics and
-    // avoids filling the LittleFS partition after repeated warnings.
+    // Keep the log bounded. A small log is enough for bench diagnostics and avoids filling the LittleFS partition after repeated warnings.
     File f = LittleFS.open("/error.log", "r");
     if (f) {
         size_t size = f.size();

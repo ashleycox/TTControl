@@ -16,8 +16,7 @@
 #include "network_manager.h"
 #include <Fonts/FreeSans12pt7b.h>
 
-// The dashboard uses four-character state labels so the top row still has
-// space for frequency and the lock icon on a 128px display.
+// The dashboard uses four-character state labels so the top row still has space for frequency and the lock icon on a 128px display.
 static const char* dashboardStateLabel() {
     if (motor.isRelayTestMode()) return "TEST";
     if (motor.isSpeedRamping()) return "RAMP";
@@ -32,8 +31,7 @@ static const char* dashboardStateLabel() {
     return "----";
 }
 
-// Diagnostic dashboards can be hidden individually to keep press-and-rotate
-// dashboard cycling short for users who only want the core views.
+// Diagnostic dashboards can be hidden individually to keep press-and-rotate dashboard cycling short for users who only want the core views.
 static bool dashboardModeEnabled(int mode) {
     switch (mode) {
         case 4: return settings.get().showCpuDashboard;
@@ -71,8 +69,7 @@ static void printKilobytes(uint32_t bytes) {
 }
 
 UserInterface::UserInterface() {
-    // The UI starts on the dashboard; menu pages are selected only after
-    // buildMenuSystem() creates their static objects in begin().
+    // The UI starts on the dashboard; menu pages are selected only after buildMenuSystem() creates their static objects in begin().
     _inMenu = false;
     _currentPage = nullptr;
     _screensaverActive = false;
@@ -92,8 +89,7 @@ UserInterface::UserInterface() {
 
     _statusMode = 0; // Standard
 
-    // Transition fields are kept initialized even though current navigation
-    // snaps pages into place after starting the animation.
+    // Transition fields are kept initialized even though current navigation snaps pages into place after starting the animation.
     _transitionProgress = 0.0;
     _transitionDirection = 0;
     _nextPage = nullptr;
@@ -102,8 +98,7 @@ UserInterface::UserInterface() {
     _lastBrightness = 0;
     _lissajousPhase = 0.0;
 
-    // Randomize column starts so the matrix screensaver is not a flat line on
-    // first entry.
+    // Randomize column starts so the matrix screensaver is not a flat line on first entry.
     for(int i=0; i<16; i++) _matrixDrops[i] = random(0, 64);
 
     _lastInputTime = 0;
@@ -112,12 +107,10 @@ UserInterface::UserInterface() {
 void UserInterface::begin() {
     _input.begin();
 
-    // Build once at boot. Menu pages/items are static and reused throughout the
-    // session to avoid heap churn while the controller is running.
+    // Build once at boot. Menu pages/items are static and reused throughout the session to avoid heap churn while the controller is running.
     buildMenuSystem();
 
-    // The splash is allowed to block because waveform generation has not
-    // started yet and setup() is still in progress.
+    // The splash is allowed to block because waveform generation has not started yet and setup() is still in progress.
     display.clearDisplay();
     display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
@@ -142,8 +135,7 @@ void UserInterface::begin() {
     display.display();
     delay(1000);
 
-    // Optional dedicated buttons bypass the encoder event stream and are
-    // sampled by InputManager on every UI update.
+    // Optional dedicated buttons bypass the encoder event stream and are sampled by InputManager on every UI update.
     #ifdef SPEED_BUTTON_ENABLE
     if (SPEED_BUTTON_ENABLE) hal.setPinMode(PIN_BTN_SPEED, INPUT_PULLUP);
     #endif
@@ -160,8 +152,7 @@ void UserInterface::begin() {
 }
 
 void UserInterface::update() {
-    // Poll first, then route events. The rest of update() is display policy and
-    // rendering, so hardware actions happen before the current frame is drawn.
+    // Poll first, then route events. The rest of update() is display policy and rendering, so hardware actions happen before the current frame is drawn.
     _input.update();
     handleInput();
 
@@ -169,8 +160,7 @@ void UserInterface::update() {
     uint32_t now = millis();
     uint32_t elapsed = (now - _lastInputTime) / 1000; // Seconds
 
-    // Auto-standby only applies when stopped; a running record should continue
-    // until explicit user or fault action stops it.
+    // Auto-standby only applies when stopped; a running record should continue until explicit user or fault action stops it.
     uint8_t stbyDelay = settings.get().autoStandbyDelay;
     if (stbyDelay > 0 && !motor.isRunning() && !motor.isStandby()) {
         if (elapsed > (stbyDelay * 60)) {
@@ -179,8 +169,7 @@ void UserInterface::update() {
         }
     }
 
-    // Auto-dim is a running-only low-distraction dashboard mode. First input
-    // wakes the standard dashboard and is consumed in handleInput().
+    // Auto-dim is a running-only low-distraction dashboard mode. First input wakes the standard dashboard and is consumed in handleInput().
     uint8_t dimDelay = settings.get().autoDimDelay;
     if (dimDelay > 0 && motor.isRunning() && _statusMode != 2) {
         if (elapsed > (dimDelay * 60)) {
@@ -188,8 +177,7 @@ void UserInterface::update() {
         }
     }
 
-    // Display sleep saves OLED life when stopped/idle. Running display policy is
-    // handled by auto-dim so status remains visible while a record plays.
+    // Display sleep saves OLED life when stopped/idle. Running display policy is handled by auto-dim so status remains visible while a record plays.
     int sleepDelayVal = settings.get().displaySleepDelay;
     if (sleepDelayVal > 0) {
         uint32_t sleepMs = 0;
@@ -207,8 +195,7 @@ void UserInterface::update() {
         }
     }
 
-    // Standby either animates a screensaver or turns the panel off, depending
-    // on the user setting. Leaving standby clears the screensaver flag.
+    // Standby either animates a screensaver or turns the panel off, depending on the user setting. Leaving standby clears the screensaver flag.
     if (motor.isStandby()) {
         if (settings.get().screensaverEnabled) {
             _screensaverActive = true;
@@ -242,8 +229,7 @@ void UserInterface::handleInput() {
     InputEvent evt = _input.getEvent();
     int delta = _input.getEncoderDelta();
 
-    // Resonance sweep has a dedicated modal behavior: any exit-style press
-    // locks the current swept phase offsets, saves them, and leaves the menu.
+    // Resonance sweep has a dedicated modal behavior: any exit-style press locks the current swept phase offsets, saves them, and leaves the menu.
     if (motor.isSweepingMode()) {
         if (evt == EVT_SELECT || evt == EVT_DOUBLE_CLICK || evt == EVT_BACK || evt == EVT_EXIT) {
             motor.stopSymmetricSweep(true);
@@ -251,8 +237,7 @@ void UserInterface::handleInput() {
             showMessage("Locked & Saved!", 2000);
             exitMenu();
         }
-        // Encoder rotation is intentionally ignored during the sweep so the
-        // diagnostic value is controlled only by the configured sweep range.
+        // Encoder rotation is intentionally ignored during the sweep so the diagnostic value is controlled only by the configured sweep range.
         return;
     }
 
@@ -261,16 +246,14 @@ void UserInterface::handleInput() {
         _lastInputTime = millis();
         display.ssd1306_command(SSD1306_DISPLAYON);
 
-        // The first input from dim mode is consumed to avoid an accidental speed
-        // change or menu action while the user is only waking the display.
+        // The first input from dim mode is consumed to avoid an accidental speed change or menu action while the user is only waking the display.
         if (_statusMode == 2) {
             _statusMode = 0; // Restore to Standard
             return;
         }
     }
 
-    // Locked mode still allows menu unlock entry, stop, and standby. Other
-    // actions show a short "UI Locked" message without changing settings.
+    // Locked mode still allows menu unlock entry, stop, and standby. Other actions show a short "UI Locked" message without changing settings.
     if (!_inMenu && networkManager.isDeviceLocked()) {
         bool speedButton = _input.isSpeedButtonPressed();
         bool startStopButton = _input.isStartStopPressed();
@@ -301,12 +284,10 @@ void UserInterface::handleInput() {
         return;
     }
 
-    // Dedicated buttons are global because they are intended as direct hardware
-    // controls, not menu-only controls.
+    // Dedicated buttons are global because they are intended as direct hardware controls, not menu-only controls.
     if (_input.isSpeedButtonPressed()) {
         motor.cycleSpeed();
-        // Keep the per-speed menu shadow aligned with the motor speed when the
-        // hardware speed button is used while inside the menu.
+        // Keep the per-speed menu shadow aligned with the motor speed when the hardware speed button is used while inside the menu.
         if (_inMenu) {
              menuShadowSpeedIndex = (int)motor.getSpeed();
              menuShadowSettings = settings.get().speeds[menuShadowSpeedIndex];
@@ -324,8 +305,7 @@ void UserInterface::handleInput() {
         motor.toggleStandby();
     }
 
-    // Screensaver wake consumes the input except for Select in standby, which
-    // intentionally wakes the controller out of standby as well as the display.
+    // Screensaver wake consumes the input except for Select in standby, which intentionally wakes the controller out of standby as well as the display.
     if (_screensaverActive && (evt != EVT_NONE || delta != 0)) {
         _screensaverActive = false;
 
@@ -335,8 +315,7 @@ void UserInterface::handleInput() {
         return;
     }
 
-    // Error dialogs are dismiss-only; corrective action is already performed by
-    // the error source or by showError(muteOutputs=true).
+    // Error dialogs are dismiss-only; corrective action is already performed by the error source or by showError(muteOutputs=true).
     if (_showingError && (evt != EVT_NONE)) {
         _showingError = false;
         return;
@@ -355,9 +334,11 @@ void UserInterface::handleInput() {
     #if PITCH_CONTROL_ENABLE
     int pitchDelta = _input.getPitchDelta();
 
-    // In menus, the pitch encoder acts as a secondary edit control. When an item
-    // is already editing it moves in coarse steps; otherwise it performs a quick
-    // one-step edit and save.
+    /*
+     * In menus, the pitch encoder acts as a secondary edit control. When an item
+     * is already editing it moves in coarse steps; otherwise it performs a quick
+     * one-step edit and save.
+     */
     if (pitchDelta != 0 && _inMenu && _currentPage) {
         MenuItem* item = _currentPage->getItem(_currentPage->getSelection());
         if (_transitionDirection == 0 && item && item->isEditable()) {
@@ -377,8 +358,7 @@ void UserInterface::handleInput() {
         motor.adjustPitchFreq(pitchDelta * step);
     }
 
-    // Pitch encoder switch is read directly because InputManager owns the
-    // primary encoder/button state machine.
+    // Pitch encoder switch is read directly because InputManager owns the primary encoder/button state machine.
     static bool lastPitchBtn = HIGH;
     static uint32_t pitchBtnDownTime = 0;
     bool pitchBtn = hal.digitalRead(PIN_ENC_PITCH_SW);
@@ -402,8 +382,7 @@ void UserInterface::handleInput() {
     lastPitchBtn = pitchBtn;
     #endif
 
-    // Menu pages consume encoder movement for item edit/scroll. Navigation keys
-    // only move pages when the selected item is not actively editing.
+    // Menu pages consume encoder movement for item edit/scroll. Navigation keys only move pages when the selected item is not actively editing.
     if (_inMenu && _currentPage) {
         if (_transitionDirection != 0) return;
 
@@ -420,8 +399,7 @@ void UserInterface::handleInput() {
         }
 
         if (evt == EVT_SELECT) {
-            // Link items navigate; editable/action items handle selection
-            // through their MenuItem implementation.
+            // Link items navigate; editable/action items handle selection through their MenuItem implementation.
             MenuPage* target = item ? item->getTargetPage() : nullptr;
             if (target) {
                 navigateTo(target);
@@ -433,8 +411,7 @@ void UserInterface::handleInput() {
         if (evt == EVT_BACK) {
             item = _currentPage->getItem(_currentPage->getSelection());
             if (item && item->onBack(_currentPage)) return;
-            // Relay test mode controls real relay outputs, so leaving that page
-            // always returns them to the normal off/test-complete state.
+            // Relay test mode controls real relay outputs, so leaving that page always returns them to the normal off/test-complete state.
             if (_currentPage == pageRelayTest) motor.endRelayTest();
             if (_menuStack.empty()) cancelMenuChangesAndExit();
             else back();
@@ -452,14 +429,12 @@ void UserInterface::handleInput() {
             }
         }
 
-        // Double-click keeps menu entry distinct from the safety-critical
-        // start/stop action on a single click.
+        // Double-click keeps menu entry distinct from the safety-critical start/stop action on a single click.
         if (evt == EVT_DOUBLE_CLICK) {
             enterMenu();
         }
 
-        // Long press/back enters standby and shows a short goodbye animation
-        // before the panel sleeps or screensaver takes over.
+        // Long press/back enters standby and shows a short goodbye animation before the panel sleeps or screensaver takes over.
         if (evt == EVT_BACK || evt == EVT_EXIT) {
             if (!motor.isStandby()) {
                 motor.toggleStandby();
@@ -488,8 +463,7 @@ void UserInterface::handleInput() {
 }
 
 void UserInterface::draw() {
-    // Contrast is sent only when changed. Dim mode and screensaver own their
-    // own brightness behavior, so the normal setting is skipped there.
+    // Contrast is sent only when changed. Dim mode and screensaver own their own brightness behavior, so the normal setting is skipped there.
     if (_statusMode != 2 && !_screensaverActive) {
         uint8_t target = settings.get().displayBrightness;
         if (target != _lastBrightness) {
@@ -501,8 +475,7 @@ void UserInterface::draw() {
 
     display.clearDisplay();
 
-    // Draw priority is safety/status first, then modal dialogs, then the active
-    // menu/dashboard surface.
+    // Draw priority is safety/status first, then modal dialogs, then the active menu/dashboard surface.
     if (_showingError) {
         drawError();
     } else if (_showingConfirm) {
@@ -529,8 +502,7 @@ void UserInterface::draw() {
 }
 
 void UserInterface::dumpDisplayToSerial() {
-    // ASCII mirror is throttled because a full 128x64 dump can otherwise
-    // dominate the 115200 baud serial link.
+    // ASCII mirror is throttled because a full 128x64 dump can otherwise dominate the 115200 baud serial link.
     static uint32_t lastDump = 0;
     if (millis() - lastDump < 1000) return;
     lastDump = millis();
@@ -547,8 +519,7 @@ void UserInterface::dumpDisplayToSerial() {
 }
 
 void UserInterface::drawGoodbye() {
-    // The goodbye screen is rendered after standby has been requested but
-    // before the display is allowed to go dark.
+    // The goodbye screen is rendered after standby has been requested but before the display is allowed to go dark.
     display.clearDisplay();
     display.setTextSize(2);
     display.setTextColor(SSD1306_WHITE);
@@ -575,8 +546,7 @@ void UserInterface::drawGoodbye() {
 }
 
 void UserInterface::drawMenu() {
-    // Transition offsets are currently zeroed by navigateTo()/back(), but the
-    // math is retained so future dual-page rendering has stable state.
+    // Transition offsets are currently zeroed by navigateTo()/back(), but the math is retained so future dual-page rendering has stable state.
     int xOffset = 0;
 
     if (_transitionDirection != 0) {
@@ -597,8 +567,7 @@ void UserInterface::drawMenu() {
     display.print(_currentPage->getTitle());
     display.drawLine(0 + xOffset, 10, 128 + xOffset, 10, SSD1306_WHITE);
 
-    // Smooth scroll state is updated even though MenuPage owns the logical
-    // window; this keeps the animation hook ready without changing layout.
+    // Smooth scroll state is updated even though MenuPage owns the logical window; this keeps the animation hook ready without changing layout.
     int selection = _currentPage->getSelection();
     int targetY = selection * 10; // 10px per item
 
@@ -626,8 +595,7 @@ void UserInterface::drawMenu() {
         display.setCursor(2 + xOffset, y);
         display.print(item->getLabel());
 
-        // Values start at x=80 by convention; labels in menu_data.cpp are kept
-        // short so both columns fit.
+        // Values start at x=80 by convention; labels in menu_data.cpp are kept short so both columns fit.
         char valBuf[18];
         item->getValueString(valBuf, sizeof(valBuf));
         if (valBuf[0] != 0) {
@@ -654,8 +622,7 @@ void UserInterface::drawMenu() {
 void UserInterface::drawDashboard() {
     extern bool safeModeActive;
 
-    // Dashboard modes can be hidden while selected through settings; advance to
-    // the next enabled page instead of leaving the OLED blank.
+    // Dashboard modes can be hidden while selected through settings; advance to the next enabled page instead of leaving the OLED blank.
     if (!dashboardModeEnabled(_statusMode)) {
         _statusMode = nextDashboardMode(_statusMode, 1);
     }
@@ -694,8 +661,7 @@ void UserInterface::drawDashboard() {
 
     // Top row is shared by every non-dim dashboard mode.
     if (safeModeActive) {
-        // Safe Mode bypasses loaded settings, so it replaces normal status
-        // icons with a full-width warning banner.
+        // Safe Mode bypasses loaded settings, so it replaces normal status icons with a full-width warning banner.
         display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
         display.setTextColor(SSD1306_BLACK);
         display.setCursor(35, 4);
@@ -723,8 +689,7 @@ void UserInterface::drawDashboard() {
         display.setCursor(freqX, 4);
         display.print(freqBuf);
 
-        // Lock icon means "running and no programmed ramp is active"; feedback
-        // lock status is reported through serial/web diagnostics.
+        // Lock icon means "running and no programmed ramp is active"; feedback lock status is reported through serial/web diagnostics.
         if (motor.getState() == STATE_RUNNING && !motor.isSpeedRamping()) {
             display.drawBitmap(112, 0, icon_lock_bits, 16, 16, SSD1306_WHITE);
         }
@@ -767,8 +732,7 @@ void UserInterface::drawDashboard() {
         display.drawRect(64, 2, 60, 60, SSD1306_WHITE);
 
         if (motor.isRunning()) {
-            // X axis is phase A, Y axis is phase B. This visualizes generated
-            // output, not measured motor feedback.
+            // X axis is phase A, Y axis is phase B. This visualizes generated output, not measured motor feedback.
             int16_t sampleA = waveform.getSample(0);
             int16_t sampleB = waveform.getSample(1);
 
@@ -887,8 +851,7 @@ void UserInterface::drawDashboard() {
     // Reset the Adafruit font before drawing small text and primitives.
     display.setFont(NULL);
 
-    // During starts, stops, and programmed speed changes, the upper bar shows
-    // motion progress through the motor state machine.
+    // During starts, stops, and programmed speed changes, the upper bar shows motion progress through the motor state machine.
     float motionProgress = motor.getMotionProgress();
     bool showProgress = motor.getState() == STATE_STARTING ||
                         motor.getState() == STATE_STOPPING ||
@@ -918,8 +881,7 @@ void UserInterface::drawDashboard() {
         deviationPercent = ((current - nominal) / nominal) * 100.0;
     }
 
-    // The visual range is fixed at +/-8% so ramps and pitch changes remain
-    // comparable across speeds.
+    // The visual range is fixed at +/-8% so ramps and pitch changes remain comparable across speeds.
     float range = 8.0;
 
     int px = 64 + (int)((deviationPercent / range) * 54.0);
@@ -952,8 +914,7 @@ void UserInterface::drawDashboard() {
 void UserInterface::drawScreensaver() {
     display.clearDisplay();
 
-    // The mode enum is stored in settings; unknown values fall back to the
-    // simple bouncing standby text.
+    // The mode enum is stored in settings; unknown values fall back to the simple bouncing standby text.
     if (settings.get().screensaverMode == SAVER_MATRIX) {
         drawMatrixRain();
     }
@@ -961,8 +922,7 @@ void UserInterface::drawScreensaver() {
         drawLissajous();
     }
     else {
-        // Move text at a fixed cadence so display frame rate does not affect
-        // animation speed.
+        // Move text at a fixed cadence so display frame rate does not affect animation speed.
         static uint32_t lastMove = 0;
         if (millis() - lastMove > 50) {
             lastMove = millis();
@@ -1010,8 +970,7 @@ void UserInterface::drawMatrixRain() {
 }
 
 void UserInterface::drawLissajous() {
-    // Parametric curves use phase advance rather than saved points, keeping the
-    // screensaver allocation-free.
+    // Parametric curves use phase advance rather than saved points, keeping the screensaver allocation-free.
     _lissajousPhase += 0.05;
 
     int cx = 64;
@@ -1062,8 +1021,7 @@ void UserInterface::drawSweepScreen() {
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
 
-    // Dedicated diagnostic screen makes it clear that normal menu navigation is
-    // temporarily trapped until the sweep is locked.
+    // Dedicated diagnostic screen makes it clear that normal menu navigation is temporarily trapped until the sweep is locked.
     display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
     display.setCursor(5, 4);
@@ -1146,21 +1104,18 @@ void UserInterface::back() {
 }
 
 void UserInterface::exitMenu() {
-    // Leaving the menu discards navigation history. Save/cancel decisions are
-    // handled by menu_data.cpp before this is called.
+    // Leaving the menu discards navigation history. Save/cancel decisions are handled by menu_data.cpp before this is called.
     _inMenu = false;
     _menuStack.clear();
     _currentPage = nullptr;
 }
 
 void UserInterface::enterMenu() {
-    // initMenuState() refreshes shadow settings and dynamic labels before the
-    // first menu page is displayed.
+    // initMenuState() refreshes shadow settings and dynamic labels before the first menu page is displayed.
     initMenuState();
     _menuStack.clear();
     _inMenu = true;
-    // Locked devices enter the unlock page only; unlocked devices start at the
-    // main menu root.
+    // Locked devices enter the unlock page only; unlocked devices start at the main menu root.
     _currentPage = networkManager.isDeviceLocked() ? pageUnlock : pageMain;
 }
 
@@ -1183,8 +1138,7 @@ void UserInterface::showConfirm(const char* msg, void (*action)()) {
 }
 
 void UserInterface::showError(const char* msg, uint32_t duration, bool muteOutputs) {
-    // Some error sources need immediate mute relay action but not a full motor
-    // state transition.
+    // Some error sources need immediate mute relay action but not a full motor state transition.
     snprintf(_errorBuffer, sizeof(_errorBuffer), "%s", msg ? msg : "");
     _errorMsg = _errorBuffer;
     _errorDuration = duration;

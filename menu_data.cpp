@@ -18,8 +18,7 @@
 extern UserInterface ui;
 extern MotorController motor;
 
-// Per-speed shadow editing. Speed pages edit menuShadowSettings; Save writes it
-// into settings, Cancel reloads persisted settings.
+// Per-speed shadow editing. Speed pages edit menuShadowSettings; Save writes it into settings, Cancel reloads persisted settings.
 char speedLabelBuffer[32];
 MenuItem* menuSpeedSelector = nullptr;
 MenuPage* pageNetwork = nullptr;
@@ -49,8 +48,10 @@ static MenuPage* pageClosedLoopSetup = nullptr;
 static MenuPage* pageClosedLoopTune = nullptr;
 #endif
 
-// --- Sweep Diagnostic ---
-// These are temporary diagnostic parameters, not persisted settings.
+/*
+ * --- Sweep Diagnostic ---
+ * These are temporary diagnostic parameters, not persisted settings.
+ */
 float sweepMinSep = 80.0;
 float sweepMaxSep = 100.0;
 float sweepSpeed = 1.0;
@@ -106,8 +107,7 @@ static const size_t relayTestLabelCount = sizeof(relayTestLabels) / sizeof(relay
 static uint8_t relayTestStage = 0;
 
 static MenuPage* rebuildMenuPage(MenuPage*& page, const char* title) {
-    // Dynamic pages are rebuilt on entry so status text and conditional items are
-    // fresh without leaking old MenuItems.
+    // Dynamic pages are rebuilt on entry so status text and conditional items are fresh without leaking old MenuItems.
     if (!page) page = new MenuPage(title);
     page->clear();
     return page;
@@ -146,8 +146,7 @@ void updateSpeedLabel() {
 }
 
 void initMenuState() {
-    // Called when the menu opens so edits begin from the currently selected
-    // motor speed.
+    // Called when the menu opens so edits begin from the currently selected motor speed.
     menuShadowSpeedIndex = (int)motor.getSpeed();
     menuShadowSettings = settings.get().speeds[menuShadowSpeedIndex];
     updateSpeedLabel();
@@ -180,8 +179,7 @@ void commitMenuShadowSettings() {
 }
 
 void saveMenuChangesAndExit() {
-    // Normalize and protected-save because these changes can affect hardware
-    // startup on the next boot.
+    // Normalize and protected-save because these changes can affect hardware startup on the next boot.
     commitMenuShadowSettings();
     motor.endRelayTest();
     settings.normalize();
@@ -191,8 +189,7 @@ void saveMenuChangesAndExit() {
 }
 
 void cancelMenuChangesAndExit() {
-    // Reload persisted settings to discard shadow edits and any live global menu
-    // edits made during this menu session.
+    // Reload persisted settings to discard shadow edits and any live global menu edits made during this menu session.
     settings.load();
     motor.endRelayTest();
     motor.applySettings();
@@ -219,8 +216,7 @@ void actionFactoryReset() {
 }
 
 void actionUnlockDevice() {
-    // Unlock page uses a separate buffer so failed attempts never overwrite the
-    // saved PIN.
+    // Unlock page uses a separate buffer so failed attempts never overwrite the saved PIN.
     if (networkManager.unlockDevice(unlockPinBuffer)) {
         memset(unlockPinBuffer, 0, sizeof(unlockPinBuffer));
         ui.showMessage("Unlocked", 1000);
@@ -321,8 +317,7 @@ void actionEnterErrorLog() {
 // --- Preset Actions ---
 
 void buildPresetSlotMenu(int slot) {
-    // Rebuild one reusable slot page. Lambdas read currentSlot so the callback
-    // always targets the slot displayed in this page.
+    // Rebuild one reusable slot page. Lambdas read currentSlot so the callback always targets the slot displayed in this page.
     static int currentSlot = 0;
     currentSlot = slot;
     static MenuPage* pageSlot = nullptr;
@@ -333,8 +328,7 @@ void buildPresetSlotMenu(int slot) {
     if (pageSlot) delete pageSlot; // Rebuild
     pageSlot = new MenuPage(title);
 
-    // Loading a preset replaces active settings and protected-saves it as boot
-    // settings so the selected preset survives restart.
+    // Loading a preset replaces active settings and protected-saves it as boot settings so the selected preset survives restart.
     pageSlot->addItem(new MenuAction("Load", [](){
         if (settings.loadPreset(currentSlot)) {
             motor.applySettings();
@@ -355,8 +349,7 @@ void buildPresetSlotMenu(int slot) {
         });
     }));
 
-    // Persistent buffer because MenuText edits in place and the page lives until
-    // rebuilt for another slot.
+    // Persistent buffer because MenuText edits in place and the page lives until rebuilt for another slot.
     static char nameBuffer[17];
     strncpy(nameBuffer, settings.getPresetName(slot), 16);
     nameBuffer[16] = 0;
@@ -400,8 +393,7 @@ void actionEnterPresets() {
 }
 
 void actionEnterSweep() {
-    // Sweep is a live diagnostic. MotorController restores original phase
-    // offsets when sweep exits/stops.
+    // Sweep is a live diagnostic. MotorController restores original phase offsets when sweep exits/stops.
     if (settings.get().phaseMode == 4) {
         ui.showError("N/A 4-Phase", 2000);
         return;
@@ -421,8 +413,7 @@ void actionEnterSweep() {
 }
 
 void actionEnterBrakeTune() {
-    // Brake Tune edits global brake settings live so the user can start/stop the
-    // motor repeatedly, then explicitly save the final tune.
+    // Brake Tune edits global brake settings live so the user can start/stop the motor repeatedly, then explicitly save the final tune.
     if (!pageBrakeTune) pageBrakeTune = new MenuPage("Brake Tune");
     pageBrakeTune->clear();
 
@@ -474,8 +465,7 @@ void actionEnterBrakeTune() {
 }
 
 void actionEnterRelayTest() {
-    // Relay test is refused while the motor is moving and disables waveform
-    // output before any relay stage is selected.
+    // Relay test is refused while the motor is moving and disables waveform output before any relay stage is selected.
     if (!motor.beginRelayTest()) {
         ui.showError("Stop Motor First", 2000);
         return;
@@ -506,8 +496,7 @@ void actionEnterRelayTest() {
 }
 
 void actionEnterNetwork() {
-    // Network pages edit NetworkConfig directly and apply/restart only when the
-    // user chooses Apply.
+    // Network pages edit NetworkConfig directly and apply/restart only when the user chooses Apply.
     if (!networkManager.isAvailable()) {
         ui.showError("No Wi-Fi", 2000);
         return;
@@ -671,8 +660,7 @@ void actionClosedLoopTuneStop() {
 }
 
 void actionEnterClosedLoop() {
-    // Closed-loop pages are rebuilt because the currently edited speed selects
-    // which per-speed tuning block is shown.
+    // Closed-loop pages are rebuilt because the currently edited speed selects which per-speed tuning block is shown.
     rebuildMenuPage(pageClosedLoop, "Closed Loop");
     rebuildMenuPage(pageClosedLoopControl, "CL Control");
     rebuildMenuPage(pageClosedLoopSensor, "CL Sensor");
@@ -922,6 +910,7 @@ void actionEnterClosedLoop() {
 
 void buildMenuSystem() {
     // Static pages are allocated once. Dynamic pages are built when entered.
+
     // --- Speed Tuning Page (Per-Speed) ---
     pageSpeedTuning = new MenuPage("Speed Tuning");
     pageSpeedTuning->addItem(new MenuFloat("Frequency", &menuShadowSettings.frequency, 0.1, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ));
@@ -936,8 +925,10 @@ void buildMenuSystem() {
     pageSpeedTuning->addItem(firProfile);
     pageSpeedTuning->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
-    // --- Phase Page (Mixed) ---
-    // Phase mode is global; phase offsets are per-speed shadow values.
+    /*
+     * --- Phase Page (Mixed) ---
+     * Phase mode is global; phase offsets are per-speed shadow values.
+     */
     pagePhase = new MenuPage("Phase Control");
     pagePhase->addItem(new MenuByte("Mode (Glb)", &settings.get().phaseMode, 1, MAX_PHASE_MODE, phaseModeLabels, MAX_PHASE_MODE + 1));
     MenuItem* phase2 = new MenuFloat("Ph 2 Offs", &menuShadowSettings.phaseOffset[1], 0.1, -360.0, 360.0);
@@ -954,9 +945,11 @@ void buildMenuSystem() {
     pagePhase->addItem(sweepDiag);
     pagePhase->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
-    // --- Motor Pages (Mixed) ---
-    // Startup/amplitude per-speed fields use the shadow copy; global ramp/brake
-    // fields update settings directly.
+    /*
+     * --- Motor Pages (Mixed) ---
+     * Startup/amplitude per-speed fields use the shadow copy; global ramp/brake
+     * fields update settings directly.
+     */
     pageMotor = new MenuPage("Motor Control");
     pageMotorStartup = new MenuPage("Motor Start");
     pageMotorAmplitude = new MenuPage("Motor Amp");
@@ -1027,8 +1020,10 @@ void buildMenuSystem() {
     pageMotorBraking->addItem(new MenuAction("Brake Tune", actionEnterBrakeTune));
     addBackItem(pageMotorBraking);
 
-    // --- Power Page (Global) ---
-    // Relay items are only added for hardware compiled into this build.
+    /*
+     * --- Power Page (Global) ---
+     * Relay items are only added for hardware compiled into this build.
+     */
     pagePower = new MenuPage("Power Control");
 
     if (ENABLE_MUTE_RELAYS) {
@@ -1129,8 +1124,10 @@ void buildMenuSystem() {
     pageMain->addItem(new MenuAction("Save & Exit", actionSaveExit));
     pageMain->addItem(new MenuAction("Cancel", actionCancelExit));
 
-    // --- Locked UI Entry Page ---
-    // This page is shown instead of the main menu when the device lock is active.
+    /*
+     * --- Locked UI Entry Page ---
+     * This page is shown instead of the main menu when the device lock is active.
+     */
     pageUnlock = new MenuPage("UI Locked");
     pageUnlock->addItem(new MenuInfo("Enter PIN"));
     pageUnlock->addItem(new MenuText("PIN", unlockPinBuffer, NETWORK_WEB_PIN_MAX));

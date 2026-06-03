@@ -27,17 +27,18 @@ public:
     
     void begin();
     void load();
-    // rollbackProtected saves the current file as known-good and marks the next
-    // boot as a candidate; setup clears the marker only after waveform buffers
-    // are successfully running.
+    /*
+     * rollbackProtected saves the current file as known-good and marks the next
+     * boot as a candidate; setup clears the marker only after waveform buffers
+     * are successfully running.
+     */
     void save(bool verbose = false, bool rollbackProtected = false);
     void resetDefaults();
     void factoryReset();
     void markBootSuccessful();
     bool rollbackWasApplied() const { return _rollbackApplied; }
     
-    // Direct mutable access is used throughout the firmware. Call normalize()
-    // after batch edits from serial/web/menu code before applying settings.
+    // Direct mutable access is used throughout the firmware. Call normalize() after batch edits from serial/web/menu code before applying settings.
     GlobalSettings& get() { return _data; }
     void normalize();
     
@@ -67,18 +68,15 @@ public:
     void resetTotalRuntime();
 
 private:
-    // Current live settings. This is written directly as a binary payload, so
-    // field changes must be coordinated with types.h/config.h migrations.
+    // Current live settings. This is written directly as a binary payload, so field changes must be coordinated with types.h/config.h migrations.
     GlobalSettings _data;
     const char* _filename = "/settings.bin";
 
-    // Runtime counters are updated once per second while MotorController reports
-    // a running state.
+    // Runtime counters are updated once per second while MotorController reports a running state.
     uint32_t _lastRuntimeUpdate;
     uint32_t _sessionRuntime;
 
-    // Rollback state guards against a saved setting that lets the firmware boot
-    // but fails before waveform generation becomes healthy.
+    // Rollback state guards against a saved setting that lets the firmware boot but fails before waveform generation becomes healthy.
     bool _rollbackApplied;
     bool _bootCandidateActive;
     
@@ -86,8 +84,7 @@ private:
     void setDefaults();
     void handlePendingRollback();
     
-    // Internal helpers. Preset slots use the same blob format as global settings
-    // but a different file magic so the two cannot be accidentally interchanged.
+    // Internal helpers. Preset slots use the same blob format as global settings but a different file magic so the two cannot be accidentally interchanged.
     void saveToSlot(uint8_t slot); // Legacy wrapper
     void loadFromSlot(uint8_t slot); // Legacy wrapper
     bool loadFromSlot(uint8_t slot, GlobalSettings& target);

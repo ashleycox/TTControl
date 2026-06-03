@@ -20,8 +20,7 @@ HardwareAbstraction::HardwareAbstraction() {
 }
 
 void HardwareAbstraction::begin() {
-    // Reserved for board-wide initialization that should happen before module
-    // setup. Pin directions are set in the owning modules.
+    // Reserved for board-wide initialization that should happen before module setup. Pin directions are set in the owning modules.
 }
 
 void HardwareAbstraction::setPinMode(int pin, int mode) {
@@ -64,14 +63,12 @@ void HardwareAbstraction::watchdogFeed() {
 }
 
 void HardwareAbstraction::watchdogReboot() {
-    // Force immediate reboot. Use only when a controlled firmware reset is safer
-    // than continuing with invalid state.
+    // Force immediate reboot. Use only when a controlled firmware reset is safer than continuing with invalid state.
     watchdog_reboot(0, 0, 0);
 }
 
 ResetCause HardwareAbstraction::getResetCause() {
-    // Arduino-Pico exposes board reset reasons through the global rp2040 helper;
-    // translate them into the firmware's stable enum for logging and APIs.
+    // Arduino-Pico exposes board reset reasons through the global rp2040 helper; translate them into the firmware's stable enum for logging and APIs.
     switch (rp2040.getResetReason()) {
         case RP2040::PWRON_RESET: return RESET_CAUSE_POWER_ON;
         case RP2040::RUN_PIN_RESET: return RESET_CAUSE_RUN_PIN;
@@ -112,8 +109,7 @@ void HardwareAbstraction::delayMs(uint32_t ms) {
 }
 
 void HardwareAbstraction::setMuteRelay(int index, bool active) {
-    // Map phase index to relay GPIO. A bad index is ignored rather than toggling
-    // an unintended pin.
+    // Map phase index to relay GPIO. A bad index is ignored rather than toggling an unintended pin.
     int pin = -1;
     switch(index) {
         case 0: pin = PIN_MUTE_PHASE_A; break;

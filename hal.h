@@ -41,9 +41,11 @@ public:
     void digitalWrite(int pin, int value);
     int digitalRead(int pin);
     
-    // --- PWM Control ---
-    // Generic Arduino PWM wrappers. The DDS output code configures PWM directly
-    // in waveform.cpp and does not rely on these helpers.
+    /*
+     * --- PWM Control ---
+     * Generic Arduino PWM wrappers. The DDS output code configures PWM directly
+     * in waveform.cpp and does not rely on these helpers.
+     */
     void analogWrite(int pin, int value);
     void setPWMFreq(int freq);
     void setPWMRange(int range);
@@ -60,9 +62,11 @@ public:
     uint32_t getMillis();
     void delayMs(uint32_t ms);
     
-    // --- Semantic Hardware Control ---
-    // These functions perform pin mapping only. Polarity, staggered sequencing,
-    // and safety timing stay in MotorController.
+    /*
+     * --- Semantic Hardware Control ---
+     * These functions perform pin mapping only. Polarity, staggered sequencing,
+     * and safety timing stay in MotorController.
+     */
     void setMuteRelay(int index, bool active);
     void setStandbyRelay(bool active);
     

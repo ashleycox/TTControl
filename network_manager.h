@@ -41,8 +41,7 @@ enum NetworkStandbyMode : uint8_t {
     NETWORK_STANDBY_ECO = 1
 };
 
-// Binary LittleFS network config. This is separate from GlobalSettings so Wi-Fi
-// credentials and web access settings can be managed/reset independently.
+// Binary LittleFS network config. This is separate from GlobalSettings so Wi-Fi credentials and web access settings can be managed/reset independently.
 struct NetworkConfig {
     uint32_t magic;
     uint16_t version;
@@ -68,9 +67,11 @@ struct NetworkConfig {
     bool deviceLockEnabled;
 };
 
-// Manages Wi-Fi station/AP state, captive setup DNS, web PIN/lock state, and
-// network config persistence. On non-Wi-Fi builds the public API remains usable
-// but reports the network as unavailable.
+/*
+ * Manages Wi-Fi station/AP state, captive setup DNS, web PIN/lock state, and
+ * network config persistence. On non-Wi-Fi builds the public API remains usable
+ * but reports the network as unavailable.
+ */
 class NetworkManager {
 public:
     NetworkManager();
@@ -114,8 +115,7 @@ public:
 
 private:
     NetworkConfig _config;
-    // Runtime state mirrors Wi-Fi library state but avoids calling Wi-Fi APIs
-    // from every dashboard/status query.
+    // Runtime state mirrors Wi-Fi library state but avoids calling Wi-Fi APIs from every dashboard/status query.
     bool _loaded;
     bool _apActive;
     bool _staStarted;

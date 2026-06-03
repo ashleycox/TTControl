@@ -14,8 +14,7 @@
 #include <functional>
 #include "input.h"
 
-// Forward declaration keeps MenuItem signatures simple without requiring the
-// full MenuPage definition at the top of the file.
+// Forward declaration keeps MenuItem signatures simple without requiring the full MenuPage definition at the top of the file.
 class MenuPage;
 
 /**
@@ -25,8 +24,7 @@ class MenuPage;
  */
 class MenuItem {
 public:
-    // Visibility callbacks let menu_data keep one static tree while hiding items
-    // behind compile-time or runtime feature flags.
+    // Visibility callbacks let menu_data keep one static tree while hiding items behind compile-time or runtime feature flags.
     typedef std::function<bool()> VisibilityCallback;
 
     MenuItem(const char* label);
@@ -48,8 +46,10 @@ public:
     virtual bool isEditable() const { return false; } // Returns true if item can be edited
     virtual MenuPage* getTargetPage() const { return nullptr; }
 
-    // --- Rendering Helpers ---
-    // UI rendering asks each item for a compact 128x64-friendly value string.
+    /*
+     * --- Rendering Helpers ---
+     * UI rendering asks each item for a compact 128x64-friendly value string.
+     */
     virtual void getValueString(char* buffer, size_t size) const { buffer[0] = 0; }
 
 protected:
@@ -150,8 +150,7 @@ public:
         : MenuItem(label), _target(target), _min(min), _max(max), _temp(*target), _editing(false) {}
 
     void onSelect(MenuPage*& currentPage) override {
-        // Generic setting editors use live preview: onInput writes _target while
-        // editing, and leaving edit mode confirms the same temp value.
+        // Generic setting editors use live preview: onInput writes _target while editing, and leaving edit mode confirms the same temp value.
         _editing = !_editing;
         if (!_editing) {
             // Save on exit edit
@@ -166,8 +165,7 @@ public:
     bool isEditing() const override { return _editing; }
     bool isDirty() const override { return _temp != *_target; }
     bool onBack(MenuPage*& currentPage) override {
-        // Back from an individual edit accepts the previewed value. Higher-level
-        // Save/Cancel flows, such as per-speed tuning, use shadow settings.
+        // Back from an individual edit accepts the previewed value. Higher-level Save/Cancel flows, such as per-speed tuning, use shadow settings.
         if (!_editing) return false;
         *_target = _temp;
         _editing = false;
@@ -192,8 +190,7 @@ public:
 
 class MenuByte : public MenuItem {
 public:
-    // Byte editor supports optional labels and a change callback because many
-    // uint8_t settings are enum-like menu choices.
+    // Byte editor supports optional labels and a change callback because many uint8_t settings are enum-like menu choices.
     typedef std::function<void(uint8_t)> ChangeCallback;
 
     MenuByte(const char* label, uint8_t* target, int min, int max);
@@ -261,8 +258,7 @@ public:
     bool isDirty() const override;
 
 private:
-    // Text editing happens in _temp until committed to _target. The temp buffer
-    // can hold internal tokens that render as Shift or pound-sign choices.
+    // Text editing happens in _temp until committed to _target. The temp buffer can hold internal tokens that render as Shift or pound-sign choices.
     char* _target;
     char* _temp;
     size_t _maxLength;

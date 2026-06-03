@@ -39,8 +39,10 @@ public:
     // Initialize hardware and LUTs
     void begin();
     
-    // Main generation loop (Call in loop1)
-    // NOTE: With DMA, this is no longer a tight loop, but a buffer management task
+    /*
+     * Main generation loop (Call in loop1)
+     * NOTE: With DMA, this is no longer a tight loop, but a buffer management task
+     */
     void update(); 
     
     // --- Control ---
@@ -66,8 +68,7 @@ public:
     bool isDmaRunning() const;
 
 private:
-    // Double-buffered configuration state. Frequency, phase, amplitude, and
-    // filters are copied as a unit so Core 1 never sees a partially changed tune.
+    // Double-buffered configuration state. Frequency, phase, amplitude, and filters are copied as a unit so Core 1 never sees a partially changed tune.
     struct WaveformState {
         float frequency;
         uint32_t phaseInc;
@@ -81,8 +82,10 @@ private:
     WaveformState _stateA;
     WaveformState _stateB;
     
-    // Pointers to active and pending states
-    // Volatile to ensure atomic-like access (pointer swap is atomic on 32-bit ARM)
+    /*
+     * Pointers to active and pending states
+     * Volatile to ensure atomic-like access (pointer swap is atomic on 32-bit ARM)
+     */
     volatile WaveformState* _activeState;
     WaveformState* _pendingState;
     
@@ -91,8 +94,7 @@ private:
     volatile bool _swapPending; // Flag to tell ISR to swap
     volatile bool _stateLock;
     
-    // Internal sample history maintained only by Core 1. The master accumulator
-    // is channel 0; other channels derive phase by adding offsets.
+    // Internal sample history maintained only by Core 1. The master accumulator is channel 0; other channels derive phase by adding offsets.
     uint32_t _phaseAcc[4];
     float _iirPrev[4];
     float _firBuffer[4][8]; // [Channel][Tap]
@@ -105,10 +107,12 @@ private:
     
     // DMA / PWM State
     static const int DMA_BUFFER_SIZE = 256; // Number of samples per buffer
-    // 2 Slices, 2 Buffers per slice (Ping-Pong), Buffer Size
-    // Slice 0 controls Phase A & B (GPIO 0, 1)
-    // Slice 1 controls Phase C & D (GPIO 2, 3)
-    // Buffer format: 32-bit words. Top 16 bits = Channel B/D, Bottom 16 bits = Channel A/C
+    /*
+     * 2 Slices, 2 Buffers per slice (Ping-Pong), Buffer Size
+     * Slice 0 controls Phase A & B (GPIO 0, 1)
+     * Slice 1 controls Phase C & D (GPIO 2, 3)
+     * Buffer format: 32-bit words. Top 16 bits = Channel B/D, Bottom 16 bits = Channel A/C
+     */
     uint32_t _dmaBufferSlice0[2][DMA_BUFFER_SIZE];
     uint32_t _dmaBufferSlice1[2][DMA_BUFFER_SIZE];
     

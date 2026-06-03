@@ -25,13 +25,11 @@ WebInterface webInterface;
 
 #if NETWORK_ENABLE
 
-// Keep response and request buffers small enough for Pico RAM while still
-// supporting the large settings/backup JSON bodies used by the web app.
+// Keep response and request buffers small enough for Pico RAM while still supporting the large settings/backup JSON bodies used by the web app.
 static const size_t WEB_RESPONSE_CHUNK_BYTES = 768;
 static const size_t WEB_JSON_BODY_MAX_BYTES = 12 * 1024;
 
-// Main browser UI. It is stored as a raw string so the firmware can serve the
-// app without LittleFS assets or a build step.
+// Main browser UI. It is stored as a raw string so the firmware can serve the app without LittleFS assets or a build step.
 static const char INDEX_HTML[] = R"HTML(
 <!doctype html>
 <html lang="en">
@@ -524,8 +522,7 @@ document.querySelectorAll("input,select").forEach(el=>{el.oninput=updateSummary;
 </html>
 )HTML";
 
-// Counts bytes that would be written to a streaming JSON response. This lets the
-// schema endpoint set Content-Length without allocating the whole schema string.
+// Counts bytes that would be written to a streaming JSON response. This lets the schema endpoint set Content-Length without allocating the whole schema string.
 class CountingPrint : public Print {
 public:
     size_t length = 0;
@@ -541,8 +538,7 @@ public:
     }
 };
 
-// Buffers small chunks before sending them to WebServer, reducing per-byte send
-// overhead while still avoiding one large response allocation.
+// Buffers small chunks before sending them to WebServer, reducing per-byte send overhead while still avoiding one large response allocation.
 class ServerBufferedPrint : public Print {
 public:
     explicit ServerBufferedPrint(WebServer& server)
@@ -586,8 +582,7 @@ private:
     size_t _used;
 };
 
-// WebServer's normal POST parser is not enough for the larger JSON bodies used
-// here, so this handler wires raw body callbacks to selected JSON routes.
+// WebServer's normal POST parser is not enough for the larger JSON bodies used here, so this handler wires raw body callbacks to selected JSON routes.
 class RawJsonRequestHandler : public RequestHandler {
 public:
     RawJsonRequestHandler(const char* uri,
@@ -634,8 +629,7 @@ static void writeComma(Print& out, bool& first) {
 }
 
 static void writeJsonString(Print& out, const char* text) {
-    // Minimal JSON string writer for streamed responses. ArduinoJson is still
-    // used where object construction is simpler and memory cost is acceptable.
+    // Minimal JSON string writer for streamed responses. ArduinoJson is still used where object construction is simpler and memory cost is acceptable.
     out.write('"');
     if (text) {
         while (*text) {
@@ -859,8 +853,7 @@ static int clampIntValue(int value, int minValue, int maxValue) {
 }
 
 static void copyJsonString(char* target, size_t targetSize, JsonVariant value, bool allowEmpty) {
-    // Copy only fields explicitly present in the request. Empty strings can be
-    // allowed for credentials that the UI is intentionally clearing.
+    // Copy only fields explicitly present in the request. Empty strings can be allowed for credentials that the UI is intentionally clearing.
     if (value.isNull() || !target || targetSize == 0) return;
     const char* text = value.as<const char*>();
     if (!text) return;
@@ -890,8 +883,7 @@ static void setFloat(JsonObject obj, const char* key, float& target, float minVa
 }
 
 static bool parseIpString(const char* text, uint8_t out[4]) {
-    // Strict enough for API validation: exactly four dotted decimal components
-    // and no trailing text.
+    // Strict enough for API validation: exactly four dotted decimal components and no trailing text.
     if (!text || !out) return false;
     int a, b, c, d;
     char tail;
@@ -914,8 +906,7 @@ static void streamOptionPair(Print& out, bool& first, int value, const char* lab
 }
 
 static void streamOptions(Print& out) {
-    // Schema option arrays are sent before fields so the browser can build
-    // select controls without hard-coded enum labels.
+    // Schema option arrays are sent before fields so the browser can build select controls without hard-coded enum labels.
     bool firstOptionSet = true;
 
     beginArrayProp(out, firstOptionSet, "phaseMode");
@@ -1085,8 +1076,7 @@ static bool streamSchemaFieldBase(Print& out,
                                   const char* help = nullptr,
                                   const char* unit = nullptr,
                                   bool safety = false) {
-    // Field schema keys are intentionally short because this endpoint is loaded
-    // by memory-constrained browsers over an embedded server.
+    // Field schema keys are intentionally short because this endpoint is loaded by memory-constrained browsers over an embedded server.
     writeComma(out, first);
     out.write('{');
     bool fieldFirst = true;
@@ -1182,8 +1172,7 @@ static void endFieldGroup(Print& out) {
 }
 
 static void streamGlobalGroups(Print& out) {
-    // Groups define web form layout and help text without duplicating labels in
-    // the browser JavaScript.
+    // Groups define web form layout and help text without duplicating labels in the browser JavaScript.
     bool firstGroup = true;
     bool firstField;
 
@@ -1320,8 +1309,7 @@ static void streamGlobalGroups(Print& out) {
 }
 
 static void streamSpeedFields(Print& out) {
-    // Speed field definitions apply to each speed tab. Per-speed values are
-    // provided separately by /api/settings.
+    // Speed field definitions apply to each speed tab. Per-speed values are provided separately by /api/settings.
     bool firstField = true;
     streamNumberField(out, firstField, "frequency", "Frequency", MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ, 0.1f, "Nominal drive frequency for this speed.", "Hz", true);
     streamNumberField(out, firstField, "minFrequency", "Minimum frequency", MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ, 0.1f, "Lower pitch/frequency limit for this speed.", "Hz", true);
@@ -1355,8 +1343,7 @@ static void streamSpeedFields(Print& out) {
 }
 
 static void streamNetworkFields(Print& out) {
-    // Network fields are exposed separately so the setup page and full UI can
-    // share validation rules and labels.
+    // Network fields are exposed separately so the setup page and full UI can share validation rules and labels.
     bool firstField = true;
     streamCheckboxField(out, firstField, "enabled", "Wi-Fi enabled", "Turn Wi-Fi features on for this board.");
     streamSelectField(out, firstField, "mode", "Connection mode", "netMode", "Choose setup AP, Wi-Fi client, or both.");
@@ -1434,8 +1421,7 @@ WebInterface::WebInterface()
 }
 
 void WebInterface::begin() {
-    // The server is started even if Wi-Fi is currently disabled; update() only
-    // handles clients when NetworkManager reports an available connection/AP.
+    // The server is started even if Wi-Fi is currently disabled; update() only handles clients when NetworkManager reports an available connection/AP.
     setupRoutes();
     _server.enableCORS(true);
     _server.begin();
@@ -1454,8 +1440,7 @@ bool WebInterface::isStarted() const {
 }
 
 void WebInterface::setupRoutes() {
-    // POST routes that need JSON bodies use RawJsonRequestHandler so large bodies
-    // can be collected safely before the handler runs.
+    // POST routes that need JSON bodies use RawJsonRequestHandler so large bodies can be collected safely before the handler runs.
     _server.collectHeaders("X-TTControl-Token");
     auto rawBody = [this]() { handleRawBody(); };
     _server.on("/", HTTP_GET, [this]() { handleRoot(); });
@@ -1481,8 +1466,7 @@ void WebInterface::setupRoutes() {
 }
 
 void WebInterface::sendJson(int code, JsonDocument& doc) {
-    // Most JSON responses are no-store so dashboards and settings do not use
-    // stale browser cache data.
+    // Most JSON responses are no-store so dashboards and settings do not use stale browser cache data.
     _server.sendHeader("Cache-Control", "no-store");
     _server.setContentLength(measureJson(doc));
     _server.send(code, "application/json", "", 0);
@@ -1493,8 +1477,7 @@ void WebInterface::sendJson(int code, JsonDocument& doc) {
 }
 
 void WebInterface::sendStaticHtml(PGM_P content, size_t contentLength) {
-    // Stream HTML from flash in chunks. The raw string constants are never copied
-    // into a heap String.
+    // Stream HTML from flash in chunks. The raw string constants are never copied into a heap String.
     _server.sendHeader("Cache-Control", "no-store");
     _server.setContentLength(contentLength);
     _server.send(200, "text/html", "", 0);
@@ -1540,8 +1523,7 @@ bool WebInterface::parseBody(JsonDocument& doc) {
 }
 
 void WebInterface::handleRawBody() {
-    // Raw body callbacks arrive before the route handler. The handler later
-    // validates size/completeness and deserializes JSON.
+    // Raw body callbacks arrive before the route handler. The handler later validates size/completeness and deserializes JSON.
     HTTPRaw& raw = _server.raw();
     switch (raw.status) {
         case RAW_START: {
@@ -1597,8 +1579,7 @@ void WebInterface::releaseRawBody() {
 }
 
 bool WebInterface::isOpenSetupRequest() {
-    // Open setup AP is intentionally restricted to network configuration only.
-    // Requests arriving on the AP's local IP are treated as setup-mode requests.
+    // Open setup AP is intentionally restricted to network configuration only. Requests arriving on the AP's local IP are treated as setup-mode requests.
     return networkManager.isSetupApOpen() && _server.client().localIP() == WiFi.softAPIP();
 }
 
@@ -1609,8 +1590,7 @@ bool WebInterface::rejectOpenSetupAccess() {
 }
 
 bool WebInterface::hasWriteAccess() {
-    // Any valid write token extends the session. Read-only requests do not need a
-    // token unless they are checking unlocked state.
+    // Any valid write token extends the session. Read-only requests do not need a token unless they are checking unlocked state.
     if (!networkManager.isWebAccessLocked()) return true;
     uint32_t now = millis();
     if (_authToken[0] == 0 || (int32_t)(_authExpiresMs - now) <= 0) {
@@ -1636,8 +1616,7 @@ void WebInterface::clearAuthToken() {
 }
 
 void WebInterface::issueAuthToken() {
-    // Not cryptographic security; this is a local-control unlock token scoped to
-    // the device UI and expires after inactivity.
+    // Not cryptographic security; this is a local-control unlock token scoped to the device UI and expires after inactivity.
     uint32_t a = random(0x7fffffff) ^ millis();
     uint32_t b = random(0x7fffffff) ^ micros();
     snprintf(_authToken, sizeof(_authToken), "%08lx%08lx", (unsigned long)a, (unsigned long)b);
@@ -1671,8 +1650,7 @@ void WebInterface::handleAuthGet() {
 }
 
 void WebInterface::handleAuthPost() {
-    // Login/logout is blocked on an open setup AP. Setup mode should only accept
-    // network configuration, not control unlocks.
+    // Login/logout is blocked on an open setup AP. Setup mode should only accept network configuration, not control unlocks.
     if (rejectOpenSetupAccess()) return;
 
     JsonDocument doc;
@@ -1941,8 +1919,7 @@ void WebInterface::populateStatus(JsonDocument& doc) {
 }
 
 void WebInterface::streamStatus(Print& out) {
-    // High-frequency status path. It avoids JsonDocument allocation and writes a
-    // complete JSON object directly to the response stream.
+    // High-frequency status path. It avoids JsonDocument allocation and writes a complete JSON object directly to the response stream.
     const NetworkConfig& cfg = networkManager.getConfig();
     char ip[18] = "";
     String stationSsid;
@@ -2161,8 +2138,7 @@ void WebInterface::streamStatus(Print& out) {
 void WebInterface::handleStatus() {
     if (rejectOpenSetupAccess()) return;
 
-    // Prefer chunked streaming to keep status allocation-free. Fall back to a
-    // JsonDocument response for clients/servers that reject chunked mode.
+    // Prefer chunked streaming to keep status allocation-free. Fall back to a JsonDocument response for clients/servers that reject chunked mode.
     _server.sendHeader("Cache-Control", "no-store");
     if (_server.chunkedResponseModeStart(200, PSTR("application/json"))) {
         ServerBufferedPrint out(_server);
@@ -2180,8 +2156,7 @@ void WebInterface::handleStatus() {
 void WebInterface::handleEventsGet() {
     if (rejectOpenSetupAccess()) return;
 
-    // A lightweight one-shot Server-Sent Event response. The browser reconnects
-    // and gets a fresh status event rather than holding a long-lived connection.
+    // A lightweight one-shot Server-Sent Event response. The browser reconnects and gets a fresh status event rather than holding a long-lived connection.
     _server.sendHeader("Cache-Control", "no-store");
     if (_server.chunkedResponseModeStart(200, PSTR("text/event-stream"))) {
         _server.sendContent_P(PSTR("retry: 1000\n"));
@@ -2210,8 +2185,7 @@ void WebInterface::handleEventsGet() {
 void WebInterface::handleSettingsGet() {
     if (rejectOpenSetupAccess()) return;
 
-    // Settings GET mirrors the browser schema names exactly so the front-end can
-    // render and diff without another mapping table.
+    // Settings GET mirrors the browser schema names exactly so the front-end can render and diff without another mapping table.
     JsonDocument doc;
     GlobalSettings& g = settings.get();
     JsonObject global = doc["global"].to<JsonObject>();
@@ -2342,8 +2316,7 @@ void WebInterface::handleSettingsPost() {
     JsonDocument doc;
     if (!parseBody(doc)) return;
 
-    // Apply only provided fields, clamp each value, then run full normalization
-    // before applying motor/waveform settings.
+    // Apply only provided fields, clamp each value, then run full normalization before applying motor/waveform settings.
     GlobalSettings& g = settings.get();
     JsonObject global = doc["global"].as<JsonObject>();
     if (!global.isNull()) {
@@ -2614,8 +2587,7 @@ void WebInterface::handleControl() {
 }
 
 void WebInterface::handleNetworkGet() {
-    // Network GET is allowed in open setup mode so the captive setup page can
-    // render current configuration. Password/PIN values are never returned.
+    // Network GET is allowed in open setup mode so the captive setup page can render current configuration. Password/PIN values are never returned.
     JsonDocument doc;
     NetworkConfig& c = networkManager.getConfig();
     char ip[18] = "";
@@ -2693,8 +2665,7 @@ void WebInterface::handleNetworkGet() {
 }
 
 void WebInterface::handleNetworkPost() {
-    // Open setup mode can edit only network connection fields; full UI mode also
-    // allows web PIN, read-only mode, lock, and home-page preferences.
+    // Open setup mode can edit only network connection fields; full UI mode also allows web PIN, read-only mode, lock, and home-page preferences.
     bool openSetup = isOpenSetupRequest();
     if (!openSetup && requireWriteAccess()) return;
 
@@ -2745,8 +2716,7 @@ void WebInterface::handleNetworkPost() {
                                motor.isStandby();
     networkManager.save();
     if (deferEcoStandbyStop) {
-        // When Eco standby is selected while already in standby, return the
-        // response before the network manager turns Wi-Fi off on the next loop.
+        // When Eco standby is selected while already in standby, return the response before the network manager turns Wi-Fi off on the next loop.
         handleNetworkGet();
     } else {
         networkManager.restart();
@@ -2755,8 +2725,7 @@ void WebInterface::handleNetworkPost() {
 }
 
 void WebInterface::handleNetworkScan() {
-    // Browser-side scan polling starts an async scan, then calls again until
-    // WiFi.scanComplete() returns results.
+    // Browser-side scan polling starts an async scan, then calls again until WiFi.scanComplete() returns results.
     static bool scanStarted = false;
     JsonDocument doc;
 
@@ -2794,8 +2763,7 @@ void WebInterface::handleNetworkScan() {
 void WebInterface::handleDiagnosticsGet() {
     if (rejectOpenSetupAccess()) return;
 
-    // Diagnostics is intentionally read-only and broad: build flags, pins,
-    // storage-file presence, network state, and runtime metrics.
+    // Diagnostics is intentionally read-only and broad: build flags, pins, storage-file presence, network state, and runtime metrics.
     JsonDocument doc;
     doc["firmware"] = FIRMWARE_VERSION;
     doc["buildDate"] = BUILD_DATE;
@@ -2940,8 +2908,7 @@ void WebInterface::handlePresetPost() {
         return;
     }
 
-    // Export is permitted without write access so backups still work in
-    // read-only mode. Every mutating action requires an unlock token.
+    // Export is permitted without write access so backups still work in read-only mode. Every mutating action requires an unlock token.
     bool readOnlyAction = strcmp(action, "export") == 0;
     if (!readOnlyAction && requireWriteAccess()) return;
 
@@ -2989,8 +2956,7 @@ void WebInterface::handlePresetPost() {
 void WebInterface::handleErrorsGet() {
     if (rejectOpenSetupAccess()) return;
 
-    // Error lines are already capped by ErrorHandler; return them as strings so
-    // the browser can render without parsing log text.
+    // Error lines are already capped by ErrorHandler; return them as strings so the browser can render without parsing log text.
     JsonDocument doc;
     std::vector<String> lines;
     errorHandler.getLogLines(lines);

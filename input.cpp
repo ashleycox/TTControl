@@ -46,14 +46,12 @@ InputManager::InputManager() {
 }
 
 void InputManager::begin() {
-    // Main encoder and button are always present. Optional controls are compiled
-    // in only when their feature flags are enabled.
+    // Main encoder and button are always present. Optional controls are compiled in only when their feature flags are enabled.
     hal.setPinMode(PIN_ENC_MAIN_CLK, INPUT_PULLUP);
     hal.setPinMode(PIN_ENC_MAIN_DT, INPUT_PULLUP);
     hal.setPinMode(PIN_ENC_MAIN_SW, INPUT_PULLUP);
 
-    // Main encoder uses an interrupt on CLK so UI polling can stay responsive
-    // even when the display draw takes a little time.
+    // Main encoder uses an interrupt on CLK so UI polling can stay responsive even when the display draw takes a little time.
     attachInterrupt(digitalPinToInterrupt(PIN_ENC_MAIN_CLK), isrEncoder, CHANGE);
 
     if (SPEED_BUTTON_ENABLE) hal.setPinMode(PIN_BTN_SPEED, INPUT_PULLUP);
@@ -71,8 +69,7 @@ void InputManager::begin() {
 void InputManager::isrEncoder() {
     if (!_inputInstance) return;
 
-    // Simple quadrature decode on CLK changes. Keep the ISR tiny: no Serial,
-    // display, settings, or heap work.
+    // Simple quadrature decode on CLK changes. Keep the ISR tiny: no Serial, display, settings, or heap work.
     int clk = digitalRead(PIN_ENC_MAIN_CLK);
     int dt = digitalRead(PIN_ENC_MAIN_DT);
 
@@ -86,9 +83,11 @@ void InputManager::isrEncoder() {
 void InputManager::update() {
     uint32_t now = hal.getMillis();
 
-    // --- Encoder Reading from ISR ---
-    // Copy the ISR counter with interrupts paused so delta calculation sees a
-    // coherent value.
+    /*
+     * --- Encoder Reading from ISR ---
+     * Copy the ISR counter with interrupts paused so delta calculation sees a
+     * coherent value.
+     */
     noInterrupts();
     long pos = _encoderPosition;
     interrupts();
@@ -96,8 +95,7 @@ void InputManager::update() {
     long delta = pos - _lastEncoderPosition;
     _lastEncoderPosition = pos;
 
-    // Handle input injection from serial tests using the same path as hardware
-    // movement, including reverse direction and acceleration.
+    // Handle input injection from serial tests using the same path as hardware movement, including reverse direction and acceleration.
     if (_injectedDelta != 0) {
         delta += _injectedDelta;
         _injectedDelta = 0;
@@ -107,8 +105,10 @@ void InputManager::update() {
         delta = -delta;
     }
 
-    // --- Acceleration Logic ---
-    // Fast rotation increases edit speed while single clicks remain fine-grained.
+    /*
+     * --- Acceleration Logic ---
+     * Fast rotation increases edit speed while single clicks remain fine-grained.
+     */
     if (delta != 0) {
         if (now - _lastEncTime < 50) { // Fast rotation threshold
             _encAccel++;
@@ -121,8 +121,7 @@ void InputManager::update() {
 
         _encDelta += delta; // Accumulate for value editing
 
-        // Navigation gets one semantic direction event while value editing can
-        // consume the accumulated raw delta.
+        // Navigation gets one semantic direction event while value editing can consume the accumulated raw delta.
         if (delta > 0) _pendingEvent = EVT_NAV_UP;
         else if (delta < 0) _pendingEvent = EVT_NAV_DOWN;
     }
@@ -131,8 +130,7 @@ void InputManager::update() {
     #if PITCH_CONTROL_ENABLE
     int pDelta = readPitchEncoder();
     if (pDelta != 0) {
-        // Pitch gets gentler acceleration than menu editing because small pitch
-        // changes are musically/mechanically meaningful.
+        // Pitch gets gentler acceleration than menu editing because small pitch changes are musically/mechanically meaningful.
         if (now - _lastPitchTime < 30) {
              _pitchAccel++;
              if (_pitchAccel > 5) pDelta *= 2; // Only 2x for pitch

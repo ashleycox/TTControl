@@ -18,8 +18,7 @@ enum SpeedFeedbackDirection : int8_t {
     SPEED_FEEDBACK_DIR_REVERSE = -1
 };
 
-// Runtime tachometer/quadrature snapshot. ISR counters are copied into this
-// struct so UI, serial, and web code can inspect sensor health safely.
+// Runtime tachometer/quadrature snapshot. ISR counters are copied into this struct so UI, serial, and web code can inspect sensor health safely.
 struct SpeedFeedbackStatus {
     bool configured;
     bool signalValid;
@@ -52,8 +51,7 @@ struct SpeedFeedbackStatus {
     uint32_t sampleSequence;
 };
 
-// Temporary capture used by the guided setup workflow. It measures exactly one
-// manual platter revolution and suggests counts/rev plus direction settings.
+// Temporary capture used by the guided setup workflow. It measures exactly one manual platter revolution and suggests counts/rev plus direction settings.
 struct SpeedFeedbackSetupStatus {
     bool active;
     bool pinAHigh;
@@ -70,9 +68,11 @@ struct SpeedFeedbackSetupStatus {
     uint8_t suggestedQuadratureMode;
 };
 
-// Counts tachometer or quadrature transitions in ISRs, then converts count
-// deltas into filtered RPM from Core 0. Closed-loop correction consumes this
-// class but the class itself never changes waveform output.
+/*
+ * Counts tachometer or quadrature transitions in ISRs, then converts count
+ * deltas into filtered RPM from Core 0. Closed-loop correction consumes this
+ * class but the class itself never changes waveform output.
+ */
 class SpeedFeedback {
 public:
     SpeedFeedback();
@@ -88,8 +88,7 @@ public:
     SpeedFeedbackSetupStatus getSetupStatus();
 
 private:
-    // attachInterrupt() needs a static thunk; _instance routes it to the single
-    // global SpeedFeedback object.
+    // attachInterrupt() needs a static thunk; _instance routes it to the single global SpeedFeedback object.
     static SpeedFeedback* _instance;
     static void isrHandler();
     void handleInterrupt();
@@ -127,8 +126,7 @@ private:
     volatile int8_t _lastDirection;
     volatile int8_t _lastRawDirection;
 
-    // Cached settings copied out of GlobalSettings. ISR-visible values above are
-    // volatile; the remaining values are read only from Core 0.
+    // Cached settings copied out of GlobalSettings. ISR-visible values above are volatile; the remaining values are read only from Core 0.
     uint16_t _countsPerRev;
     uint16_t _timeoutMs;
     uint16_t _updateIntervalMs;
@@ -148,8 +146,7 @@ private:
     bool _signalValid;
     bool _locked;
 
-    // Setup capture starts from a counter baseline and reports deltas without
-    // disturbing the normal ISR counting path.
+    // Setup capture starts from a counter baseline and reports deltas without disturbing the normal ISR counting path.
     volatile bool _setupActive;
     int32_t _setupStartCount;
     uint32_t _setupStartInvalidTransitions;

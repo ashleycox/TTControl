@@ -11,9 +11,11 @@
 
 #include <Arduino.h>
 
-// Snapshot consumed by the OLED dashboards, serial status, and web API. Values
-// are refreshed on a one-second window so callers can read without doing heap or
-// filesystem work themselves.
+/*
+ * Snapshot consumed by the OLED dashboards, serial status, and web API. Values
+ * are refreshed on a one-second window so callers can read without doing heap or
+ * filesystem work themselves.
+ */
 struct SystemMetricsSnapshot {
     float core0LoadPercent;
     float core1LoadPercent;
@@ -38,8 +40,7 @@ class SystemMonitor {
 public:
     SystemMonitor();
 
-    // Core 0 wraps its loop with begin/end calls. Core 1 reports just the time
-    // spent filling waveform buffers so the dashboard reflects real work.
+    // Core 0 wraps its loop with begin/end calls. Core 1 reports just the time spent filling waveform buffers so the dashboard reflects real work.
     void begin();
     void beginCore0Loop();
     void endCore0Loop();

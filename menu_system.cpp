@@ -9,8 +9,7 @@
 #include "menu_system.h"
 
 static char* copyMenuString(const char* text) {
-    // Menu items own labels so generated/dynamic labels can outlive the caller's
-    // temporary String.
+    // Menu items own labels so generated/dynamic labels can outlive the caller's temporary String.
     if (!text) text = "";
     size_t length = strlen(text);
     char* copy = new char[length + 1];
@@ -109,8 +108,7 @@ void MenuPage::input(int delta) {
 }
 
 size_t MenuPage::getVisibleItemCount() const {
-    // Visibility can change while the same page is open, so counts are computed
-    // from callbacks instead of cached.
+    // Visibility can change while the same page is open, so counts are computed from callbacks instead of cached.
     size_t count = 0;
     for (auto item : _items) {
         if (item && item->isVisible()) count++;
@@ -129,8 +127,7 @@ MenuItem* MenuPage::getVisibleItem(size_t index) const {
 }
 
 void MenuPage::clampSelection() {
-    // Called before navigation/render interaction so hidden items cannot leave
-    // selection pointing past the visible list.
+    // Called before navigation/render interaction so hidden items cannot leave selection pointing past the visible list.
     int count = (int)getVisibleItemCount();
     if (count <= 0) {
         _selection = 0;
@@ -202,8 +199,7 @@ MenuByte::MenuByte(const char* label, uint8_t* target, int min, int max,
       _changeCallback(callback) {}
 
 void MenuByte::onSelect(MenuPage*& currentPage) {
-    // Selecting enters/exits edit mode. Exit commits the last previewed value and
-    // notifies callbacks such as immediate waveform refresh.
+    // Selecting enters/exits edit mode. Exit commits the last previewed value and notifies callbacks such as immediate waveform refresh.
     _editing = !_editing;
     if (_editing) {
         _temp = *_target;
@@ -298,9 +294,11 @@ void MenuBool::getValueString(char* buffer, size_t size) const {
     snprintf(buffer, size, "%s", val ? "ON" : "OFF");
 }
 
-// --- MenuText (String Editor) ---
-// Internal one-byte tokens are used so the encoder can offer a Shift action and
-// a pound-sign character without making the editable buffer variable-width.
+/*
+ * --- MenuText (String Editor) ---
+ * Internal one-byte tokens are used so the encoder can offer a Shift action and
+ * a pound-sign character without making the editable buffer variable-width.
+ */
 static const char MENU_TEXT_SHIFT_TOKEN = 1;
 static const char MENU_TEXT_POUND_TOKEN = 2;
 static const char MENU_TEXT_POUND_UTF8[] = "\xC2\xA3";
@@ -378,8 +376,7 @@ void MenuText::onInput(int delta) {
         if (_cursorPos > tempLen) _cursorPos = tempLen;
         char c = (_cursorPos < tempLen) ? _temp[_cursorPos] : ' ';
         
-        // Find current index in the active charset, then wrap encoder movement
-        // through all available characters.
+        // Find current index in the active charset, then wrap encoder movement through all available characters.
         const char* charset = menuTextCharset(_uppercase);
         const int charsetLen = strlen(charset);
         int idx = 0;
@@ -393,8 +390,7 @@ void MenuText::onInput(int delta) {
         
         _temp[_cursorPos] = charset[idx];
         
-        // If we just changed the null terminator, extend the editable string by
-        // one character.
+        // If we just changed the null terminator, extend the editable string by one character.
         if (_cursorPos == tempLen && _cursorPos < _maxLength) {
             _temp[_cursorPos + 1] = 0;
         }
@@ -430,8 +426,7 @@ void MenuText::getValueString(char* buffer, size_t size) const {
 }
 
 bool MenuText::isDirty() const {
-    // Compare target text to temp text while treating internal pound token as
-    // either UTF-8 pound or legacy single-byte pound.
+    // Compare target text to temp text while treating internal pound token as either UTF-8 pound or legacy single-byte pound.
     size_t targetIndex = 0;
     size_t tempIndex = 0;
 
@@ -459,8 +454,7 @@ bool MenuText::isDirty() const {
 }
 
 void MenuText::loadTargetIntoTemp() {
-    // Convert target text into the single-byte token representation used while
-    // editing.
+    // Convert target text into the single-byte token representation used while editing.
     size_t out = 0;
     for (size_t i = 0; _target && _target[i] && out < _maxLength; i++) {
         uint8_t c = (uint8_t)_target[i];

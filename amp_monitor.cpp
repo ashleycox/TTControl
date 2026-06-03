@@ -27,8 +27,7 @@ AmplifierMonitor::AmplifierMonitor() {
 
 void AmplifierMonitor::begin() {
 #if AMP_MONITOR_ENABLE
-    // THERM_OK is expected high during normal operation; the analog pin reads a
-    // TMP36-style voltage for warning/shutdown thresholds.
+    // THERM_OK is expected high during normal operation; the analog pin reads a TMP36-style voltage for warning/shutdown thresholds.
     hal.setPinMode(PIN_AMP_THERM_OK, INPUT_PULLDOWN);
     hal.setPinMode(PIN_AMP_TEMP, INPUT);
 #endif
@@ -40,8 +39,7 @@ void AmplifierMonitor::update() {
     if (now - _lastSampleMs < 500) return;
     _lastSampleMs = now;
 
-    // Once a shutdown has happened, keep asserting emergency stop. Recovery is
-    // intentionally a reboot/settings action, not an automatic restart.
+    // Once a shutdown has happened, keep asserting emergency stop. Recovery is intentionally a reboot/settings action, not an automatic restart.
     if (_shutdown) {
         motor.emergencyStop();
         return;
@@ -51,8 +49,7 @@ void AmplifierMonitor::update() {
     _temperatureC = readTmp36C();
     float warnThresholdC = settings.get().ampTempWarnC;
     float shutdownThresholdC = settings.get().ampTempShutdownC;
-    // Defend against malformed settings so warning and shutdown do not collapse
-    // to the same threshold.
+    // Defend against malformed settings so warning and shutdown do not collapse to the same threshold.
     if (shutdownThresholdC < warnThresholdC + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C) {
         shutdownThresholdC = warnThresholdC + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
     }
@@ -80,8 +77,7 @@ void AmplifierMonitor::update() {
 
 float AmplifierMonitor::readTmp36C() {
     int raw = analogRead(PIN_AMP_TEMP);
-    // Arduino-Pico uses 10-bit analog reads by default. TMP36 is 500 mV at 0 C
-    // with a 10 mV/C slope.
+    // Arduino-Pico uses 10-bit analog reads by default. TMP36 is 500 mV at 0 C with a 10 mV/C slope.
     float voltage = (raw * 3.3f) / 1023.0f;
     return (voltage - 0.5f) * 100.0f;
 }
@@ -90,7 +86,6 @@ void AmplifierMonitor::shutdownOutputs(const char* message) {
     if (_shutdown) return;
     _shutdown = true;
 
-    // The next update() call performs the actual emergency stop so the first log
-    // entry is captured exactly once.
+    // The next update() call performs the actual emergency stop so the first log entry is captured exactly once.
     errorHandler.report(ERR_AMP_THERMAL, message, true);
 }

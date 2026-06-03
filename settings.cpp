@@ -11,9 +11,11 @@
 #include <ArduinoJson.h>
 
 namespace {
-// Settings and presets are stored as a small checked header plus the binary
-// GlobalSettings payload. The header lets future schemas migrate without
-// accepting random flash contents as valid settings.
+/*
+ * Settings and presets are stored as a small checked header plus the binary
+ * GlobalSettings payload. The header lets future schemas migrate without
+ * accepting random flash contents as valid settings.
+ */
 struct SettingsFileHeader {
     uint32_t magic;
     uint16_t formatVersion;
@@ -31,9 +33,11 @@ static const uint8_t SETTINGS_BOOT_NONE = 0;
 static const uint8_t SETTINGS_BOOT_PENDING = 1;
 static const uint8_t SETTINGS_BOOT_BOOTING = 2;
 
-// Boot marker state machine:
-// PENDING is written after a protected save, BOOTING is written on the next
-// startup, and NONE is restored only after waveform generation proves healthy.
+/*
+ * Boot marker state machine:
+ * PENDING is written after a protected save, BOOTING is written on the next
+ * startup, and NONE is restored only after waveform generation proves healthy.
+ */
 struct SettingsBootMarker {
     uint32_t magic;
     uint8_t version;
@@ -42,8 +46,7 @@ struct SettingsBootMarker {
     uint32_t crc32;
 };
 
-// Legacy layouts preserve exact field order and padding for schema migration.
-// Do not edit these structs unless you are correcting an older schema definition.
+// Legacy layouts preserve exact field order and padding for schema migration. Do not edit these structs unless you are correcting an older schema definition.
 struct GlobalSettingsV5 {
     uint32_t schemaVersion;
     uint8_t phaseMode;
@@ -272,8 +275,7 @@ struct GlobalSettingsV8 {
 static_assert(sizeof(GlobalSettingsV8) == 588, "GlobalSettingsV8 must match schema 8 storage size.");
 
 void copyGlobalClosedLoopTuningToSpeed(const GlobalSettings& source, ClosedLoopSpeedTuning& target) {
-    // Schema 6/7 stored a single global tuning block. Newer schemas keep one
-    // tuning block per speed, so migration copies the global values to all three.
+    // Schema 6/7 stored a single global tuning block. Newer schemas keep one tuning block per speed, so migration copies the global values to all three.
     target.deadbandRpm = source.closedLoopDeadbandRpm;
     target.lockToleranceRpm = source.closedLoopLockToleranceRpm;
     target.kp = source.closedLoopKp;
@@ -294,8 +296,7 @@ void copyGlobalClosedLoopTuningToSpeeds(GlobalSettings& data) {
 }
 
 void setClosedLoopAdvancedDefaults(GlobalSettings& data) {
-    // Defaults for fields added after the initial closed-loop feature. Keeping
-    // these separate makes migrations easier to read.
+    // Defaults for fields added after the initial closed-loop feature. Keeping these separate makes migrations easier to read.
     data.closedLoopControlMode = CLOSED_LOOP_CONTROL_CORRECT;
     data.closedLoopRequireSignalBeforeEngage = true;
     data.closedLoopRequireNearTargetBeforeEngage = false;
@@ -318,8 +319,7 @@ void setClosedLoopAdvancedDefaults(GlobalSettings& data) {
 }
 
 void setClosedLoopDefaults(GlobalSettings& data) {
-    // Conservative defaults: feature disabled, correction mode prepared, and
-    // sensor assumptions safe for a single-pulse tachometer.
+    // Conservative defaults: feature disabled, correction mode prepared, and sensor assumptions safe for a single-pulse tachometer.
     data.closedLoopEnabled = false;
     data.closedLoopControlMode = CLOSED_LOOP_CONTROL_CORRECT;
     data.closedLoopSensorMode = CLOSED_LOOP_SENSOR_PULSE;
@@ -596,8 +596,7 @@ void copyFromV8(const GlobalSettingsV8& source, GlobalSettings& target) {
 }
 
 uint32_t settingsCrc32(const uint8_t* data, size_t length) {
-    // Standard reflected CRC-32 used only for flash payload integrity. It is not
-    // a security primitive; it just rejects partial writes and corrupted blobs.
+    // Standard reflected CRC-32 used only for flash payload integrity. It is not a security primitive; it just rejects partial writes and corrupted blobs.
     uint32_t crc = 0xFFFFFFFFUL;
     for (size_t i = 0; i < length; i++) {
         crc ^= data[i];
@@ -659,8 +658,7 @@ bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, 
         return true;
     }
 
-    // Older schemas are migrated only after their exact payload size and CRC
-    // match, avoiding partial or ambiguous upgrades.
+    // Older schemas are migrated only after their exact payload size and CRC match, avoiding partial or ambiguous upgrades.
     if (header.schemaVersion == 5 && header.payloadSize == sizeof(GlobalSettingsV5)) {
         GlobalSettingsV5 legacy;
         if (f.read((uint8_t*)&legacy, sizeof(legacy)) != sizeof(legacy)) {
@@ -732,8 +730,7 @@ bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, 
 bool loadSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, bool* migrated = nullptr) {
     if (readSettingsBlob(path, magic, target, migrated)) return true;
 
-    // A failed primary read falls back to the previous backup created by the
-    // atomic writer below.
+    // A failed primary read falls back to the previous backup created by the atomic writer below.
     char backupPath[40];
     if (makeSidecarPath(path, ".bak", backupPath, sizeof(backupPath))) {
         return readSettingsBlob(backupPath, magic, target, migrated);
@@ -747,8 +744,7 @@ bool writeSettingsBlob(const char* path, uint32_t magic, const GlobalSettings& s
     if (!makeSidecarPath(path, ".tmp", tmpPath, sizeof(tmpPath))) return false;
     if (!makeSidecarPath(path, ".bak", backupPath, sizeof(backupPath))) return false;
 
-    // Write to a temp file first, then rename the current file to .bak, then
-    // promote the temp file. This avoids leaving no readable copy after reset.
+    // Write to a temp file first, then rename the current file to .bak, then promote the temp file. This avoids leaving no readable copy after reset.
     LittleFS.remove(tmpPath);
 
     File f = LittleFS.open(tmpPath, "w");
@@ -840,8 +836,7 @@ bool writeBootMarkerState(uint8_t state) {
 // --- Helper Functions for Preset Management ---
 
 bool Settings::loadFromSlot(uint8_t slot, GlobalSettings& target) {
-    // Slot indexes are zero-based internally even though user-facing labels are
-    // one-based in serial/web text.
+    // Slot indexes are zero-based internally even though user-facing labels are one-based in serial/web text.
     char path[32];
     snprintf(path, sizeof(path), "/preset_%d.bin", slot);
     return loadSettingsBlob(path, PRESET_FILE_MAGIC, target);
@@ -855,8 +850,7 @@ void Settings::saveToSlot(uint8_t slot, const GlobalSettings& source) {
 
 void Settings::renamePreset(uint8_t slot, const char* name) {
     if (slot >= MAX_PRESET_SLOTS) return;
-    // Names are fixed width in GlobalSettings; truncate rather than resizing the
-    // persisted struct.
+    // Names are fixed width in GlobalSettings; truncate rather than resizing the persisted struct.
     strncpy(_data.presetNames[slot], name, 16);
     _data.presetNames[slot][16] = 0; // Ensure null termination
     save();
@@ -910,8 +904,7 @@ void Settings::begin() {
         return;
     }
 
-    // Mount LittleFS only after Safe Mode has had a chance to bypass normal
-    // flash load. Formatting is a last resort for a missing/corrupt filesystem.
+    // Mount LittleFS only after Safe Mode has had a chance to bypass normal flash load. Formatting is a last resort for a missing/corrupt filesystem.
     if (!LittleFS.begin()) {
         Serial.println("LittleFS Mount Failed. Formatting...");
         LittleFS.format();
@@ -929,8 +922,7 @@ void Settings::begin() {
 }
 
 void Settings::handlePendingRollback() {
-    // If a protected settings save reached BOOTING but never got confirmed, the
-    // previous known-good file is restored before normal load.
+    // If a protected settings save reached BOOTING but never got confirmed, the previous known-good file is restored before normal load.
     uint8_t markerState = readBootMarkerState();
     if (markerState == SETTINGS_BOOT_BOOTING) {
         GlobalSettings knownGood;
@@ -949,8 +941,7 @@ void Settings::handlePendingRollback() {
     }
 
     if (markerState == SETTINGS_BOOT_PENDING) {
-        // First boot after a protected save: mark it as BOOTING. Core 0 will
-        // clear this only after Core 1 has filled a waveform buffer.
+        // First boot after a protected save: mark it as BOOTING. Core 0 will clear this only after Core 1 has filled a waveform buffer.
         _bootCandidateActive = true;
         writeBootMarkerState(SETTINGS_BOOT_BOOTING);
     }
@@ -964,8 +955,7 @@ void Settings::load() {
         Serial.println("Settings loaded.");
         validate();
         if (migrated) {
-            // Save migrated data back in the current schema so future boots take
-            // the fast path.
+            // Save migrated data back in the current schema so future boots take the fast path.
             Serial.println("Settings migrated.");
             save(false);
         }
@@ -999,8 +989,7 @@ void Settings::save(bool verbose, bool rollbackProtected) {
 }
 
 void Settings::markBootSuccessful() {
-    // Called after Core 1 fills a waveform buffer. At that point the current
-    // settings have survived enough of boot to become the new known-good copy.
+    // Called after Core 1 fills a waveform buffer. At that point the current settings have survived enough of boot to become the new known-good copy.
     uint8_t markerState = readBootMarkerState();
     if (markerState == SETTINGS_BOOT_NONE && !_bootCandidateActive) return;
 
@@ -1045,15 +1034,13 @@ void Settings::normalize() {
 }
 
 void Settings::validate() {
-    // Current storage is strict: any schema mismatch that was not handled by a
-    // migration path resets to defaults rather than guessing field layout.
+    // Current storage is strict: any schema mismatch that was not handled by a migration path resets to defaults rather than guessing field layout.
     if (_data.schemaVersion != SETTINGS_SCHEMA_VERSION) {
         Serial.println("Schema mismatch. Resetting defaults.");
         resetDefaults();
     }
 
-    // Enforce global ranges before per-speed ranges so dependent calculations
-    // see sane values.
+    // Enforce global ranges before per-speed ranges so dependent calculations see sane values.
     if (_data.phaseMode < PHASE_1 || _data.phaseMode > MAX_PHASE_MODE) _data.phaseMode = DEFAULT_PHASE_MODE;
     if (_data.currentSpeed < SPEED_33 || _data.currentSpeed > SPEED_78) _data.currentSpeed = SPEED_33;
     if (_data.maxAmplitude > 100) _data.maxAmplitude = 100;
@@ -1211,8 +1198,7 @@ void Settings::validate() {
         if (t.rampCorrectionLimitHz > 20.0f) t.rampCorrectionLimitHz = 20.0f;
     }
 
-    // Validate per-speed settings. The min/max/frequency order matters: first
-    // clamp each value to hardware limits, then fix relationships between them.
+    // Validate per-speed settings. The min/max/frequency order matters: first clamp each value to hardware limits, then fix relationships between them.
     for(int i=0; i<3; i++) {
         if (_data.speeds[i].minFrequency < MIN_OUTPUT_FREQUENCY_HZ) _data.speeds[i].minFrequency = MIN_OUTPUT_FREQUENCY_HZ;
         if (_data.speeds[i].minFrequency > MAX_OUTPUT_FREQUENCY_HZ) _data.speeds[i].minFrequency = MAX_OUTPUT_FREQUENCY_HZ;
@@ -1244,8 +1230,7 @@ void Settings::validate() {
         if (_data.speeds[i].iirAlpha > 0.99) _data.speeds[i].iirAlpha = 0.99;
         if (_data.speeds[i].firProfile > FIR_AGGRESSIVE) _data.speeds[i].firProfile = FIR_GENTLE;
 
-        // Normalize phase offsets to one full cycle so DDS phase conversion does
-        // not depend on callers wrapping values before saving.
+        // Normalize phase offsets to one full cycle so DDS phase conversion does not depend on callers wrapping values before saving.
         for(int p=0; p<4; p++) {
             while(_data.speeds[i].phaseOffset[p] >= 360.0) _data.speeds[i].phaseOffset[p] -= 360.0;
             while(_data.speeds[i].phaseOffset[p] < 0.0) _data.speeds[i].phaseOffset[p] += 360.0;
@@ -1371,8 +1356,7 @@ void Settings::setDefaults() {
 bool Settings::loadPreset(uint8_t slot) {
     if (slot >= MAX_PRESET_SLOTS) return false;
 
-    // Loading a preset replaces the active global settings in RAM. The caller is
-    // responsible for applying the new motor/waveform settings.
+    // Loading a preset replaces the active global settings in RAM. The caller is responsible for applying the new motor/waveform settings.
     GlobalSettings temp;
     if (loadFromSlot(slot, temp)) {
         _data = temp;
@@ -1428,12 +1412,10 @@ bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
         target = _data;
     }
 
-    // ArduinoJson 7 allocates JsonDocument dynamically. The short keys keep the
-    // preset export compact enough for serial and web workflows.
+    // ArduinoJson 7 allocates JsonDocument dynamically. The short keys keep the preset export compact enough for serial and web workflows.
     JsonDocument doc;
 
-    // Global motor parameters exported with compact keys for backward-compatible
-    // preset files.
+    // Global motor parameters exported with compact keys for backward-compatible preset files.
     doc["pm"] = target.phaseMode;
     doc["maxAmp"] = target.maxAmplitude;
     doc["ssCurve"] = target.softStartCurve;
@@ -1549,14 +1531,12 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
     }
 
     GlobalSettings target;
-    // Base imports on the existing slot, or current config if the slot is empty,
-    // so omitted keys keep their previous values.
+    // Base imports on the existing slot, or current config if the slot is empty, so omitted keys keep their previous values.
     if (!loadFromSlot(slot, target)) {
         target = _data;
     }
 
-    // Every imported field is optional. validate() below clamps unsafe or
-    // out-of-range values before the slot is saved.
+    // Every imported field is optional. validate() below clamps unsafe or out-of-range values before the slot is saved.
     if (doc["pm"].is<uint8_t>()) target.phaseMode = doc["pm"].as<uint8_t>();
     if (doc["maxAmp"].is<uint8_t>()) target.maxAmplitude = doc["maxAmp"].as<uint8_t>();
     if (doc["ssCurve"].is<uint8_t>()) target.softStartCurve = doc["ssCurve"].as<uint8_t>();
@@ -1633,8 +1613,7 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
             if (tune["rLim"].is<float>()) t.rampCorrectionLimitHz = tune["rLim"].as<float>();
         }
     } else if (oldClosedLoopTuningImported) {
-        // Older preset exports stored one closed-loop tuning block. Apply it to
-        // all speeds so imports preserve old behavior.
+        // Older preset exports stored one closed-loop tuning block. Apply it to all speeds so imports preserve old behavior.
         copyGlobalClosedLoopTuningToSpeeds(target);
     }
 
@@ -1676,8 +1655,7 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
         }
     }
 
-    // validate() operates on _data, so temporarily swap the candidate into the
-    // live struct, copy the normalized result, then restore the active settings.
+    // validate() operates on _data, so temporarily swap the candidate into the live struct, copy the normalized result, then restore the active settings.
     GlobalSettings liveSettings = _data;
     _data = target;
     validate();
@@ -1690,8 +1668,7 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
 }
 
 void Settings::updateRuntime() {
-    // Runtime accumulation is coarse by design to avoid frequent writes. Total
-    // runtime is persisted by normal settings saves.
+    // Runtime accumulation is coarse by design to avoid frequent writes. Total runtime is persisted by normal settings saves.
     uint32_t now = millis();
     if (now - _lastRuntimeUpdate >= 1000) {
         uint32_t seconds = (now - _lastRuntimeUpdate) / 1000;

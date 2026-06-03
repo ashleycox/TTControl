@@ -12,10 +12,12 @@
 #include <Arduino.h>
 #include "config.h"
 
-// --- Enumerations ---
-// These values are persisted, exported, and exposed through serial/web APIs.
-// Avoid reordering existing entries; add new values at the end or migrate stored
-// data explicitly.
+/*
+ * --- Enumerations ---
+ * These values are persisted, exported, and exposed through serial/web APIs.
+ * Avoid reordering existing entries; add new values at the end or migrate stored
+ * data explicitly.
+ */
 
 enum MotorState {
     STATE_STANDBY,  // Low power, relays off
@@ -31,8 +33,7 @@ enum SpeedMode {
     SPEED_78 = 2
 };
 
-// Phase mode is one-based because it represents the number of active phase
-// outputs rather than an array index.
+// Phase mode is one-based because it represents the number of active phase outputs rather than an array index.
 enum PhaseMode {
     PHASE_1 = 1,
     PHASE_2 = 2,
@@ -120,20 +121,23 @@ enum ClosedLoopPitchTargetMode {
     CLOSED_LOOP_PITCH_TARGET_FOLLOW = 1
 };
 
-// --- Data Structures ---
-// The settings structs below are written directly to LittleFS. Field order,
-// types, and padding are part of the storage contract.
+/*
+ * --- Data Structures ---
+ * The settings structs below are written directly to LittleFS. Field order,
+ * types, and padding are part of the storage contract.
+ */
 
-// Settings specific to a single speed (33, 45, or 78 RPM). GlobalSettings owns
-// three copies so each speed can have its own frequency, phase, and startup tune.
+// Settings specific to a single speed (33, 45, or 78 RPM). GlobalSettings owns three copies so each speed can have its own frequency, phase, and startup tune.
 struct SpeedSettings {
     // Nominal DDS output and user-adjustable bounds for pitch changes.
     float frequency;
     float minFrequency;
     float maxFrequency;
     
-    // Phase Offsets (Degrees)
-    // Index 0 is Phase 1 (Reference, usually 0)
+    /*
+     * Phase Offsets (Degrees)
+     * Index 0 is Phase 1 (Reference, usually 0)
+     */
     float phaseOffset[4];
     
     // Motor Control
@@ -150,8 +154,7 @@ struct SpeedSettings {
     uint8_t firProfile; // 0=Gentle, 1=Medium, 2=Aggressive
 };
 
-// PID-like closed-loop parameters are duplicated per speed. That lets a deck
-// use gentler correction at one RPM and tighter correction at another.
+// PID-like closed-loop parameters are duplicated per speed. That lets a deck use gentler correction at one RPM and tighter correction at another.
 struct ClosedLoopSpeedTuning {
     float deadbandRpm;
     float lockToleranceRpm;
@@ -166,8 +169,7 @@ struct ClosedLoopSpeedTuning {
     uint16_t lockTimeMs;
 };
 
-// Top-level persisted settings. Keep new fields grouped by feature and update
-// settings.cpp, menus, serial registry, web JSON, and schema migration together.
+// Top-level persisted settings. Keep new fields grouped by feature and update settings.cpp, menus, serial registry, web JSON, and schema migration together.
 struct GlobalSettings {
     // Version is checked before using binary contents from LittleFS.
     uint32_t schemaVersion;
@@ -181,9 +183,11 @@ struct GlobalSettings {
     bool smoothSwitching;
     uint8_t switchRampDuration; // Seconds
     
-    // Braking
-    // These are output-driving values; validation keeps them within motor-safe
-    // limits before MotorController applies them.
+    /*
+     * Braking
+     * These are output-driving values; validation keeps them within motor-safe
+     * limits before MotorController applies them.
+     */
     uint8_t brakeMode; // 0=Off, 1=Pulse, 2=Ramp, 3=SoftStop
     float brakeDuration;
     float brakePulseGap;
@@ -197,9 +201,11 @@ struct GlobalSettings {
     bool muteRelayLinkStartStop;
     uint8_t powerOnRelayDelay;
     
-    // Display
-    // Delay fields are menu indices or minutes depending on the label; see
-    // settings.cpp validation/defaults and menu_data.cpp labels.
+    /*
+     * Display
+     * Delay fields are menu indices or minutes depending on the label; see
+     * settings.cpp validation/defaults and menu_data.cpp labels.
+     */
     uint8_t displayBrightness;
     uint8_t displaySleepDelay; // Index
     bool screensaverEnabled;
@@ -238,9 +244,11 @@ struct GlobalSettings {
     
     uint8_t bootSpeed; // 0=33, 1=45, 2=78, 3=Last Used
     
-    // Current State Persistence
-    // Stored separately from bootSpeed so "Last Used" can be honored on the next
-    // boot without changing the user's boot mode preference.
+    /*
+     * Current State Persistence
+     * Stored separately from bootSpeed so "Last Used" can be honored on the next
+     * boot without changing the user's boot mode preference.
+     */
     SpeedMode currentSpeed;
 
     // Amplifier Monitor
@@ -252,9 +260,11 @@ struct GlobalSettings {
     bool showMemoryDashboard;
     bool showFlashDashboard;
 
-    // Closed-loop speed feedback
-    // Closed-loop can run as monitor-only diagnostics or actively trim waveform
-    // frequency. Feature flags decide whether pins and ISR code are compiled in.
+    /*
+     * Closed-loop speed feedback
+     * Closed-loop can run as monitor-only diagnostics or actively trim waveform
+     * frequency. Feature flags decide whether pins and ISR code are compiled in.
+     */
     bool closedLoopEnabled;
     uint8_t closedLoopControlMode; // 0=Monitor only, 1=Correct speed
     uint8_t closedLoopSensorMode; // 0=Pulse tach, 1=Quadrature

@@ -18,35 +18,39 @@
 #include "input.h"
 #include "menu_system.h"
 
-// Owns the Core 0 user experience: input polling, menu routing, transient
-// dialogs, dashboard rendering, and standby/screensaver display policy.
+// Owns the Core 0 user experience: input polling, menu routing, transient dialogs, dashboard rendering, and standby/screensaver display policy.
 class UserInterface {
 public:
     UserInterface();
     
-    // Initialize input hardware, build the static menu tree, and show the
-    // blocking boot splash before the main loop starts.
+    // Initialize input hardware, build the static menu tree, and show the blocking boot splash before the main loop starts.
     void begin();
 
     // Poll input, apply idle policies, advance animations, and redraw once.
     void update();
     
-    // --- Navigation ---
-    // Page navigation keeps a stack so Back returns to the previous menu page.
+    /*
+     * --- Navigation ---
+     * Page navigation keeps a stack so Back returns to the previous menu page.
+     */
     void navigateTo(MenuPage* page);
     void back();
     void exitMenu();
     void enterMenu(); 
     
-    // --- Dialogs ---
-    // Dialog strings are copied into local buffers so callers may pass stack
-    // buffers, including short serial/debug messages.
+    /*
+     * --- Dialogs ---
+     * Dialog strings are copied into local buffers so callers may pass stack
+     * buffers, including short serial/debug messages.
+     */
     void showMessage(const char* msg, uint32_t duration);
     void showConfirm(const char* msg, void (*action)()); 
     void showError(const char* msg, uint32_t duration, bool muteOutputs = false);
     
-    // --- Input Injection (for Serial/Debug) ---
-    // Serial UI tests feed the same event path as the physical encoder.
+    /*
+     * --- Input Injection (for Serial/Debug) ---
+     * Serial UI tests feed the same event path as the physical encoder.
+     */
     void injectInput(int delta, bool btn);
 
 private:
@@ -84,13 +88,14 @@ private:
     // Bouncing-text screensaver position and velocity.
     int _saverX, _saverY, _saverDX, _saverDY;
     
-    // Reserved slide state for menu transitions. Current drawing switches pages
-    // immediately but keeps the fields for future animation work.
+    // Reserved slide state for menu transitions. Current drawing switches pages immediately but keeps the fields for future animation work.
     int _transitionDirection; // 0=None, 1=Forward, -1=Backward
     float _transitionProgress; // 0.0 to 1.0
     
-    // Dashboard page selector: 0=Standard, 1=Stats, 2=Dim, 3=Scope,
-    // 4=CPU, 5=Memory, 6=Flash.
+    /*
+     * Dashboard page selector: 0=Standard, 1=Stats, 2=Dim, 3=Scope,
+     * 4=CPU, 5=Memory, 6=Flash.
+     */
     int _statusMode; // 0=Standard, 1=Stats, 2=Dim, 3=Scope, 4=CPU, 5=Memory, 6=Flash
     
     // Menu scroll animation state.
@@ -110,8 +115,7 @@ private:
     // Inactivity clock drives auto standby, dim, and display sleep.
     uint32_t _lastInputTime;
     
-    // Input and drawing are split so update() has one clear sequence:
-    // poll, handle, policy, animate, draw.
+    // Input and drawing are split so update() has one clear sequence: poll, handle, policy, animate, draw.
     void handleInput();
     void draw();
     void drawDashboard();

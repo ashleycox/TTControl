@@ -26,8 +26,7 @@ enum ClosedLoopTuneStep : uint8_t {
     CLOSED_LOOP_TUNE_VERIFY
 };
 
-// Automatic recommendation codes for the guided closed-loop tuning workflow.
-// They are kept as stable numeric values because the web UI exposes them.
+// Automatic recommendation codes for the guided closed-loop tuning workflow. They are kept as stable numeric values because the web UI exposes them.
 enum ClosedLoopTuneSuggestionAction : uint8_t {
     CLOSED_LOOP_SUGGEST_NONE = 0,
     CLOSED_LOOP_SUGGEST_APPLY_SETUP,
@@ -39,8 +38,7 @@ enum ClosedLoopTuneSuggestionAction : uint8_t {
     CLOSED_LOOP_SUGGEST_INCREASE_KP
 };
 
-// Accumulated closed-loop health counters. They are reset with closed-loop state
-// and reported through serial/web diagnostics rather than persisted.
+// Accumulated closed-loop health counters. They are reset with closed-loop state and reported through serial/web diagnostics rather than persisted.
 struct ClosedLoopMetrics {
     uint32_t sampleCount;
     uint32_t validSamples;
@@ -72,8 +70,7 @@ struct ClosedLoopTrendPoint {
     bool locked;
 };
 
-// Compact status for the guided tuning UI. The text buffers are fixed-size to
-// avoid heap allocation in repeated dashboard/API calls.
+// Compact status for the guided tuning UI. The text buffers are fixed-size to avoid heap allocation in repeated dashboard/API calls.
 struct ClosedLoopTuningStatus {
     bool active;
     uint8_t step;
@@ -220,8 +217,7 @@ private:
     uint32_t _kickRampStartTime;
     float _kickRampDuration;
 
-    // Closed-loop speed correction. These fields track both the requested target
-    // and the slowly slewed target so pitch changes do not shock the controller.
+    // Closed-loop speed correction. These fields track both the requested target and the slowly slewed target so pitch changes do not shock the controller.
     bool _closedLoopActive;
     float _closedLoopTargetRpm;
     float _closedLoopRequestedTargetRpm;
@@ -297,9 +293,11 @@ private:
     SpeedMode _sweepOriginalSpeedMode;
     bool _sweepHasOriginalPhase;
     
-    // Deferred Settings Save
-    // Speed changes defer flash writes so quick encoder/button adjustments do
-    // not repeatedly erase LittleFS sectors.
+    /*
+     * Deferred Settings Save
+     * Speed changes defer flash writes so quick encoder/button adjustments do
+     * not repeatedly erase LittleFS sectors.
+     */
     bool _settingsDirty;
     uint32_t _lastSettingsChange;
 
