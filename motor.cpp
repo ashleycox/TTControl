@@ -12,9 +12,11 @@
 #include "hal.h"
 #include "speed_feedback.h"
 #include "error_handler.h"
+#include <math.h>
 
 // The waveform generator accepts signed frequencies for braking, but all public settings still need to remain inside the hardware-safe output limit.
 static float clampOutputFrequency(float freq) {
+    if (!isfinite(freq)) return 0.0f;
     if (freq > MAX_OUTPUT_FREQUENCY_HZ) return MAX_OUTPUT_FREQUENCY_HZ;
     if (freq < -MAX_OUTPUT_FREQUENCY_HZ) return -MAX_OUTPUT_FREQUENCY_HZ;
     return freq;
@@ -22,6 +24,7 @@ static float clampOutputFrequency(float freq) {
 
 static float clampToSpeedSettings(float freq, const SpeedSettings& s) {
     // Per-speed pitch limits are narrower than the absolute DDS limits.
+    if (!isfinite(freq)) freq = isfinite(s.frequency) ? s.frequency : MIN_OUTPUT_FREQUENCY_HZ;
     if (freq > s.maxFrequency) return s.maxFrequency;
     if (freq < s.minFrequency) return s.minFrequency;
     return clampOutputFrequency(freq);
@@ -595,7 +598,7 @@ void MotorController::handleBraking(uint32_t now) {
         }
 
         // Reset frequency to positive so the next start does not inherit reverse braking direction.
-        waveform.setFrequency(abs(_targetFreq));
+        waveform.setFrequency(fabsf(_targetFreq));
         return;
     }
 
@@ -626,7 +629,7 @@ void MotorController::handleBraking(uint32_t now) {
     }
     else if (settings.get().brakeMode == BRAKE_SOFT_STOP) {
         // Active Coasting: Gently bring frequency down to the configured cutoff point while maintaining driving torque
-        float startF = abs(_targetFreq);
+        float startF = fabsf(_targetFreq);
         float stopF = settings.get().softStopCutoff;
 
         // If we're already below the cutoff, or duration is 0, just stop instantly like BRAKE_OFF
@@ -815,6 +818,7 @@ void MotorController::setSpeed(SpeedMode mode) {
 
 void MotorController::setPitch(float percent) {
     // Pitch is a shared percentage; frequency is recalculated from it in update() so changing pitch does not immediately do waveform work from input code.
+    if (!isfinite(percent)) percent = 0.0f;
     if (percent > _pitchRange) percent = _pitchRange;
     if (percent < -_pitchRange) percent = -_pitchRange;
     currentPitchPercent = percent;
@@ -832,6 +836,8 @@ void MotorController::togglePitchRange() {
 void MotorController::adjustPitchFreq(float deltaHz) {
     // Calculate current pitch in Hz
     float baseFreq = settings.getCurrentSpeedSettings().frequency;
+    if (!isfinite(deltaHz)) deltaHz = 0.0f;
+    if (!isfinite(baseFreq) || baseFreq <= 0.0f) return;
     float currentPitchHz = baseFreq * (currentPitchPercent / 100.0);
     float newPitchHz = currentPitchHz + deltaHz;
 
@@ -845,10 +851,10 @@ void MotorController::adjustPitchFreq(float deltaHz) {
 }
 
 void MotorController::applySettings() {
-    // Apply the current speed's base waveform tune. Running mode will fold pitch and closed-loop correction in on the next update.
+    // Apply the current speed's pitch-adjusted waveform tune. Running mode can still layer closed-loop correction on top during update().
     SpeedSettings& s = settings.getCurrentSpeedSettings();
 
-    _targetFreq = clampOutputFrequency(s.frequency);
+    _targetFreq = calculatePitchAdjustedFrequencyForSpeed(_currentSpeedMode);
     _currentFreq = _targetFreq;
     currentFrequency = _currentFreq;
 
@@ -1161,6 +1167,8 @@ float MotorController::calculatePitchAdjustedFrequencyForSpeed(SpeedMode speed) 
     if (index > SPEED_78) index = SPEED_33;
 
     SpeedSettings& s = settings.get().speeds[index];
+    if (!isfinite(s.frequency)) return MIN_OUTPUT_FREQUENCY_HZ;
+    if (!isfinite(currentPitchPercent)) return clampToSpeedSettings(clampOutputFrequency(s.frequency), s);
     float pitchMod = s.frequency * (currentPitchPercent / 100.0f);
     return clampToSpeedSettings(clampOutputFrequency(s.frequency + pitchMod), s);
 }

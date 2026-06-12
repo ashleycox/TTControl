@@ -254,7 +254,6 @@ private:
     uint8_t _closedLoopTrendNext;
     uint8_t _closedLoopTrendCount;
     
-    void updateState();
     float calculateSoftStartAmp(float elapsed, float duration);
     void handleBraking(uint32_t now);
     float calculatePitchAdjustedFrequencyForSpeed(SpeedMode speed) const;

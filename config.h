@@ -108,7 +108,7 @@
 #define ENABLE_4_CHANNEL_SUPPORT 0 // Set to 1 to enable optional 4-channel/Premotec bridge modes
 #endif
 #ifndef AMP_MONITOR_ENABLE
-#define AMP_MONITOR_ENABLE 1       // Enable amplifier heatsink thermal monitoring
+#define AMP_MONITOR_ENABLE 0       // Set to 1 only when the amplifier thermal monitor pins are populated and driven
 #endif
 #ifndef CLOSED_LOOP_SPEED_ENABLE
 #define CLOSED_LOOP_SPEED_ENABLE 0 // Enable optional tachometer/quadrature speed feedback

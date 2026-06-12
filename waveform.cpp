@@ -13,6 +13,10 @@
 
 // Global pointer for ISR access. Only one WaveformGenerator exists in this sketch, so a static thunk is simpler than passing context through the IRQ API.
 static WaveformGenerator* _waveformInstance = nullptr;
+static const uint16_t PWM_WRAP_VALUE = 1023;
+static const float PWM_CLOCK_DIVIDER = 2.44f;
+static const float FALLBACK_SAMPLE_RATE_HZ = 50000.0f;
+static const double DDS_ACCUMULATOR_SCALE = 4294967296.0;
 
 // FIR coefficients are normalized to roughly unity gain so filtering does not change the requested output amplitude.
 const float FIR_COEFFS_GENTLE[8] = {0.0, 0.0, 0.1, 0.4, 0.4, 0.1, 0.0, 0.0};
@@ -42,7 +46,7 @@ WaveformGenerator::WaveformGenerator() {
     *_pendingState = *((WaveformState*)_activeState);
     
     _lutSize = LUT_MAX_SIZE;
-    _lut = new int16_t[_lutSize];
+    _sampleRateHz = FALLBACK_SAMPLE_RATE_HZ;
     
     // Initialize per-channel state
     for(int i=0; i<4; i++) {
@@ -58,6 +62,9 @@ WaveformGenerator::WaveformGenerator() {
     _currentBufferIndex = 0;
     _lastBufferFillMs = 0;
     _bufferFillCount = 0;
+    _dmaIrqCount = 0;
+    _dmaRearmCount = 0;
+    _dmaDesyncCount = 0;
     _dmaStarted = false;
 }
 
@@ -98,14 +105,19 @@ void WaveformGenerator::setupPWM() {
     pwm_config config = pwm_get_default_config();
     
     /*
-     * Set PWM frequency to approximately 50 kHz. The DDS phase increment below
-     * assumes this sample rate.
+     * Set PWM frequency to approximately 50 kHz. The DDS phase increment is
+     * derived from the same wrap/divider values below so clock changes do not
+     * silently retune the motor.
      * SysClock = 125MHz (usually)
      * Wrap = 1023 (10-bit)
      * Div = 125000000 / (50000 * 1024) = ~2.44
      */
-    pwm_config_set_wrap(&config, 1023);
-    pwm_config_set_clkdiv(&config, 2.44f);
+    pwm_config_set_wrap(&config, PWM_WRAP_VALUE);
+    pwm_config_set_clkdiv(&config, PWM_CLOCK_DIVIDER);
+    _sampleRateHz = ((float)clock_get_hz(clk_sys) / PWM_CLOCK_DIVIDER) / ((float)PWM_WRAP_VALUE + 1.0f);
+    if (!isfinite(_sampleRateHz) || _sampleRateHz <= 0.0f) {
+        _sampleRateHz = FALLBACK_SAMPLE_RATE_HZ;
+    }
     
     pwm_init(_pwmSlice0, &config, true);
     pwm_init(_pwmSlice1, &config, true);
@@ -201,8 +213,14 @@ void __not_in_flash_func(WaveformGenerator::dmaInterruptHandler)() {
              * Chan 0 (and Chan 2) finished. Chan 1 (and Chan 3) are now running.
              * Reset read addresses for Chan 0 and Chan 2 so they are ready when chained back.
              */
-            dma_channel_set_read_addr(_waveformInstance->_dmaChan0, _waveformInstance->_dmaBufferSlice0[0], false);
-            dma_channel_set_read_addr(_waveformInstance->_dmaChan2, _waveformInstance->_dmaBufferSlice1[0], false);
+            _waveformInstance->_dmaIrqCount++;
+            bool pairedBusy = dma_channel_is_busy(_waveformInstance->_dmaChan2);
+            if (pairedBusy) {
+                _waveformInstance->_dmaDesyncCount++;
+            } else {
+                _waveformInstance->rearmDmaChannel(_waveformInstance->_dmaChan2, _waveformInstance->_dmaBufferSlice1[0]);
+            }
+            _waveformInstance->rearmDmaChannel(_waveformInstance->_dmaChan0, _waveformInstance->_dmaBufferSlice0[0]);
             
             // Signal that Buffer 0 is free to be refilled
             _waveformInstance->_currentBufferIndex = 0; 
@@ -214,8 +232,14 @@ void __not_in_flash_func(WaveformGenerator::dmaInterruptHandler)() {
              * Chan 1 (and Chan 3) finished. Chan 0 (and Chan 2) are now running.
              * Reset read addresses for Chan 1 and Chan 3.
              */
-            dma_channel_set_read_addr(_waveformInstance->_dmaChan1, _waveformInstance->_dmaBufferSlice0[1], false);
-            dma_channel_set_read_addr(_waveformInstance->_dmaChan3, _waveformInstance->_dmaBufferSlice1[1], false);
+            _waveformInstance->_dmaIrqCount++;
+            bool pairedBusy = dma_channel_is_busy(_waveformInstance->_dmaChan3);
+            if (pairedBusy) {
+                _waveformInstance->_dmaDesyncCount++;
+            } else {
+                _waveformInstance->rearmDmaChannel(_waveformInstance->_dmaChan3, _waveformInstance->_dmaBufferSlice1[1]);
+            }
+            _waveformInstance->rearmDmaChannel(_waveformInstance->_dmaChan1, _waveformInstance->_dmaBufferSlice0[1]);
             
             // Signal that Buffer 1 is free to be refilled
             _waveformInstance->_currentBufferIndex = 1;
@@ -232,17 +256,35 @@ void __not_in_flash_func(WaveformGenerator::update)() {
     
     bool chan0Busy = dma_channel_is_busy(_dmaChan0);
     bool chan1Busy = dma_channel_is_busy(_dmaChan1);
+    bool chan2Busy = dma_channel_is_busy(_dmaChan2);
+    bool chan3Busy = dma_channel_is_busy(_dmaChan3);
     
     static int lastFilledBuffer = -1;
+    static bool desyncRecorded = false;
+
+    bool slice0Ping = chan0Busy && !chan1Busy;
+    bool slice0Pong = chan1Busy && !chan0Busy;
+    bool slice1Ping = chan2Busy && !chan3Busy;
+    bool slice1Pong = chan3Busy && !chan2Busy;
+    bool inSync = (slice0Ping && slice1Ping) || (slice0Pong && slice1Pong);
+
+    if (!inSync) {
+        if (!desyncRecorded) {
+            _dmaDesyncCount++;
+            desyncRecorded = true;
+        }
+        return;
+    }
+    desyncRecorded = false;
     
-    if (chan0Busy && lastFilledBuffer != 1) {
+    if (slice0Ping && lastFilledBuffer != 1) {
         // Chan 0 is reading Buffer 0, so Buffer 1 is free to fill
         uint32_t startUs = time_us_32();
         fillBuffer(1);
         systemMonitor.recordCore1WorkMicros(time_us_32() - startUs);
         lastFilledBuffer = 1;
     }
-    else if (chan1Busy && lastFilledBuffer != 0) {
+    else if (slice0Pong && lastFilledBuffer != 0) {
         // Chan 1 is reading Buffer 1, so Buffer 0 is free to fill
         uint32_t startUs = time_us_32();
         fillBuffer(0);
@@ -255,7 +297,7 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
     _lastBufferFillMs = millis();
     _bufferFillCount++;
 
-    if (!_enabled) {
+    if (!enabledAtomic()) {
         // Fill with zero duty while disabled. MotorController ramps amplitude to zero before disabling for normal stops.
         for (int i = 0; i < DMA_BUFFER_SIZE; i++) {
             _dmaBufferSlice0[bufferIndex][i] = 0;
@@ -265,13 +307,15 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
     }
 
     // Apply a pending Core 0 settings update between buffers so every sample in the buffer uses one coherent state.
-    if (_swapPending) {
+    if (swapPendingAtomic()) {
         lockState();
-        WaveformState* temp = (WaveformState*)_activeState;
-        _activeState = _pendingState;
-        _pendingState = temp;
-        *_pendingState = *((WaveformState*)_activeState);
-        _swapPending = false;
+        if (swapPendingAtomic()) {
+            WaveformState* temp = (WaveformState*)_activeState;
+            _activeState = _pendingState;
+            _pendingState = temp;
+            *_pendingState = *((WaveformState*)_activeState);
+            storeSwapPending(false);
+        }
         unlockState();
     }
     
@@ -333,14 +377,13 @@ void WaveformGenerator::configure(const SpeedSettings& s) {
     // Configure phase and filtering without changing the current frequency.
     lockState();
     _pendingState->filterType = (FilterType)s.filterType;
-    _pendingState->iirAlpha = s.iirAlpha;
+    _pendingState->iirAlpha = isfinite(s.iirAlpha) ? s.iirAlpha : 0.5f;
     _pendingState->firProfile = (FirProfile)s.firProfile;
     
     for(int i=0; i<4; i++) {
-        double normalized = s.phaseOffset[i] / 360.0;
-        _pendingState->phaseOffsets[i] = (uint32_t)(normalized * 4294967296.0);
+        _pendingState->phaseOffsets[i] = phaseOffsetToAccumulator(s.phaseOffset[i]);
     }
-    _swapPending = true;
+    storeSwapPending(true);
     unlockState();
 }
 
@@ -352,58 +395,50 @@ float WaveformGenerator::getFrequency() {
 }
 
 void WaveformGenerator::setFrequency(float freq) {
+    if (!isfinite(freq)) freq = 0.0f;
     if (freq > MAX_OUTPUT_FREQUENCY_HZ) freq = MAX_OUTPUT_FREQUENCY_HZ;
     if (freq < -MAX_OUTPUT_FREQUENCY_HZ) freq = -MAX_OUTPUT_FREQUENCY_HZ;
     lockState();
     _pendingState->frequency = freq;
-    /*
-     * Recalculate phase increment based on the 50 kHz PWM/sample rate.
-     * Inc = Freq * (1/50000) * 2^32
-     * Inc = Freq * 0.00002 * 4294967296.0
-     * Inc = Freq * 85899.34592
-     */
-    double inc = freq * 85899.34592;
-    _pendingState->phaseInc = (uint32_t)inc;
-    _swapPending = true;
+    _pendingState->phaseInc = frequencyToPhaseIncrement(freq);
+    storeSwapPending(true);
     unlockState();
 }
 
 void WaveformGenerator::setAmplitude(float amp) {
     // Public amplitude is normalized; MotorController applies settings limits before calling this function.
+    if (!isfinite(amp)) amp = 0.0;
     if (amp < 0.0) amp = 0.0;
     if (amp > 1.0) amp = 1.0;
     lockState();
     _pendingState->amplitude = amp;
-    _swapPending = true;
+    storeSwapPending(true);
     unlockState();
 }
 
 void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s) {
     // Atomically publish a complete waveform tune: frequency, filters, and phase offsets. This is the preferred path during speed changes.
+    if (!isfinite(freq)) freq = 0.0f;
     if (freq > MAX_OUTPUT_FREQUENCY_HZ) freq = MAX_OUTPUT_FREQUENCY_HZ;
     if (freq < -MAX_OUTPUT_FREQUENCY_HZ) freq = -MAX_OUTPUT_FREQUENCY_HZ;
     lockState();
     _pendingState->frequency = freq;
-    
-    // Recalculate Phase Increment
-    double inc = freq * 85899.34592;
-    _pendingState->phaseInc = (uint32_t)inc;
+    _pendingState->phaseInc = frequencyToPhaseIncrement(freq);
     
     _pendingState->filterType = (FilterType)s.filterType;
-    _pendingState->iirAlpha = s.iirAlpha;
+    _pendingState->iirAlpha = isfinite(s.iirAlpha) ? s.iirAlpha : 0.5f;
     _pendingState->firProfile = (FirProfile)s.firProfile;
     
     for(int i=0; i<4; i++) {
-        double normalized = s.phaseOffset[i] / 360.0;
-        _pendingState->phaseOffsets[i] = (uint32_t)(normalized * 4294967296.0);
+        _pendingState->phaseOffsets[i] = phaseOffsetToAccumulator(s.phaseOffset[i]);
     }
     
-    _swapPending = true;
+    storeSwapPending(true);
     unlockState();
 }
 
 void WaveformGenerator::setEnabled(bool e) {
-    _enabled = e;
+    storeEnabled(e);
     if (!e) {
         // Leave DMA/PWM running and let subsequent buffers go to zero. That keeps output shutdown deterministic without reconfiguring timing hardware.
     }
@@ -422,10 +457,69 @@ uint32_t WaveformGenerator::getBufferFillCount() const {
     return _bufferFillCount;
 }
 
+uint32_t WaveformGenerator::getDmaIrqCount() const {
+    return _dmaIrqCount;
+}
+
+uint32_t WaveformGenerator::getDmaRearmCount() const {
+    return _dmaRearmCount;
+}
+
+uint32_t WaveformGenerator::getDmaDesyncCount() const {
+    return _dmaDesyncCount;
+}
+
+float WaveformGenerator::getSampleRateHz() const {
+    return _sampleRateHz;
+}
+
 bool WaveformGenerator::isDmaRunning() const {
     return _dmaStarted &&
            (dma_channel_is_busy(_dmaChan0) || dma_channel_is_busy(_dmaChan1) ||
             dma_channel_is_busy(_dmaChan2) || dma_channel_is_busy(_dmaChan3));
+}
+
+uint32_t WaveformGenerator::frequencyToPhaseIncrement(float freq) const {
+    if (!isfinite(freq)) freq = 0.0f;
+    float sampleRate = _sampleRateHz;
+    if (!isfinite(sampleRate) || sampleRate <= 0.0f) sampleRate = FALLBACK_SAMPLE_RATE_HZ;
+
+    double incD = (double)freq * (DDS_ACCUMULATOR_SCALE / (double)sampleRate);
+    if (!isfinite(incD)) return 0;
+
+    int64_t inc = llround(incD);
+    return (uint32_t)inc;
+}
+
+uint32_t WaveformGenerator::phaseOffsetToAccumulator(float degrees) const {
+    if (!isfinite(degrees)) degrees = 0.0f;
+    double normalized = fmod((double)degrees, 360.0);
+    if (normalized < 0.0) normalized += 360.0;
+    double scaled = floor((normalized / 360.0) * DDS_ACCUMULATOR_SCALE);
+    if (scaled < 0.0 || scaled >= DDS_ACCUMULATOR_SCALE) return 0;
+    return (uint32_t)scaled;
+}
+
+void __not_in_flash_func(WaveformGenerator::rearmDmaChannel)(int channel, const uint32_t* readAddr) {
+    dma_channel_set_trans_count(channel, DMA_BUFFER_SIZE, false);
+    dma_channel_set_read_addr(channel, readAddr, false);
+    _dmaRearmCount++;
+}
+
+bool WaveformGenerator::enabledAtomic() const {
+    return __atomic_load_n(&_enabled, __ATOMIC_ACQUIRE);
+}
+
+bool WaveformGenerator::swapPendingAtomic() const {
+    return __atomic_load_n(&_swapPending, __ATOMIC_ACQUIRE);
+}
+
+void WaveformGenerator::storeEnabled(bool enabled) {
+    __atomic_store_n(&_enabled, enabled, __ATOMIC_RELEASE);
+}
+
+void WaveformGenerator::storeSwapPending(bool pending) {
+    __atomic_store_n(&_swapPending, pending, __ATOMIC_RELEASE);
 }
 
 int16_t __not_in_flash_func(WaveformGenerator::generateSample)(int channel) {

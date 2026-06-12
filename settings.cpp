@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "error_handler.h"
 #include <ArduinoJson.h>
+#include <math.h>
 
 namespace {
 /*
@@ -32,6 +33,10 @@ static const uint8_t SETTINGS_BOOT_MARKER_VERSION = 1;
 static const uint8_t SETTINGS_BOOT_NONE = 0;
 static const uint8_t SETTINGS_BOOT_PENDING = 1;
 static const uint8_t SETTINGS_BOOT_BOOTING = 2;
+
+float finiteOr(float value, float fallback) {
+    return isfinite(value) ? value : fallback;
+}
 
 /*
  * Boot marker state machine:
@@ -904,15 +909,13 @@ void Settings::begin() {
         return;
     }
 
-    // Mount LittleFS only after Safe Mode has had a chance to bypass normal flash load. Formatting is a last resort for a missing/corrupt filesystem.
+    // Mount LittleFS only after Safe Mode has had a chance to bypass normal flash load. Do not format on a single mount failure; a transient flash issue
+    // should not erase settings, presets, logs, and network configuration.
     if (!LittleFS.begin()) {
-        Serial.println("LittleFS Mount Failed. Formatting...");
-        LittleFS.format();
-        if (!LittleFS.begin()) {
-            Serial.println("LittleFS Mount Failed again. Critical Error.");
-            setDefaults();
-            return;
-        }
+        Serial.println("LittleFS Mount Failed. Using RAM defaults and preserving flash.");
+        setDefaults();
+        _lastRuntimeUpdate = millis();
+        return;
     }
 
     handlePendingRollback();
@@ -1039,6 +1042,37 @@ void Settings::validate() {
         Serial.println("Schema mismatch. Resetting defaults.");
         resetDefaults();
     }
+
+    _data.brakeDuration = finiteOr(_data.brakeDuration, 2.0f);
+    _data.brakePulseGap = finiteOr(_data.brakePulseGap, 0.5f);
+    _data.brakeStartFreq = finiteOr(_data.brakeStartFreq, 50.0f);
+    _data.brakeStopFreq = finiteOr(_data.brakeStopFreq, 0.0f);
+    _data.softStopCutoff = finiteOr(_data.softStopCutoff, 5.0f);
+    _data.pitchStepSize = finiteOr(_data.pitchStepSize, 0.1f);
+    _data.vfLowFreq = finiteOr(_data.vfLowFreq, 5.0f);
+    _data.vfMidFreq = finiteOr(_data.vfMidFreq, 25.0f);
+    _data.ampTempWarnC = finiteOr(_data.ampTempWarnC, AMP_TEMP_WARN_C);
+    _data.ampTempShutdownC = finiteOr(_data.ampTempShutdownC, AMP_TEMP_SHUTDOWN_C);
+    const float defaultClosedLoopTargetRpm[3] = {33.3333f, 45.0f, 78.0f};
+    for (uint8_t i = 0; i < 3; i++) {
+        _data.closedLoopTargetRpm[i] = finiteOr(_data.closedLoopTargetRpm[i], defaultClosedLoopTargetRpm[i]);
+    }
+    _data.closedLoopFilterAlpha = finiteOr(_data.closedLoopFilterAlpha, 0.25f);
+    _data.closedLoopDeadbandRpm = finiteOr(_data.closedLoopDeadbandRpm, 0.02f);
+    _data.closedLoopLockToleranceRpm = finiteOr(_data.closedLoopLockToleranceRpm, 0.05f);
+    _data.closedLoopKp = finiteOr(_data.closedLoopKp, 0.05f);
+    _data.closedLoopKi = finiteOr(_data.closedLoopKi, 0.01f);
+    _data.closedLoopKd = finiteOr(_data.closedLoopKd, 0.0f);
+    _data.closedLoopIntegralLimitHz = finiteOr(_data.closedLoopIntegralLimitHz, 1.0f);
+    _data.closedLoopCorrectionLimitHz = finiteOr(_data.closedLoopCorrectionLimitHz, 3.0f);
+    _data.closedLoopSlewLimitHzPerSec = finiteOr(_data.closedLoopSlewLimitHzPerSec, 0.5f);
+    _data.closedLoopEngageToleranceRpm = finiteOr(_data.closedLoopEngageToleranceRpm, 2.0f);
+    _data.closedLoopRampKp = finiteOr(_data.closedLoopRampKp, 0.02f);
+    _data.closedLoopRampCorrectionLimitHz = finiteOr(_data.closedLoopRampCorrectionLimitHz, 1.0f);
+    _data.closedLoopPitchSlewRpmPerSec = finiteOr(_data.closedLoopPitchSlewRpmPerSec, 0.0f);
+    _data.closedLoopPitchResetThresholdRpm = finiteOr(_data.closedLoopPitchResetThresholdRpm, 0.25f);
+    _data.closedLoopPlausibilityMinRpm = finiteOr(_data.closedLoopPlausibilityMinRpm, 1.0f);
+    _data.closedLoopPlausibilityMaxRpm = finiteOr(_data.closedLoopPlausibilityMaxRpm, 120.0f);
 
     // Enforce global ranges before per-speed ranges so dependent calculations see sane values.
     if (_data.phaseMode < PHASE_1 || _data.phaseMode > MAX_PHASE_MODE) _data.phaseMode = DEFAULT_PHASE_MODE;
@@ -1175,6 +1209,16 @@ void Settings::validate() {
 
     for (uint8_t i = 0; i < 3; i++) {
         ClosedLoopSpeedTuning& t = _data.closedLoopTuning[i];
+        t.deadbandRpm = finiteOr(t.deadbandRpm, 0.02f);
+        t.lockToleranceRpm = finiteOr(t.lockToleranceRpm, 0.05f);
+        t.kp = finiteOr(t.kp, 0.05f);
+        t.ki = finiteOr(t.ki, 0.01f);
+        t.kd = finiteOr(t.kd, 0.0f);
+        t.integralLimitHz = finiteOr(t.integralLimitHz, 1.0f);
+        t.correctionLimitHz = finiteOr(t.correctionLimitHz, 3.0f);
+        t.slewLimitHzPerSec = finiteOr(t.slewLimitHzPerSec, 0.5f);
+        t.rampKp = finiteOr(t.rampKp, 0.02f);
+        t.rampCorrectionLimitHz = finiteOr(t.rampCorrectionLimitHz, 1.0f);
         if (t.deadbandRpm < 0.0f) t.deadbandRpm = 0.0f;
         if (t.deadbandRpm > 5.0f) t.deadbandRpm = 5.0f;
         if (t.lockToleranceRpm < 0.01f) t.lockToleranceRpm = 0.01f;
@@ -1199,7 +1243,22 @@ void Settings::validate() {
     }
 
     // Validate per-speed settings. The min/max/frequency order matters: first clamp each value to hardware limits, then fix relationships between them.
+    const float defaultSpeedFrequency[3] = {25.07f, 33.85f, 58.66f};
+    const float defaultSpeedMinFrequency[3] = {20.0f, 30.0f, 50.0f};
+    const float defaultSpeedMaxFrequency[3] = {30.0f, 40.0f, 70.0f};
+    const float defaultSoftStartDuration[3] = {1.0f, 1.0f, 1.5f};
+    const float defaultPhaseOffset[4] = {0.0f, 120.0f, 240.0f, 270.0f};
     for(int i=0; i<3; i++) {
+        _data.speeds[i].frequency = finiteOr(_data.speeds[i].frequency, defaultSpeedFrequency[i]);
+        _data.speeds[i].minFrequency = finiteOr(_data.speeds[i].minFrequency, defaultSpeedMinFrequency[i]);
+        _data.speeds[i].maxFrequency = finiteOr(_data.speeds[i].maxFrequency, defaultSpeedMaxFrequency[i]);
+        _data.speeds[i].softStartDuration = finiteOr(_data.speeds[i].softStartDuration, defaultSoftStartDuration[i]);
+        _data.speeds[i].startupKickRampDuration = finiteOr(_data.speeds[i].startupKickRampDuration, 1.0f);
+        _data.speeds[i].iirAlpha = finiteOr(_data.speeds[i].iirAlpha, 0.5f);
+        for (int p = 0; p < 4; p++) {
+            _data.speeds[i].phaseOffset[p] = finiteOr(_data.speeds[i].phaseOffset[p], defaultPhaseOffset[p]);
+        }
+
         if (_data.speeds[i].minFrequency < MIN_OUTPUT_FREQUENCY_HZ) _data.speeds[i].minFrequency = MIN_OUTPUT_FREQUENCY_HZ;
         if (_data.speeds[i].minFrequency > MAX_OUTPUT_FREQUENCY_HZ) _data.speeds[i].minFrequency = MAX_OUTPUT_FREQUENCY_HZ;
         if (_data.speeds[i].maxFrequency < MIN_OUTPUT_FREQUENCY_HZ) _data.speeds[i].maxFrequency = MIN_OUTPUT_FREQUENCY_HZ;

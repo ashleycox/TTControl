@@ -86,6 +86,7 @@ void AmplifierMonitor::shutdownOutputs(const char* message) {
     if (_shutdown) return;
     _shutdown = true;
 
-    // The next update() call performs the actual emergency stop so the first log entry is captured exactly once.
+    // Stop outputs immediately on the first sampled fault; later update() calls keep the emergency stop asserted.
+    motor.emergencyStop();
     errorHandler.report(ERR_AMP_THERMAL, message, true);
 }

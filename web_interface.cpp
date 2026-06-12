@@ -834,6 +834,10 @@ static void streamSystemMetrics(Print& out, bool& first) {
     writeUIntProp(out, nestedFirst, "lastBufferFillMs", lastFillMs);
     writeUIntProp(out, nestedFirst, "bufferFillAgeMs", lastFillMs == 0 ? 0 : now - lastFillMs);
     writeUIntProp(out, nestedFirst, "bufferFillCount", waveform.getBufferFillCount());
+    writeFloatProp(out, nestedFirst, "sampleRateHz", waveform.getSampleRateHz());
+    writeUIntProp(out, nestedFirst, "dmaIrqCount", waveform.getDmaIrqCount());
+    writeUIntProp(out, nestedFirst, "dmaRearmCount", waveform.getDmaRearmCount());
+    writeUIntProp(out, nestedFirst, "dmaDesyncCount", waveform.getDmaDesyncCount());
     writeBoolProp(out, nestedFirst, "dmaRunning", waveform.isDmaRunning());
     out.write('}');
 
@@ -841,6 +845,7 @@ static void streamSystemMetrics(Print& out, bool& first) {
 }
 
 static float clampFloatValue(float value, float minValue, float maxValue) {
+    if (!isfinite(value)) return minValue;
     if (value < minValue) return minValue;
     if (value > maxValue) return maxValue;
     return value;
@@ -1423,7 +1428,6 @@ WebInterface::WebInterface()
 void WebInterface::begin() {
     // The server is started even if Wi-Fi is currently disabled; update() only handles clients when NetworkManager reports an available connection/AP.
     setupRoutes();
-    _server.enableCORS(true);
     _server.begin();
     _started = true;
 }

@@ -16,6 +16,7 @@
 
 extern "C" {
     #include "pico/stdlib.h"
+    #include "hardware/clocks.h"
     #include "hardware/dma.h"
     #include "hardware/pwm.h"
     #include "hardware/irq.h"
@@ -65,6 +66,10 @@ public:
     int16_t getSample(int channel);
     uint32_t getLastBufferFillMs() const;
     uint32_t getBufferFillCount() const;
+    uint32_t getDmaIrqCount() const;
+    uint32_t getDmaRearmCount() const;
+    uint32_t getDmaDesyncCount() const;
+    float getSampleRateHz() const;
     bool isDmaRunning() const;
 
 private:
@@ -101,9 +106,10 @@ private:
     uint8_t _firIndex;
     volatile int16_t _lastSamples[4];
     
-    int16_t* _lut;
+    int16_t _lut[LUT_MAX_SIZE];
     int _lutSize;
     int _lutShift;
+    float _sampleRateHz;
     
     // DMA / PWM State
     static const int DMA_BUFFER_SIZE = 256; // Number of samples per buffer
@@ -127,6 +133,9 @@ private:
     volatile int _currentBufferIndex; // Last buffer freed by DMA IRQ, 0 or 1
     volatile uint32_t _lastBufferFillMs;
     volatile uint32_t _bufferFillCount;
+    volatile uint32_t _dmaIrqCount;
+    volatile uint32_t _dmaRearmCount;
+    volatile uint32_t _dmaDesyncCount;
     bool _dmaStarted;
     
     void generateLUT();
@@ -136,6 +145,13 @@ private:
     int16_t generateSample(int channel);
     void setupPWM();
     void setupDMA();
+    uint32_t frequencyToPhaseIncrement(float freq) const;
+    uint32_t phaseOffsetToAccumulator(float degrees) const;
+    void rearmDmaChannel(int channel, const uint32_t* readAddr);
+    bool enabledAtomic() const;
+    bool swapPendingAtomic() const;
+    void storeEnabled(bool enabled);
+    void storeSwapPending(bool pending);
 };
 
 #endif // WAVEFORM_H
