@@ -298,7 +298,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 
 - **Automatic Wi-Fi Build Detection:** `NETWORK_ENABLE` defaults to `1` only when the selected Arduino-Pico board target defines `PICO_CYW43_SUPPORTED`. Non-Wi-Fi builds compile the network and web modules out.
 - **Default Setup Access Point:** Wi-Fi-capable builds start in open setup access point mode by default using SSID `TTControl-Setup`, so the network setup UI can be reached before any home network credentials are entered.
-- **Setup-Only Safety:** When reached through an open setup AP, the hosted server only serves Wi-Fi configuration pages and network APIs. Motor controls, full settings, presets, and error logs are blocked until the device is reached through the configured Wi-Fi network, or through a protected setup access point.
+- **Setup-Only Safety:** When reached through an open setup AP, the hosted server only serves Wi-Fi configuration pages and network APIs. Motor controls, full settings, presets, and error logs are blocked until the device is reached through the configured Wi-Fi network, or through a protected setup access point. Fresh network defaults also enable read-only mode and Device UI Lock until the shared PIN is entered.
 - **Guided Setup Wizard:** The open setup access point serves a network-only wizard for Wi-Fi mode, SSID/password, hidden SSID selection, DHCP/static addressing, fallback AP name/password, and AP channel. Leaving the setup AP password blank creates an open setup network.
 - **Serial Setup Wizard:** The Serial Monitor can configure the same network storage with `wifi wizard`, including Wi-Fi scanning, station credentials, hidden SSID selection, DHCP/static addressing, hostname, fallback setup AP settings, and immediate save/reconnect.
 - **Network Menu:** The OLED menu groups network controls into overview, station credentials, IP/power, setup AP, and web access pages. It exposes Wi-Fi enable/disable, setup AP/station mode, standby mode, hostname, station SSID/password, hidden SSID selection, DHCP, AP fallback, AP SSID/password, AP channel, read-only guest mode, web PIN editing/reset, saved web home page, apply/reconnect, and force-setup-AP actions.
@@ -329,7 +329,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Full Backup:** The Diagnostics page can export, validate, and import a full JSON backup containing motor settings, presets, non-secret network metadata, and the error log. Wi-Fi and web PIN passwords are intentionally not exported.
 - **SSE Status Stream:** The dashboard uses a lightweight Server-Sent Events status stream when available, with normal status requests retained for direct refreshes and compatibility.
 - **Chart Controls:** The telemetry chart has gridlines, a legend, and selectable series for frequency, pitch, and amplifier temperature.
-- **Network Storage:** Wi-Fi credentials and network options are stored separately on LittleFS, avoiding changes to the binary motor settings schema.
+- **Network Storage:** Wi-Fi credentials and network options are stored separately on LittleFS with a checked header, schema tag, CRC, temp-file promotion, and backup fallback, avoiding changes to the binary motor settings schema.
 
 ---
 
@@ -381,7 +381,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 
 ### 2.11. Amplifier Monitoring And Thermal Safety
 
-- **Compile-Time Enable:** `AMP_MONITOR_ENABLE` enables the amplifier monitor. It is enabled by default and has no runtime enable/disable toggle.
+- **Compile-Time Enable:** `AMP_MONITOR_ENABLE` enables the amplifier monitor. It is opt-in by default because the monitor pins must be populated and driven; there is no runtime enable/disable toggle.
 - **Temperature Sensor:** `PIN_AMP_TEMP` reads a TMP36-style analogue heatsink sensor on ADC GP26. The firmware samples it every 500 ms and converts voltage to degrees Celsius.
 - **Thermal Cutout Input:** `PIN_AMP_THERM_OK` reads the amplifier thermal cutout/status line on GP27 using an input pulldown. HIGH means the amplifier thermal chain is healthy; LOW triggers an immediate critical shutdown.
 - **Warning Threshold:** At the configured warning threshold, defaulting to `AMP_TEMP_WARN_C` (`65.0C`), the firmware logs a non-critical `ERR_AMP_THERMAL` warning. The warning re-arms once temperature falls at least 5C below the warning threshold.
@@ -451,7 +451,7 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `p` | Reset pitch |
 | `status` / `i` | Show current status; includes CPU load, heap use, flash/filesystem use, and amplifier temperature/thermal state when enabled |
 | `list` | **List all available settings and values** |
-| `set <key> <val>` | Set a parameter value |
+| `set <key> <val>` | Set a parameter value; numeric values are parsed strictly and clamped to the setting range |
 | `get <key>` | Get a parameter value |
 | `save` | Save current RAM settings to flash |
 | `reboot` | Reboot via watchdog |
@@ -811,8 +811,8 @@ Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
   - **AP Pass:** Setup access point password.
   - **AP Channel:** Setup access point channel.
 - **Web Access**
-  - **ReadOnly:** Enables optional read-only guest mode for the web interface. Off by default.
-  - **Web PIN:** Sets the 4-8 character PIN used to unlock web write actions when read-only mode is enabled.
+  - **ReadOnly:** Enables read-only guest mode for the web interface. Fresh network defaults keep this on until changed.
+  - **Web PIN:** Sets the 4-8 character PIN used to unlock web write actions when read-only mode or Device UI Lock is enabled.
   - **Web Home:** Selects the default page shown when the web interface opens.
   - **Reset PIN:** Restores the web PIN to `NETWORK_DEFAULT_WEB_PIN`.
 
@@ -842,20 +842,20 @@ Lists numbered slots (1: Preset 1, 2: High Torque, etc.). Clicking a slot reveal
 | **Waveform** | `MAX_OUTPUT_FREQUENCY_HZ` | Maximum generated sine frequency. | `1500.0` | Used by menus, validation, serial commands, and waveform output. |
 | **Presets** | `MAX_PRESET_SLOTS` | Defines the maximum number of user-configurable presets. | `5` | Used to size the data structure for presets. |
 | **Network** | `NETWORK_ENABLE` | Enables Wi-Fi, local web server, network menu, and web settings UI. | Auto: `1` on `PICO_CYW43_SUPPORTED`, otherwise `0` | Can be overridden at compile time. |
-| **Network** | `NETWORK_CONFIG_VERSION` | Tag for network settings schema. | `4` | Used to migrate `/network.bin` when Wi-Fi settings change. |
+| **Network** | `NETWORK_CONFIG_VERSION` | Tag for network settings schema. | `5` | Used to migrate `/network.bin` when Wi-Fi settings change. |
 | **Network** | `NETWORK_WEB_PIN_MAX` | Maximum web unlock PIN length. | `8` | Web PINs shorter than 4 characters are rejected by the browser/API. |
 | **Network** | `NETWORK_DEFAULT_HOSTNAME` | Default network hostname. | `"ttcontrol"` | Stored separately from motor settings in `/network.bin`. |
 | **Network** | `NETWORK_DEFAULT_AP_SSID` | Default setup access point SSID. | `"TTControl-Setup"` | Used on first boot of Wi-Fi builds. |
 | **Network** | `NETWORK_DEFAULT_AP_PASSWORD` | Default setup access point password. | `""` | Blank means open setup AP. Open setup AP requests are limited to Wi-Fi configuration only. If set, use at least 8 characters. |
 | **Network** | `NETWORK_DEFAULT_AP_CHANNEL` | Default setup access point channel. | `6` | Configurable from menu and web UI. |
-| **Network** | `NETWORK_DEFAULT_WEB_PIN` | Default PIN used if read-only guest mode is enabled before changing the PIN. | `"1234"` | Read-only guest mode is off by default; change this PIN before enabling it on a shared network. |
+| **Network** | `NETWORK_DEFAULT_WEB_PIN` | Default PIN used if read-only guest mode or Device UI Lock is enabled before changing the PIN. | `"1234"` | Fresh defaults enable both protections; change this PIN before placing the device on a shared network. |
 | **Serial/Debug** | `SERIAL_MONITOR_ENABLE` | Enables/Disables all Serial Monitor functionality and setup. | `1` or `0` | Global toggle for serial output. |
 | **Serial/Debug** | `DUPLICATE_DISPLAY_TO_SERIAL` | Duplicates all display output to the serial monitor. | `1` or `0` | Requires `SERIAL_MONITOR_ENABLE` to be `1`. |
 | **Features** | `ENABLE_STANDBY` | Enable/Disable Standby Mode | `1` | Controls standby functionality. |
 | **Features** | `ENABLE_MUTE_RELAYS` | Enable/Disable Mute Relays | `1` | Controls relay logic. |
 | **Features** | `ENABLE_DPDT_RELAYS` | Use 2x DPDT instead of 4x SPST | `0` | Changes relay switching logic. |
 | **Features** | `ENABLE_4_CHANNEL_SUPPORT` | Enable 4-phase/4-channel support. | `0` | Normal firmware builds expose three channels. Set to `1` to enable optional four-channel/Premotec bridge modes on hardware that has the fourth output populated. |
-| **Features** | `AMP_MONITOR_ENABLE` | Enable amplifier temperature and thermal cutout monitoring. | `1` | Samples every 500 ms using `PIN_AMP_TEMP` and `PIN_AMP_THERM_OK`; thresholds appear in the System menu and web Settings page. |
+| **Features** | `AMP_MONITOR_ENABLE` | Enable amplifier temperature and thermal cutout monitoring. | `0` | Set to `1` only when `PIN_AMP_TEMP` and `PIN_AMP_THERM_OK` are populated and driven; thresholds appear in the System menu and web Settings page. |
 | **Features** | `CLOSED_LOOP_SPEED_ENABLE` | Enable pulse tachometer or quadrature speed feedback. | `0` | Adds sensor decoding, monitor/correction modes, setup capture, OLED menu, serial keys, and Web UI/API fields. |
 | **Features** | `CLOSED_LOOP_TREND_SIZE` | Number of recent closed-loop samples kept for serial/web trend reporting. | `24` | Valid range is 1-64. Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`. |
 | **Optional Pins** | `PIN_SPEED_SENSOR_A` | Pulse input or quadrature A input. | `6` | Only used when `CLOSED_LOOP_SPEED_ENABLE` is `1`. |

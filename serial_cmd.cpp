@@ -15,6 +15,10 @@
 #include "system_monitor.h"
 #include "speed_feedback.h"
 #include "waveform.h"
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
+#include <stdlib.h>
 
 extern UserInterface ui;
 
@@ -32,6 +36,105 @@ struct SettingItem {
 
 std::vector<SettingItem> registry;
 bool cliInitialized = false;
+static const size_t SERIAL_COMMAND_BUFFER_SIZE = 4096;
+
+enum SerialSettingType : uint8_t {
+    SERIAL_SETTING_BOOL,
+    SERIAL_SETTING_INT,
+    SERIAL_SETTING_FLOAT
+};
+
+struct SerialSettingRule {
+    const char* name;
+    SerialSettingType type;
+    float minValue;
+    float maxValue;
+};
+
+static const SerialSettingRule SERIAL_SETTING_RULES[] = {
+    {"brightness", SERIAL_SETTING_INT, 0, 255},
+    {"ramp", SERIAL_SETTING_INT, 0, 1},
+    {"pitch_step", SERIAL_SETTING_FLOAT, 0.01f, 1.0f},
+    {"rev_enc", SERIAL_SETTING_BOOL, 0, 1},
+    {"saver_mode", SERIAL_SETTING_INT, 0, 2},
+    {"show_cpu", SERIAL_SETTING_BOOL, 0, 1},
+    {"show_memory", SERIAL_SETTING_BOOL, 0, 1},
+    {"show_flash", SERIAL_SETTING_BOOL, 0, 1},
+    {"phase_mode", SERIAL_SETTING_INT, 1, MAX_PHASE_MODE},
+    {"max_amp", SERIAL_SETTING_INT, 0, 100},
+#if CLOSED_LOOP_SPEED_ENABLE
+    {"cl_enable", SERIAL_SETTING_BOOL, 0, 1},
+    {"cl_control", SERIAL_SETTING_INT, CLOSED_LOOP_CONTROL_MONITOR, CLOSED_LOOP_CONTROL_CORRECT},
+    {"cl_mode", SERIAL_SETTING_INT, CLOSED_LOOP_SENSOR_PULSE, CLOSED_LOOP_SENSOR_QUADRATURE},
+    {"cl_target_rpm", SERIAL_SETTING_FLOAT, 1.0f, 120.0f},
+    {"cl_counts", SERIAL_SETTING_INT, 1, 20000},
+    {"cl_edge", SERIAL_SETTING_INT, CLOSED_LOOP_EDGE_RISING, CLOSED_LOOP_EDGE_CHANGE},
+    {"cl_quad", SERIAL_SETTING_INT, CLOSED_LOOP_QUAD_X1, CLOSED_LOOP_QUAD_X4},
+    {"cl_reverse", SERIAL_SETTING_BOOL, 0, 1},
+    {"cl_dir_fault", SERIAL_SETTING_INT, CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP},
+    {"cl_debounce_us", SERIAL_SETTING_INT, 0, 50000},
+    {"cl_timeout_ms", SERIAL_SETTING_INT, 100, 10000},
+    {"cl_engage_ms", SERIAL_SETTING_INT, 0, 30000},
+    {"cl_update_ms", SERIAL_SETTING_INT, 20, 1000},
+    {"cl_filter", SERIAL_SETTING_FLOAT, 0.01f, 1.0f},
+    {"cl_deadband", SERIAL_SETTING_FLOAT, 0.0f, 5.0f},
+    {"cl_lock_tol", SERIAL_SETTING_FLOAT, 0.01f, 5.0f},
+    {"cl_lock_ms", SERIAL_SETTING_INT, 0, 30000},
+    {"cl_kp", SERIAL_SETTING_FLOAT, 0.0f, 20.0f},
+    {"cl_ki", SERIAL_SETTING_FLOAT, 0.0f, 20.0f},
+    {"cl_kd", SERIAL_SETTING_FLOAT, 0.0f, 20.0f},
+    {"cl_i_limit", SERIAL_SETTING_FLOAT, 0.0f, 50.0f},
+    {"cl_corr_limit", SERIAL_SETTING_FLOAT, 0.0f, 100.0f},
+    {"cl_slew", SERIAL_SETTING_FLOAT, 0.0f, 100.0f},
+    {"cl_dropout", SERIAL_SETTING_INT, CLOSED_LOOP_DROPOUT_OPEN_LOOP, CLOSED_LOOP_DROPOUT_STOP},
+    {"cl_req_signal", SERIAL_SETTING_BOOL, 0, 1},
+    {"cl_req_near", SERIAL_SETTING_BOOL, 0, 1},
+    {"cl_engage_tol", SERIAL_SETTING_FLOAT, 0.01f, 20.0f},
+    {"cl_ramp_mode", SERIAL_SETTING_INT, CLOSED_LOOP_RAMP_DISABLED, CLOSED_LOOP_RAMP_TRACK},
+    {"cl_ramp_kp", SERIAL_SETTING_FLOAT, 0.0f, 5.0f},
+    {"cl_ramp_limit", SERIAL_SETTING_FLOAT, 0.0f, 20.0f},
+    {"cl_pitch_slew", SERIAL_SETTING_FLOAT, 0.0f, 200.0f},
+    {"cl_pitch_mode", SERIAL_SETTING_INT, CLOSED_LOOP_PITCH_TARGET_FIXED, CLOSED_LOOP_PITCH_TARGET_FOLLOW},
+    {"cl_pitch_reset", SERIAL_SETTING_FLOAT, 0.0f, 20.0f},
+    {"cl_sat_ms", SERIAL_SETTING_INT, 0, 60000},
+    {"cl_sat_action", SERIAL_SETTING_INT, CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP},
+    {"cl_min_rpm", SERIAL_SETTING_FLOAT, 0.0f, 120.0f},
+    {"cl_max_rpm", SERIAL_SETTING_FLOAT, 1.0f, 200.0f},
+    {"cl_plaus_action", SERIAL_SETTING_INT, CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP},
+    {"cl_lock_timeout", SERIAL_SETTING_INT, 0, 60000},
+    {"cl_lock_action", SERIAL_SETTING_INT, CLOSED_LOOP_FAULT_IGNORE, CLOSED_LOOP_FAULT_STOP},
+    {"cl_amp_recovery", SERIAL_SETTING_INT, CLOSED_LOOP_AMP_RECOVERY_OFF, CLOSED_LOOP_AMP_RECOVERY_RESTORE},
+    {"cl_amp_recovery_ms", SERIAL_SETTING_INT, 0, 30000},
+#endif
+#if AMP_MONITOR_ENABLE
+    {"amp_warn", SERIAL_SETTING_FLOAT, AMP_TEMP_MIN_C, AMP_TEMP_MAX_C},
+    {"amp_shutdown", SERIAL_SETTING_FLOAT, AMP_TEMP_MIN_C, AMP_TEMP_MAX_C},
+#endif
+    {"smooth_switch", SERIAL_SETTING_BOOL, 0, 1},
+    {"switch_ramp", SERIAL_SETTING_INT, 1, 5},
+    {"brake_mode", SERIAL_SETTING_INT, 0, 3},
+    {"brake_duration", SERIAL_SETTING_FLOAT, 0.0f, 10.0f},
+    {"brake_pulse_gap", SERIAL_SETTING_FLOAT, 0.1f, 2.0f},
+    {"brake_start_freq", SERIAL_SETTING_FLOAT, 10.0f, 200.0f},
+    {"brake_stop_freq", SERIAL_SETTING_FLOAT, 0.0f, 50.0f},
+    {"brake_cutoff", SERIAL_SETTING_FLOAT, 0.0f, 50.0f},
+    {"relay_active_high", SERIAL_SETTING_BOOL, 0, 1},
+    {"relay_delay", SERIAL_SETTING_INT, 0, 10},
+    {"freq", SERIAL_SETTING_FLOAT, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ},
+    {"phase1", SERIAL_SETTING_FLOAT, -360.0f, 360.0f},
+    {"phase2", SERIAL_SETTING_FLOAT, -360.0f, 360.0f},
+    {"phase3", SERIAL_SETTING_FLOAT, -360.0f, 360.0f},
+#if ENABLE_4_CHANNEL_SUPPORT
+    {"phase4", SERIAL_SETTING_FLOAT, -360.0f, 360.0f},
+#endif
+    {"soft_start", SERIAL_SETTING_FLOAT, 0.0f, 10.0f},
+    {"kick", SERIAL_SETTING_INT, 1, 4},
+    {"kick_dur", SERIAL_SETTING_INT, 0, 15},
+    {"filter", SERIAL_SETTING_INT, 0, 2},
+    {"reduced_amp", SERIAL_SETTING_INT, 10, 100},
+    {"amp_delay", SERIAL_SETTING_INT, 0, 60},
+    {"pitch", SERIAL_SETTING_FLOAT, -100.0f, 100.0f}
+};
 
 static const char* speedName(SpeedMode speed) {
     if (speed == SPEED_33) return "33 RPM";
@@ -134,6 +237,7 @@ static int clampInt(int value, int minValue, int maxValue) {
 }
 
 static float clampFloat(float value, float minValue, float maxValue) {
+    if (!isfinite(value)) return minValue;
     if (value < minValue) return minValue;
     if (value > maxValue) return maxValue;
     return value;
@@ -189,6 +293,80 @@ static bool parseBoolValue(String value, bool& out) {
         return true;
     }
     return false;
+}
+
+static const SerialSettingRule* findSerialSettingRule(const String& key) {
+    for (const SerialSettingRule& rule : SERIAL_SETTING_RULES) {
+        if (key == rule.name) return &rule;
+    }
+    return nullptr;
+}
+
+static bool parseStrictInt(String value, int& out) {
+    value.trim();
+    if (value.length() == 0) return false;
+
+    const char* start = value.c_str();
+    char* end = nullptr;
+    errno = 0;
+    long parsed = strtol(start, &end, 10);
+    if (errno != 0 || end == start || *end != 0) return false;
+    if (parsed < INT_MIN || parsed > INT_MAX) return false;
+
+    out = (int)parsed;
+    return true;
+}
+
+static bool parseStrictFloat(String value, float& out) {
+    value.trim();
+    if (value.length() == 0) return false;
+
+    const char* start = value.c_str();
+    char* end = nullptr;
+    errno = 0;
+    float parsed = strtof(start, &end);
+    if (errno != 0 || end == start || *end != 0 || !isfinite(parsed)) return false;
+
+    out = parsed;
+    return true;
+}
+
+static const char* serialSettingTypeText(SerialSettingType type) {
+    if (type == SERIAL_SETTING_BOOL) return "boolean";
+    if (type == SERIAL_SETTING_INT) return "integer";
+    return "number";
+}
+
+static bool normalizeSerialSettingValue(const String& key, const String& rawValue, String& normalized, const char*& expectedType) {
+    const SerialSettingRule* rule = findSerialSettingRule(key);
+    if (!rule) {
+        normalized = rawValue;
+        expectedType = "value";
+        return true;
+    }
+
+    expectedType = serialSettingTypeText(rule->type);
+
+    if (rule->type == SERIAL_SETTING_BOOL) {
+        bool parsed = false;
+        if (!parseBoolValue(rawValue, parsed)) return false;
+        normalized = parsed ? "1" : "0";
+        return true;
+    }
+
+    if (rule->type == SERIAL_SETTING_INT) {
+        int parsed = 0;
+        if (!parseStrictInt(rawValue, parsed)) return false;
+        parsed = clampInt(parsed, (int)rule->minValue, (int)rule->maxValue);
+        normalized = String(parsed);
+        return true;
+    }
+
+    float parsed = 0.0f;
+    if (!parseStrictFloat(rawValue, parsed)) return false;
+    parsed = clampFloat(parsed, rule->minValue, rule->maxValue);
+    normalized = String(parsed, 6);
+    return true;
 }
 
 static bool isSerialCommandAllowedWhileLocked(const String& input) {
@@ -807,8 +985,10 @@ static void handleWifiWizardInput(String input) {
                     return;
                 }
             } else {
-                int selected = input.toInt();
-                bool isNumber = selected > 0 && selected <= wifiWizardScanCount && input == String(selected);
+                int selected = 0;
+                bool isNumber = parseStrictInt(input, selected) &&
+                                selected > 0 &&
+                                selected <= wifiWizardScanCount;
                 String ssid = isNumber ? wifiWizardScanSsids[selected - 1] : input;
                 if (!copyConfigString(wifiWizardConfig.ssid, sizeof(wifiWizardConfig.ssid), ssid, "Station SSID")) {
                     promptWifiWizardStep();
@@ -942,7 +1122,12 @@ static void handleWifiWizardInput(String input) {
             break;
         case WIFI_WIZARD_AP_CHANNEL:
             if (input.length() > 0) {
-                int channel = input.toInt();
+                int channel = 0;
+                if (!parseStrictInt(input, channel)) {
+                    Serial.println("AP channel must be 1 through 13.");
+                    promptWifiWizardStep();
+                    return;
+                }
                 if (channel < 1 || channel > 13) {
                     Serial.println("AP channel must be 1 through 13.");
                     promptWifiWizardStep();
@@ -1504,9 +1689,40 @@ void handleSerialCommands() {
     // Wi-Fi scan completion is polled even when no new serial line is available.
     updateWifiSerialTasks();
     
-    if (Serial.available() > 0) {
-        String input = Serial.readStringUntil('\n');
-        input.trim();
+    static char inputBuffer[SERIAL_COMMAND_BUFFER_SIZE];
+    static size_t inputLength = 0;
+    static bool inputOverflow = false;
+    bool lineReady = false;
+
+    while (Serial.available() > 0 && !lineReady) {
+        char c = (char)Serial.read();
+        if (c == '\r') {
+            continue;
+        }
+        if (c == '\n') {
+            inputBuffer[inputLength] = 0;
+            lineReady = true;
+            break;
+        }
+        if (inputLength < sizeof(inputBuffer) - 1) {
+            inputBuffer[inputLength++] = c;
+        } else {
+            inputOverflow = true;
+        }
+    }
+
+    if (!lineReady) return;
+
+    if (inputOverflow) {
+        inputLength = 0;
+        inputOverflow = false;
+        Serial.println("Serial command too long.");
+        return;
+    }
+
+    String input(inputBuffer);
+    inputLength = 0;
+    input.trim();
 
         if (wifiWizardActive) {
             // While the wizard is active, every line is wizard input until cancel or confirmation.
@@ -1555,7 +1771,11 @@ void handleSerialCommands() {
             }
         }
         else if (input.startsWith("speed ")) {
-            int s = input.substring(6).toInt();
+            int s = -1;
+            if (!parseStrictInt(input.substring(6), s)) {
+                Serial.println("Invalid speed index (0-2)");
+                return;
+            }
             if (s >= 0 && s <= 2) {
                 if (s == SPEED_78 && !settings.get().enable78rpm) {
                     Serial.println("78 RPM is disabled. Enable it before selecting speed 2.");
@@ -1671,8 +1891,18 @@ void handleSerialCommands() {
                 bool found = false;
                 for (const auto& item : registry) {
                     if (item.name == key) {
-                        item.set(valStr);
-                        Serial.print("Set "); Serial.print(key); Serial.print(" = "); Serial.println(valStr);
+                        String normalizedValue;
+                        const char* expectedType = "value";
+                        if (!normalizeSerialSettingValue(key, valStr, normalizedValue, expectedType)) {
+                            Serial.print("Invalid value for ");
+                            Serial.print(key);
+                            Serial.print(". Expected ");
+                            Serial.print(expectedType);
+                            Serial.println(".");
+                            return;
+                        }
+                        item.set(normalizedValue);
+                        Serial.print("Set "); Serial.print(key); Serial.print(" = "); Serial.println(item.get());
                         found = true;
                         break;
                     }
@@ -1700,7 +1930,12 @@ void handleSerialCommands() {
          * Preset JSON is line-oriented for serial monitor compatibility.
          */
         else if (input.startsWith("export preset ")) {
-            int slot = input.substring(14).toInt() - 1; // 1-based to 0-based
+            int slotNumber = 0;
+            if (!parseStrictInt(input.substring(14), slotNumber)) {
+                Serial.println("Invalid preset slot (1-5)");
+                return;
+            }
+            int slot = slotNumber - 1; // 1-based to 0-based
             if (slot >= 0 && slot < MAX_PRESET_SLOTS) {
                 String out;
                 if (settings.exportPresetToJSON(slot, out)) {
@@ -1715,7 +1950,12 @@ void handleSerialCommands() {
         else if (input.startsWith("import preset ")) {
             int firstSpace = input.indexOf(' ', 14);
             if (firstSpace > 14) {
-                int slot = input.substring(14, firstSpace).toInt() - 1;
+                int slotNumber = 0;
+                if (!parseStrictInt(input.substring(14, firstSpace), slotNumber)) {
+                    Serial.println("Invalid preset slot (1-5)");
+                    return;
+                }
+                int slot = slotNumber - 1;
                 String jsonStr = input.substring(firstSpace + 1);
                 
                 if (slot >= 0 && slot < MAX_PRESET_SLOTS) {
@@ -1744,7 +1984,6 @@ void handleSerialCommands() {
         else {
             Serial.println("Unknown command. Type 'help' for list.");
         }
-    }
 }
 
 void printStatus() {
@@ -1815,7 +2054,11 @@ void printStatus() {
     Serial.print(", fill age ");
     Serial.print(lastFillMs == 0 ? 0 : (hal.getMillis() - lastFillMs));
     Serial.print("ms, fills ");
-    Serial.println(waveform.getBufferFillCount());
+    Serial.print(waveform.getBufferFillCount());
+    Serial.print(", IRQs ");
+    Serial.print(waveform.getDmaIrqCount());
+    Serial.print(", desync ");
+    Serial.println(waveform.getDmaDesyncCount());
 
     Serial.print("Heap: ");
     Serial.print(metrics.heapUsedBytes / 1024UL);
@@ -2573,7 +2816,11 @@ static void handleWifiSetCommand(const std::vector<String>& args) {
         if (!copyConfigString(cfg.apPassword, sizeof(cfg.apPassword), args[2], "Setup AP password")) return;
         markWifiConfigUpdated();
     } else if (key == "ap_channel") {
-        int channel = args[2].toInt();
+        int channel = 0;
+        if (!parseStrictInt(args[2], channel)) {
+            Serial.println("AP channel must be 1 through 13.");
+            return;
+        }
         if (channel < 1 || channel > 13) {
             Serial.println("AP channel must be 1 through 13.");
             return;
@@ -2839,7 +3086,12 @@ static void handlePresetCommand(const String& input) {
     }
 
     if (input.startsWith("preset load ")) {
-        int slot = input.substring(12).toInt() - 1;
+        int slotNumber = 0;
+        if (!parseStrictInt(input.substring(12), slotNumber)) {
+            Serial.println("Invalid preset slot (1-5).");
+            return;
+        }
+        int slot = slotNumber - 1;
         if (slot >= 0 && slot < MAX_PRESET_SLOTS) {
             if (settings.loadPreset(slot)) {
                 motor.applySettings();
@@ -2854,7 +3106,12 @@ static void handlePresetCommand(const String& input) {
     }
 
     if (input.startsWith("preset save ")) {
-        int slot = input.substring(12).toInt() - 1;
+        int slotNumber = 0;
+        if (!parseStrictInt(input.substring(12), slotNumber)) {
+            Serial.println("Invalid preset slot (1-5).");
+            return;
+        }
+        int slot = slotNumber - 1;
         if (slot >= 0 && slot < MAX_PRESET_SLOTS) {
             settings.savePreset(slot);
             Serial.println("Preset saved.");
@@ -2882,18 +3139,7 @@ static void handleRelayTestCommand(const String& input) {
     }
 
     int stage = -1;
-    bool numeric = arg.length() > 0;
-    for (size_t i = 0; i < arg.length(); i++) {
-        char c = arg.charAt(i);
-        if (c < '0' || c > '9') {
-            numeric = false;
-            break;
-        }
-    }
-
-    if (numeric) {
-        stage = arg.toInt();
-    }
+    parseStrictInt(arg, stage);
 
     if (stage < 0 || stage >= motor.getRelayTestStageCount()) {
         Serial.print("Usage: relay test <0-");

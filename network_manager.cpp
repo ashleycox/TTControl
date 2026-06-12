@@ -13,8 +13,142 @@
 #include <stddef.h>
 
 static const char* NETWORK_CONFIG_FILE = "/network.bin";
+static const uint32_t NETWORK_CONFIG_BLOB_MAGIC = 0x54544E43UL; // "TTNC"
+static const uint16_t NETWORK_CONFIG_BLOB_VERSION = 1;
 
 NetworkManager networkManager;
+
+namespace {
+struct NetworkConfigFileHeader {
+    uint32_t magic;
+    uint16_t formatVersion;
+    uint16_t headerSize;
+    uint32_t configVersion;
+    uint32_t payloadSize;
+    uint32_t crc32;
+};
+
+uint32_t networkCrc32(const uint8_t* data, size_t length) {
+    uint32_t crc = 0xFFFFFFFFUL;
+    while (length--) {
+        crc ^= *data++;
+        for (uint8_t i = 0; i < 8; i++) {
+            crc = (crc >> 1) ^ (0xEDB88320UL & (-(int32_t)(crc & 1)));
+        }
+    }
+    return ~crc;
+}
+
+bool makeNetworkSidecarPath(const char* path, const char* suffix, char* out, size_t outSize) {
+    if (!path || !suffix || !out || outSize == 0) return false;
+    int written = snprintf(out, outSize, "%s%s", path, suffix);
+    return written > 0 && (size_t)written < outSize;
+}
+
+bool readWrappedNetworkConfig(const char* path, NetworkConfig& target, size_t& readSize) {
+    File f = LittleFS.open(path, "r");
+    if (!f) return false;
+
+    NetworkConfigFileHeader header;
+    if (f.read((uint8_t*)&header, sizeof(header)) != sizeof(header)) {
+        f.close();
+        return false;
+    }
+
+    if (header.magic != NETWORK_CONFIG_BLOB_MAGIC ||
+        header.formatVersion != NETWORK_CONFIG_BLOB_VERSION ||
+        header.headerSize != sizeof(NetworkConfigFileHeader) ||
+        header.configVersion > NETWORK_CONFIG_VERSION ||
+        header.payloadSize == 0 ||
+        header.payloadSize > sizeof(NetworkConfig)) {
+        f.close();
+        return false;
+    }
+
+    memset(&target, 0, sizeof(target));
+    readSize = f.read((uint8_t*)&target, header.payloadSize);
+    f.close();
+
+    if (readSize != header.payloadSize) return false;
+    if (networkCrc32((const uint8_t*)&target, readSize) != header.crc32) return false;
+    return true;
+}
+
+bool readRawNetworkConfig(const char* path, NetworkConfig& target, size_t& readSize) {
+    File f = LittleFS.open(path, "r");
+    if (!f) return false;
+
+    memset(&target, 0, sizeof(target));
+    readSize = f.read((uint8_t*)&target, sizeof(NetworkConfig));
+    f.close();
+
+    return readSize >= offsetof(NetworkConfig, readOnlyMode) &&
+           target.magic == NETWORK_CONFIG_MAGIC;
+}
+
+bool readNetworkConfigBlob(const char* path, NetworkConfig& target, size_t& readSize, bool& wrapped) {
+    wrapped = true;
+    if (readWrappedNetworkConfig(path, target, readSize)) return true;
+
+    wrapped = false;
+    return readRawNetworkConfig(path, target, readSize);
+}
+
+bool loadNetworkConfigBlob(const char* path, NetworkConfig& target, size_t& readSize, bool& wrapped) {
+    if (readNetworkConfigBlob(path, target, readSize, wrapped)) return true;
+
+    char backupPath[40];
+    if (makeNetworkSidecarPath(path, ".bak", backupPath, sizeof(backupPath))) {
+        return readNetworkConfigBlob(backupPath, target, readSize, wrapped);
+    }
+    return false;
+}
+
+bool writeNetworkConfigBlob(const char* path, const NetworkConfig& source) {
+    char tmpPath[40];
+    char backupPath[40];
+    if (!makeNetworkSidecarPath(path, ".tmp", tmpPath, sizeof(tmpPath))) return false;
+    if (!makeNetworkSidecarPath(path, ".bak", backupPath, sizeof(backupPath))) return false;
+
+    LittleFS.remove(tmpPath);
+
+    File f = LittleFS.open(tmpPath, "w");
+    if (!f) return false;
+
+    NetworkConfigFileHeader header;
+    header.magic = NETWORK_CONFIG_BLOB_MAGIC;
+    header.formatVersion = NETWORK_CONFIG_BLOB_VERSION;
+    header.headerSize = sizeof(NetworkConfigFileHeader);
+    header.configVersion = NETWORK_CONFIG_VERSION;
+    header.payloadSize = sizeof(NetworkConfig);
+    header.crc32 = networkCrc32((const uint8_t*)&source, sizeof(source));
+
+    bool ok = f.write((const uint8_t*)&header, sizeof(header)) == sizeof(header);
+    ok = ok && f.write((const uint8_t*)&source, sizeof(source)) == sizeof(source);
+    f.close();
+
+    if (!ok) {
+        LittleFS.remove(tmpPath);
+        return false;
+    }
+
+    LittleFS.remove(backupPath);
+    bool hadOriginal = LittleFS.exists(path);
+    if (hadOriginal && !LittleFS.rename(path, backupPath)) {
+        LittleFS.remove(tmpPath);
+        return false;
+    }
+
+    if (!LittleFS.rename(tmpPath, path)) {
+        if (hadOriginal) LittleFS.rename(backupPath, path);
+        LittleFS.remove(tmpPath);
+        return false;
+    }
+
+    if (hadOriginal) LittleFS.remove(backupPath);
+    return true;
+}
+}
 
 static void copyBounded(char* target, size_t targetSize, const char* source) {
     // All config strings are fixed-width fields in NetworkConfig. Always leave a terminator so older/corrupt files cannot leak into adjacent fields.
@@ -168,10 +302,7 @@ void NetworkManager::save() {
         copyBounded(_config.webPin, sizeof(_config.webPin), NETWORK_DEFAULT_WEB_PIN);
     }
 
-    File f = LittleFS.open(NETWORK_CONFIG_FILE, "w");
-    if (!f) return;
-    f.write((const uint8_t*)&_config, sizeof(NetworkConfig));
-    f.close();
+    writeNetworkConfigBlob(NETWORK_CONFIG_FILE, _config);
 }
 
 void NetworkManager::resetDefaults() {
@@ -350,12 +481,12 @@ void NetworkManager::setDefaults() {
     _config.dhcp = true;
     _config.apFallback = true;
     _config.apChannel = NETWORK_DEFAULT_AP_CHANNEL;
-    _config.readOnlyMode = false;
+    _config.readOnlyMode = true;
     _config.webHomePage = WEB_HOME_DASHBOARD;
     _config.hiddenSsid = false;
     _config.standbyMode = NETWORK_STANDBY_NETWORK;
-    _config.deviceLockEnabled = false;
-    _deviceUnlocked = true;
+    _config.deviceLockEnabled = true;
+    _deviceUnlocked = false;
     copyBounded(_config.hostname, sizeof(_config.hostname), NETWORK_DEFAULT_HOSTNAME);
     copyBounded(_config.apSsid, sizeof(_config.apSsid), NETWORK_DEFAULT_AP_SSID);
     copyBounded(_config.apPassword, sizeof(_config.apPassword), NETWORK_DEFAULT_AP_PASSWORD);
@@ -369,21 +500,13 @@ void NetworkManager::setDefaults() {
 
 void NetworkManager::load() {
     _loaded = true;
-    if (!LittleFS.exists(NETWORK_CONFIG_FILE)) {
-        setDefaults();
-        return;
-    }
-
-    File f = LittleFS.open(NETWORK_CONFIG_FILE, "r");
-    if (!f) {
-        setDefaults();
-        return;
-    }
-
     NetworkConfig loaded;
-    memset(&loaded, 0, sizeof(loaded));
-    size_t readSize = f.read((uint8_t*)&loaded, sizeof(NetworkConfig));
-    f.close();
+    size_t readSize = 0;
+    bool wrapped = false;
+    if (!loadNetworkConfigBlob(NETWORK_CONFIG_FILE, loaded, readSize, wrapped)) {
+        setDefaults();
+        return;
+    }
 
     if (loaded.magic != NETWORK_CONFIG_MAGIC) {
         setDefaults();
@@ -391,7 +514,7 @@ void NetworkManager::load() {
     }
 
     // Older versions were prefixes of the current struct. Migrate by filling the fields that did not exist in that version, then rewrite the file.
-    bool migrated = false;
+    bool migrated = !wrapped;
     if (loaded.version == 1 && readSize >= offsetof(NetworkConfig, readOnlyMode)) {
         loaded.readOnlyMode = false;
         copyBounded(loaded.webPin, sizeof(loaded.webPin), NETWORK_DEFAULT_WEB_PIN);
