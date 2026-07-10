@@ -30,6 +30,11 @@ static float clampToSpeedSettings(float freq, const SpeedSettings& s) {
     return clampOutputFrequency(freq);
 }
 
+static bool deadlinePending(uint32_t now, uint32_t deadline) {
+    // Signed subtraction keeps absolute deadlines correct across millis() rollover.
+    return deadline != 0 && (int32_t)(now - deadline) < 0;
+}
+
 MotorController::MotorController() {
     _state = ENABLE_STANDBY ? STATE_STANDBY : STATE_STOPPED;
     _currentSpeedMode = SPEED_33;
@@ -211,7 +216,7 @@ void MotorController::update() {
 
             // 1. Startup Kick Logic (High torque start)
             if (_isKicking) {
-                if (now >= _kickEndTime) {
+                if (!deadlinePending(now, _kickEndTime)) {
                     _isKicking = false;
 
                     // Transition from Kick frequency to Target frequency
@@ -1558,7 +1563,7 @@ float MotorController::applyClosedLoopCorrection(uint32_t now, float openLoopFre
         return openLoopFreq;
     }
 
-    if (now < _closedLoopEngageTime) {
+    if (deadlinePending(now, _closedLoopEngageTime)) {
         _closedLoopActive = false;
         return openLoopFreq;
     }

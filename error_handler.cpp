@@ -10,6 +10,7 @@
 #include "ui.h"
 #include "settings.h"
 #include "motor.h"
+#include "globals.h"
 
 extern UserInterface ui;
 
@@ -53,6 +54,9 @@ void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
 }
 
 void ErrorHandler::logToFile(ErrorCode code, const char* message) {
+    // Safe Mode is a read-only recovery boot. Keep serial diagnostics available without changing flash contents.
+    if (safeModeActive) return;
+
     // Keep the log bounded. A small log is enough for bench diagnostics and avoids filling the LittleFS partition after repeated warnings.
     File f = LittleFS.open("/error.log", "r");
     if (f) {
@@ -78,6 +82,7 @@ void ErrorHandler::logToFile(ErrorCode code, const char* message) {
 }
 
 void ErrorHandler::clearLogs() {
+    if (safeModeActive) return;
     LittleFS.remove("/error.log");
 }
 

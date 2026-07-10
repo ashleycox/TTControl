@@ -355,6 +355,75 @@ void setClosedLoopDefaults(GlobalSettings& data) {
     copyGlobalClosedLoopTuningToSpeeds(data);
 }
 
+void applyMotorPreset(const GlobalSettings& source, GlobalSettings& target) {
+    // Presets are motor tunes, not whole-device snapshots. Preserve runtime, names, display/UI choices, relay wiring, boot policy, and the live speed selection.
+    target.phaseMode = source.phaseMode;
+    target.maxAmplitude = source.maxAmplitude;
+    target.softStartCurve = source.softStartCurve;
+    target.smoothSwitching = source.smoothSwitching;
+    target.switchRampDuration = source.switchRampDuration;
+    target.brakeMode = source.brakeMode;
+    target.brakeDuration = source.brakeDuration;
+    target.brakePulseGap = source.brakePulseGap;
+    target.brakeStartFreq = source.brakeStartFreq;
+    target.brakeStopFreq = source.brakeStopFreq;
+    target.softStopCutoff = source.softStopCutoff;
+    target.rampType = source.rampType;
+    target.freqDependentAmplitude = source.freqDependentAmplitude;
+    target.vfLowFreq = source.vfLowFreq;
+    target.vfLowBoost = source.vfLowBoost;
+    target.vfMidFreq = source.vfMidFreq;
+    target.vfMidBoost = source.vfMidBoost;
+
+    for (int i = 0; i < 3; i++) {
+        target.speeds[i] = source.speeds[i];
+        target.closedLoopTargetRpm[i] = source.closedLoopTargetRpm[i];
+        target.closedLoopTuning[i] = source.closedLoopTuning[i];
+    }
+
+    target.closedLoopEnabled = source.closedLoopEnabled;
+    target.closedLoopControlMode = source.closedLoopControlMode;
+    target.closedLoopSensorMode = source.closedLoopSensorMode;
+    target.closedLoopCountsPerRev = source.closedLoopCountsPerRev;
+    target.closedLoopPulseEdge = source.closedLoopPulseEdge;
+    target.closedLoopQuadratureMode = source.closedLoopQuadratureMode;
+    target.closedLoopReverseDirection = source.closedLoopReverseDirection;
+    target.closedLoopDirectionFaultAction = source.closedLoopDirectionFaultAction;
+    target.closedLoopDebounceUs = source.closedLoopDebounceUs;
+    target.closedLoopTimeoutMs = source.closedLoopTimeoutMs;
+    target.closedLoopEngageDelayMs = source.closedLoopEngageDelayMs;
+    target.closedLoopUpdateIntervalMs = source.closedLoopUpdateIntervalMs;
+    target.closedLoopFilterAlpha = source.closedLoopFilterAlpha;
+    target.closedLoopDeadbandRpm = source.closedLoopDeadbandRpm;
+    target.closedLoopLockToleranceRpm = source.closedLoopLockToleranceRpm;
+    target.closedLoopLockTimeMs = source.closedLoopLockTimeMs;
+    target.closedLoopKp = source.closedLoopKp;
+    target.closedLoopKi = source.closedLoopKi;
+    target.closedLoopKd = source.closedLoopKd;
+    target.closedLoopIntegralLimitHz = source.closedLoopIntegralLimitHz;
+    target.closedLoopCorrectionLimitHz = source.closedLoopCorrectionLimitHz;
+    target.closedLoopSlewLimitHzPerSec = source.closedLoopSlewLimitHzPerSec;
+    target.closedLoopDropoutAction = source.closedLoopDropoutAction;
+    target.closedLoopRequireSignalBeforeEngage = source.closedLoopRequireSignalBeforeEngage;
+    target.closedLoopRequireNearTargetBeforeEngage = source.closedLoopRequireNearTargetBeforeEngage;
+    target.closedLoopEngageToleranceRpm = source.closedLoopEngageToleranceRpm;
+    target.closedLoopRampMode = source.closedLoopRampMode;
+    target.closedLoopRampKp = source.closedLoopRampKp;
+    target.closedLoopRampCorrectionLimitHz = source.closedLoopRampCorrectionLimitHz;
+    target.closedLoopPitchSlewRpmPerSec = source.closedLoopPitchSlewRpmPerSec;
+    target.closedLoopPitchResetThresholdRpm = source.closedLoopPitchResetThresholdRpm;
+    target.closedLoopPitchTargetMode = source.closedLoopPitchTargetMode;
+    target.closedLoopSaturationTimeMs = source.closedLoopSaturationTimeMs;
+    target.closedLoopSaturationAction = source.closedLoopSaturationAction;
+    target.closedLoopPlausibilityMinRpm = source.closedLoopPlausibilityMinRpm;
+    target.closedLoopPlausibilityMaxRpm = source.closedLoopPlausibilityMaxRpm;
+    target.closedLoopPlausibilityAction = source.closedLoopPlausibilityAction;
+    target.closedLoopLockTimeoutMs = source.closedLoopLockTimeoutMs;
+    target.closedLoopLockTimeoutAction = source.closedLoopLockTimeoutAction;
+    target.closedLoopAmpRecoveryMode = source.closedLoopAmpRecoveryMode;
+    target.closedLoopAmpRecoveryDelayMs = source.closedLoopAmpRecoveryDelayMs;
+}
+
 void copyFromV5(const GlobalSettingsV5& source, GlobalSettings& target) {
     target.schemaVersion = SETTINGS_SCHEMA_VERSION;
     target.phaseMode = source.phaseMode;
@@ -1418,7 +1487,7 @@ bool Settings::loadPreset(uint8_t slot) {
     // Loading a preset replaces the active global settings in RAM. The caller is responsible for applying the new motor/waveform settings.
     GlobalSettings temp;
     if (loadFromSlot(slot, temp)) {
-        _data = temp;
+        applyMotorPreset(temp, _data);
         validate();
         return true;
     }
