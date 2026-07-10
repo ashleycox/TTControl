@@ -916,18 +916,18 @@ bool Settings::loadFromSlot(uint8_t slot, GlobalSettings& target) {
     return loadSettingsBlob(path, PRESET_FILE_MAGIC, target);
 }
 
-void Settings::saveToSlot(uint8_t slot, const GlobalSettings& source) {
+bool Settings::saveToSlot(uint8_t slot, const GlobalSettings& source) {
     char path[32];
     snprintf(path, sizeof(path), "/preset_%d.bin", slot);
-    writeSettingsBlob(path, PRESET_FILE_MAGIC, source);
+    return writeSettingsBlob(path, PRESET_FILE_MAGIC, source);
 }
 
-void Settings::renamePreset(uint8_t slot, const char* name) {
-    if (slot >= MAX_PRESET_SLOTS) return;
+bool Settings::renamePreset(uint8_t slot, const char* name) {
+    if (slot >= MAX_PRESET_SLOTS || !name) return false;
     // Names are fixed width in GlobalSettings; truncate rather than resizing the persisted struct.
     strncpy(_data.presetNames[slot], name, 16);
     _data.presetNames[slot][16] = 0; // Ensure null termination
-    save();
+    return save();
 }
 
 void Settings::duplicatePreset(uint8_t src, uint8_t dest) {
@@ -943,9 +943,9 @@ void Settings::resetSessionRuntime() {
     _lastRuntimeUpdate = millis();
 }
 
-void Settings::resetTotalRuntime() {
+bool Settings::resetTotalRuntime() {
     _data.totalRuntime = 0;
-    save();
+    return save();
 }
 
 Settings::Settings() {
@@ -1038,25 +1038,35 @@ void Settings::load() {
     resetDefaults();
 }
 
-void Settings::save(bool verbose, bool rollbackProtected) {
+bool Settings::save(bool verbose, bool rollbackProtected) {
     if (rollbackProtected) {
         // Preserve a known-good copy before writing the candidate settings file.
         GlobalSettings knownGood;
+        bool knownGoodSaved;
         if (loadSettingsBlob(_filename, SETTINGS_FILE_MAGIC, knownGood)) {
-            writeSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, knownGood);
+            knownGoodSaved = writeSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, knownGood);
         } else {
-            writeSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, _data);
+            knownGoodSaved = writeSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, _data);
+        }
+        if (!knownGoodSaved) {
+            if (verbose) Serial.println("Failed to preserve known-good settings.");
+            return false;
         }
     }
 
     if (writeSettingsBlob(_filename, SETTINGS_FILE_MAGIC, _data)) {
         if (rollbackProtected) {
             _bootCandidateActive = true;
-            writeBootMarkerState(SETTINGS_BOOT_PENDING);
+            if (!writeBootMarkerState(SETTINGS_BOOT_PENDING)) {
+                if (verbose) Serial.println("Settings saved without rollback marker.");
+                return false;
+            }
         }
         if (verbose) Serial.println("Settings saved.");
+        return true;
     } else {
         if (verbose) Serial.println("Failed to save settings.");
+        return false;
     }
 }
 
@@ -1072,18 +1082,18 @@ void Settings::markBootSuccessful() {
     }
 }
 
-void Settings::resetDefaults() {
+bool Settings::resetDefaults() {
     setDefaults();
     writeBootMarkerState(SETTINGS_BOOT_NONE);
-    save();
+    return save();
 }
 
-void Settings::factoryReset() {
+bool Settings::factoryReset() {
     // Format filesystem to clear all settings, presets, logs, and boot markers.
-    LittleFS.format();
+    if (!LittleFS.format()) return false;
     _rollbackApplied = false;
     _bootCandidateActive = false;
-    resetDefaults();
+    return resetDefaults();
 }
 
 SpeedSettings& Settings::getCurrentSpeedSettings() {
@@ -1494,23 +1504,24 @@ bool Settings::loadPreset(uint8_t slot) {
     return false;
 }
 
-void Settings::savePreset(uint8_t slot) {
-    if (slot >= MAX_PRESET_SLOTS) return;
-    // Presets store a full GlobalSettings snapshot, not just per-speed fields.
-    saveToSlot(slot, _data);
+bool Settings::savePreset(uint8_t slot) {
+    if (slot >= MAX_PRESET_SLOTS) return false;
+    // The compatible blob remains a GlobalSettings payload; loadPreset() deliberately applies only its motor-tuning subset.
+    return saveToSlot(slot, _data);
 }
 
-void Settings::resetPreset(uint8_t slot) {
-    if (slot >= MAX_PRESET_SLOTS) return;
+bool Settings::resetPreset(uint8_t slot) {
+    if (slot >= MAX_PRESET_SLOTS) return false;
 
     char path[32];
     snprintf(path, sizeof(path), "/preset_%d.bin", slot);
-    if (LittleFS.exists(path)) {
-        LittleFS.remove(path);
-    }
+    if (LittleFS.exists(path) && !LittleFS.remove(path)) return false;
+    char sidecar[40];
+    if (makeSidecarPath(path, ".bak", sidecar, sizeof(sidecar))) LittleFS.remove(sidecar);
+    if (makeSidecarPath(path, ".tmp", sidecar, sizeof(sidecar))) LittleFS.remove(sidecar);
     // Reset name to default in the preset directory.
     snprintf(_data.presetNames[slot], 17, "Preset %d", slot + 1);
-    save();
+    return save();
 }
 
 const char* Settings::getPresetName(uint8_t slot) {
@@ -1520,9 +1531,9 @@ const char* Settings::getPresetName(uint8_t slot) {
     return _data.presetNames[slot];
 }
 
-void Settings::saveToSlot(uint8_t slot) {
+bool Settings::saveToSlot(uint8_t slot) {
     // Legacy wrapper
-    savePreset(slot);
+    return savePreset(slot);
 }
 
 void Settings::loadFromSlot(uint8_t slot) {
@@ -1791,8 +1802,7 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
     _data = liveSettings;
 
     // Save to the slot file without changing active runtime settings.
-    saveToSlot(slot, target);
-    return true;
+    return saveToSlot(slot, target);
 }
 
 void Settings::updateRuntime() {

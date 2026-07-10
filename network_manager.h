@@ -80,8 +80,8 @@ public:
     void update();
     void restart();
     void stop();
-    void save();
-    void resetDefaults();
+    bool save();
+    bool resetDefaults();
 
     bool isAvailable() const;
     bool isEnabled() const;

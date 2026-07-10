@@ -32,9 +32,9 @@ public:
      * boot as a candidate; setup clears the marker only after waveform buffers
      * are successfully running.
      */
-    void save(bool verbose = false, bool rollbackProtected = false);
-    void resetDefaults();
-    void factoryReset();
+    bool save(bool verbose = false, bool rollbackProtected = false);
+    bool resetDefaults();
+    bool factoryReset();
     void markBootSuccessful();
     bool rollbackWasApplied() const { return _rollbackApplied; }
     
@@ -48,10 +48,10 @@ public:
     ClosedLoopSpeedTuning& getClosedLoopTuning(SpeedMode speed);
 
     // --- Preset Management ---
-    void savePreset(uint8_t slot);
+    bool savePreset(uint8_t slot);
     bool loadPreset(uint8_t slot);
-    void resetPreset(uint8_t slot);
-    void renamePreset(uint8_t slot, const char* name);
+    bool resetPreset(uint8_t slot);
+    bool renamePreset(uint8_t slot, const char* name);
     void duplicatePreset(uint8_t src, uint8_t dest);
     const char* getPresetName(uint8_t slot);
     
@@ -65,7 +65,7 @@ public:
     uint32_t getSessionRuntime();
     uint32_t getTotalRuntime();
     void resetSessionRuntime();
-    void resetTotalRuntime();
+    bool resetTotalRuntime();
 
 private:
     // Current live settings. This is written directly as a binary payload, so field changes must be coordinated with types.h/config.h migrations.
@@ -85,10 +85,10 @@ private:
     void handlePendingRollback();
     
     // Internal helpers. Preset slots use the same blob format as global settings but a different file magic so the two cannot be accidentally interchanged.
-    void saveToSlot(uint8_t slot); // Legacy wrapper
+    bool saveToSlot(uint8_t slot); // Legacy wrapper
     void loadFromSlot(uint8_t slot); // Legacy wrapper
     bool loadFromSlot(uint8_t slot, GlobalSettings& target);
-    void saveToSlot(uint8_t slot, const GlobalSettings& source);
+    bool saveToSlot(uint8_t slot, const GlobalSettings& source);
 };
 
 #endif // SETTINGS_H

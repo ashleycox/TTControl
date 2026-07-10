@@ -288,7 +288,7 @@ void NetworkManager::stop() {
     _staStarted = false;
 }
 
-void NetworkManager::save() {
+bool NetworkManager::save() {
     // Normalize access-control defaults before writing. A locked/read-only web UI must always have a PIN.
     _config.magic = NETWORK_CONFIG_MAGIC;
     _config.version = NETWORK_CONFIG_VERSION;
@@ -302,12 +302,12 @@ void NetworkManager::save() {
         copyBounded(_config.webPin, sizeof(_config.webPin), NETWORK_DEFAULT_WEB_PIN);
     }
 
-    writeNetworkConfigBlob(NETWORK_CONFIG_FILE, _config);
+    return writeNetworkConfigBlob(NETWORK_CONFIG_FILE, _config);
 }
 
-void NetworkManager::resetDefaults() {
+bool NetworkManager::resetDefaults() {
     setDefaults();
-    save();
+    return save();
 }
 
 bool NetworkManager::isAvailable() const {

@@ -1774,8 +1774,13 @@ void WebInterface::handlePreferencesPost() {
     if (!parseBody(doc)) return;
 
     NetworkConfig& c = networkManager.getConfig();
+    uint8_t previousHomePage = c.webHomePage;
     setByte(doc.as<JsonObject>(), "homePage", c.webHomePage, 0, WEB_HOME_PAGE_COUNT - 1);
-    networkManager.save();
+    if (!networkManager.save()) {
+        c.webHomePage = previousHomePage;
+        sendError(500, "Failed to save web preference");
+        return;
+    }
     handlePreferencesGet();
 }
 
@@ -2540,7 +2545,10 @@ void WebInterface::handleSettingsPost() {
     motor.applySettings();
     if (doc["save"].as<bool>()) {
         // Protected save participates in the boot rollback mechanism.
-        settings.save(false, true);
+        if (!settings.save(false, true)) {
+            sendError(500, "Settings applied in RAM but could not be saved");
+            return;
+        }
     }
 
     handleSettingsGet();
@@ -2633,14 +2641,23 @@ void WebInterface::handleControl() {
     } else if (strcmp(action, "relayOff") == 0) {
         motor.endRelayTest();
     } else if (strcmp(action, "resetRuntime") == 0) {
-        settings.resetTotalRuntime();
+        if (!settings.resetTotalRuntime()) {
+            sendError(500, "Failed to save runtime reset");
+            return;
+        }
         settings.resetSessionRuntime();
     } else if (strcmp(action, "factoryReset") == 0) {
-        settings.factoryReset();
+        if (!settings.factoryReset()) {
+            sendError(500, "Factory reset failed");
+            return;
+        }
         settings.load();
         motor.endRelayTest();
         motor.applySettings();
-        networkManager.resetDefaults();
+        if (!networkManager.resetDefaults()) {
+            sendError(500, "Motor settings reset, but network defaults could not be saved");
+            return;
+        }
         networkManager.restart();
     } else if (strcmp(action, "reboot") == 0) {
         hal.watchdogReboot();
@@ -2741,6 +2758,24 @@ void WebInterface::handleNetworkPost() {
     if (!parseBody(doc)) return;
 
     NetworkConfig& c = networkManager.getConfig();
+    NetworkConfig previous = c;
+    const char* pin = doc["webPin"].as<const char*>();
+    if (!openSetup && pin && pin[0]) {
+        size_t pinLength = strlen(pin);
+        if (pinLength < 4 || pinLength > NETWORK_WEB_PIN_MAX) {
+            sendError(400, "Web PIN must be 4 to 8 characters");
+            return;
+        }
+    }
+    const char* ipKeys[] = {"staticIp", "gateway", "subnet", "dns"};
+    uint8_t parsedIps[4][4];
+    for (uint8_t i = 0; i < 4; i++) {
+        if (!doc[ipKeys[i]].isNull() && !parseIpString(doc[ipKeys[i]].as<const char*>(), parsedIps[i])) {
+            sendError(400, "Invalid IPv4 address");
+            return;
+        }
+    }
+
     setBool(doc.as<JsonObject>(), "enabled", c.enabled);
     setByte(doc.as<JsonObject>(), "mode", c.mode, NETWORK_MODE_AP, NETWORK_MODE_STA_AP);
     setBool(doc.as<JsonObject>(), "dhcp", c.dhcp);
@@ -2750,39 +2785,50 @@ void WebInterface::handleNetworkPost() {
     setByte(doc.as<JsonObject>(), "apChannel", c.apChannel, 1, 13);
     copyJsonString(c.hostname, sizeof(c.hostname), doc["hostname"], false);
     copyJsonString(c.ssid, sizeof(c.ssid), doc["ssid"], true);
-    copyJsonString(c.password, sizeof(c.password), doc["password"], true);
+    copyJsonString(c.password, sizeof(c.password), doc["password"], false);
     copyJsonString(c.apSsid, sizeof(c.apSsid), doc["apSsid"], false);
-    copyJsonString(c.apPassword, sizeof(c.apPassword), doc["apPassword"], true);
+    copyJsonString(c.apPassword, sizeof(c.apPassword), doc["apPassword"], false);
+    if (doc["clearPassword"].as<bool>()) c.password[0] = 0;
+    if (doc["clearApPassword"].as<bool>()) c.apPassword[0] = 0;
+    bool pinChanged = false;
+    bool previousDeviceLockEnabled = previous.deviceLockEnabled;
     if (!openSetup) {
         setBool(doc.as<JsonObject>(), "readOnlyMode", c.readOnlyMode);
-        bool deviceLockEnabled = c.deviceLockEnabled;
-        setBool(doc.as<JsonObject>(), "deviceLockEnabled", deviceLockEnabled);
-        networkManager.setDeviceLockEnabled(deviceLockEnabled);
+        setBool(doc.as<JsonObject>(), "deviceLockEnabled", c.deviceLockEnabled);
         setByte(doc.as<JsonObject>(), "webHomePage", c.webHomePage, 0, WEB_HOME_PAGE_COUNT - 1);
-        const char* pin = doc["webPin"].as<const char*>();
         if (pin && pin[0]) {
-            if (!networkManager.setWebPin(pin)) {
-                sendError(400, "Web PIN must be 4 to 8 characters");
-                return;
-            }
-            clearAuthToken();
+            strncpy(c.webPin, pin, sizeof(c.webPin) - 1);
+            c.webPin[sizeof(c.webPin) - 1] = 0;
+            pinChanged = true;
         }
         if ((c.readOnlyMode || c.deviceLockEnabled) && c.webPin[0] == 0) {
             strncpy(c.webPin, NETWORK_DEFAULT_WEB_PIN, sizeof(c.webPin) - 1);
             c.webPin[sizeof(c.webPin) - 1] = 0;
         }
-        if (!c.readOnlyMode && !c.deviceLockEnabled) clearAuthToken();
     }
 
-    if (!doc["staticIp"].isNull()) parseIpString(doc["staticIp"].as<const char*>(), c.staticIp);
-    if (!doc["gateway"].isNull()) parseIpString(doc["gateway"].as<const char*>(), c.gateway);
-    if (!doc["subnet"].isNull()) parseIpString(doc["subnet"].as<const char*>(), c.subnet);
-    if (!doc["dns"].isNull()) parseIpString(doc["dns"].as<const char*>(), c.dns);
+    uint8_t* ipTargets[] = {c.staticIp, c.gateway, c.subnet, c.dns};
+    for (uint8_t i = 0; i < 4; i++) {
+        if (!doc[ipKeys[i]].isNull()) memcpy(ipTargets[i], parsedIps[i], 4);
+    }
 
     bool deferEcoStandbyStop = c.enabled &&
                                c.standbyMode == NETWORK_STANDBY_ECO &&
                                motor.isStandby();
-    networkManager.save();
+    if (!networkManager.save()) {
+        c = previous;
+        sendError(500, "Network settings could not be saved");
+        return;
+    }
+    if (previousDeviceLockEnabled != c.deviceLockEnabled) {
+        networkManager.setDeviceLockEnabled(c.deviceLockEnabled);
+    }
+    if (pinChanged) {
+        clearAuthToken();
+        networkManager.lockDevice();
+    } else if (!c.readOnlyMode && !c.deviceLockEnabled) {
+        clearAuthToken();
+    }
     if (deferEcoStandbyStop) {
         // When Eco standby is selected while already in standby, return the response before the network manager turns Wi-Fi off on the next loop.
         handleNetworkGet();
@@ -2988,15 +3034,27 @@ void WebInterface::handlePresetPost() {
             return;
         }
         motor.applySettings();
-        settings.save(false, true);
+        if (!settings.save(false, true)) {
+            sendError(500, "Preset loaded in RAM but could not be saved");
+            return;
+        }
     } else if (strcmp(action, "save") == 0) {
-        settings.savePreset(slot);
+        if (!settings.savePreset(slot)) {
+            sendError(500, "Preset could not be saved");
+            return;
+        }
     } else if (strcmp(action, "rename") == 0) {
         const char* name = doc["name"].as<const char*>();
         if (!name) name = "";
-        settings.renamePreset(slot, name);
+        if (!settings.renamePreset(slot, name)) {
+            sendError(500, "Preset name could not be saved");
+            return;
+        }
     } else if (strcmp(action, "clear") == 0) {
-        settings.resetPreset(slot);
+        if (!settings.resetPreset(slot)) {
+            sendError(500, "Preset could not be cleared");
+            return;
+        }
     } else if (strcmp(action, "export") == 0) {
         if (!presetSlotExists(slot)) {
             sendError(404, "Preset slot is empty");
