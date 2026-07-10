@@ -34,6 +34,8 @@ private:
     // Single-session write token issued after a valid web PIN. It is intentionally short-lived and stored only in RAM.
     char _authToken[17];
     uint32_t _authExpiresMs;
+    uint32_t _authBlockedUntilMs;
+    uint8_t _authFailedAttempts;
 
     // WebServer's raw-body callback arrives in chunks. POST handlers parse this buffer once the body is complete, then release it immediately.
     char* _rawBody;
@@ -45,13 +47,15 @@ private:
     void setupRoutes();
     void sendJson(int code, JsonDocument& doc);
     void sendStaticHtml(PGM_P content, size_t contentLength);
+    void addCommonSecurityHeaders();
     void sendError(int code, const char* message);
     bool parseBody(JsonDocument& doc);
     void handleRawBody();
     void releaseRawBody();
     bool isOpenSetupRequest();
     bool rejectOpenSetupAccess();
-    bool hasWriteAccess();
+    bool rejectCrossOriginWrite();
+    bool hasWriteAccess(bool refreshExpiry = false);
     bool requireWriteAccess();
     void clearAuthToken();
     void issueAuthToken();

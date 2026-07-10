@@ -28,6 +28,12 @@ WebInterface webInterface;
 // Keep response and request buffers small enough for Pico RAM while still supporting the large settings/backup JSON bodies used by the web app.
 static const size_t WEB_RESPONSE_CHUNK_BYTES = 768;
 static const size_t WEB_JSON_BODY_MAX_BYTES = 12 * 1024;
+static const uint32_t WEB_AUTH_SESSION_MS = 30UL * 60UL * 1000UL;
+static const uint32_t WEB_AUTH_MAX_BACKOFF_MS = 60UL * 1000UL;
+
+static bool deadlinePending(uint32_t now, uint32_t deadline) {
+    return deadline != 0 && (int32_t)(now - deadline) < 0;
+}
 
 // Main browser UI. It is stored as a raw string so the firmware can serve the app without LittleFS assets or a build step.
 static const char INDEX_HTML[] = R"HTML(
@@ -1417,6 +1423,8 @@ WebInterface::WebInterface()
     : _server(80),
       _started(false),
       _authExpiresMs(0),
+      _authBlockedUntilMs(0),
+      _authFailedAttempts(0),
       _rawBody(nullptr),
       _rawBodyLength(0),
       _rawBodyCapacity(0),
@@ -1445,7 +1453,7 @@ bool WebInterface::isStarted() const {
 
 void WebInterface::setupRoutes() {
     // POST routes that need JSON bodies use RawJsonRequestHandler so large bodies can be collected safely before the handler runs.
-    _server.collectHeaders("X-TTControl-Token");
+    _server.collectHeaders("X-TTControl-Token", "Content-Type", "Origin");
     auto rawBody = [this]() { handleRawBody(); };
     _server.on("/", HTTP_GET, [this]() { handleRoot(); });
     _server.on("/api/auth", HTTP_GET, [this]() { handleAuthGet(); });
@@ -1471,6 +1479,7 @@ void WebInterface::setupRoutes() {
 
 void WebInterface::sendJson(int code, JsonDocument& doc) {
     // Most JSON responses are no-store so dashboards and settings do not use stale browser cache data.
+    addCommonSecurityHeaders();
     _server.sendHeader("Cache-Control", "no-store");
     _server.setContentLength(measureJson(doc));
     _server.send(code, "application/json", "", 0);
@@ -1482,6 +1491,8 @@ void WebInterface::sendJson(int code, JsonDocument& doc) {
 
 void WebInterface::sendStaticHtml(PGM_P content, size_t contentLength) {
     // Stream HTML from flash in chunks. The raw string constants are never copied into a heap String.
+    addCommonSecurityHeaders();
+    _server.sendHeader("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     _server.sendHeader("Cache-Control", "no-store");
     _server.setContentLength(contentLength);
     _server.send(200, "text/html", "", 0);
@@ -1495,6 +1506,12 @@ void WebInterface::sendStaticHtml(PGM_P content, size_t contentLength) {
     }
 }
 
+void WebInterface::addCommonSecurityHeaders() {
+    _server.sendHeader("X-Content-Type-Options", "nosniff");
+    _server.sendHeader("X-Frame-Options", "DENY");
+    _server.sendHeader("Referrer-Policy", "no-referrer");
+}
+
 void WebInterface::sendError(int code, const char* message) {
     JsonDocument doc;
     doc["ok"] = false;
@@ -1504,6 +1521,17 @@ void WebInterface::sendError(int code, const char* message) {
 
 bool WebInterface::parseBody(JsonDocument& doc) {
     // POST handlers call this once. It owns cleanup of the raw body buffer.
+    if (rejectCrossOriginWrite()) return false;
+
+    String contentType = _server.header("Content-Type");
+    int separator = contentType.indexOf(';');
+    if (separator >= 0) contentType.remove(separator);
+    contentType.trim();
+    if (!contentType.equalsIgnoreCase("application/json")) {
+        sendError(415, "Content-Type must be application/json");
+        return false;
+    }
+
     if (_rawBodyOverflow) {
         releaseRawBody();
         sendError(413, "Request body is too large");
@@ -1593,23 +1621,39 @@ bool WebInterface::rejectOpenSetupAccess() {
     return true;
 }
 
-bool WebInterface::hasWriteAccess() {
-    // Any valid write token extends the session. Read-only requests do not need a token unless they are checking unlocked state.
+bool WebInterface::rejectCrossOriginWrite() {
+    // Browser writes must come from the page served by this device. Requests without Origin remain available to serial-test tools and local API clients.
+    String origin = _server.header("Origin");
+    if (origin.length() == 0) return false;
+
+    origin.trim();
+    while (origin.endsWith("/")) origin.remove(origin.length() - 1);
+    String host = _server.hostHeader();
+    host.trim();
+    String expected = String("http://") + host;
+    if (host.length() > 0 && origin.equalsIgnoreCase(expected)) return false;
+
+    sendError(403, "Cross-origin write rejected");
+    return true;
+}
+
+bool WebInterface::hasWriteAccess(bool refreshExpiry) {
+    // Only deliberate writes refresh the inactivity deadline. Status polling must not keep an unattended browser session unlocked forever.
     if (!networkManager.isWebAccessLocked()) return true;
     uint32_t now = millis();
-    if (_authToken[0] == 0 || (int32_t)(_authExpiresMs - now) <= 0) {
+    if (_authToken[0] == 0 || !deadlinePending(now, _authExpiresMs)) {
         clearAuthToken();
         return false;
     }
     String token = _server.header("X-TTControl-Token");
     if (token.length() == 0) return false;
     if (strcmp(token.c_str(), _authToken) != 0) return false;
-    _authExpiresMs = now + 30UL * 60UL * 1000UL;
+    if (refreshExpiry) _authExpiresMs = now + WEB_AUTH_SESSION_MS;
     return true;
 }
 
 bool WebInterface::requireWriteAccess() {
-    if (hasWriteAccess()) return false;
+    if (hasWriteAccess(true)) return false;
     sendError(401, "PIN unlock required");
     return true;
 }
@@ -1620,11 +1664,11 @@ void WebInterface::clearAuthToken() {
 }
 
 void WebInterface::issueAuthToken() {
-    // Not cryptographic security; this is a local-control unlock token scoped to the device UI and expires after inactivity.
-    uint32_t a = random(0x7fffffff) ^ millis();
-    uint32_t b = random(0x7fffffff) ^ micros();
+    // Arduino-Pico sources hwrand32() from the RP2350 hardware entropy path, avoiding predictable millis-based session tokens.
+    uint32_t a = rp2040.hwrand32();
+    uint32_t b = rp2040.hwrand32();
     snprintf(_authToken, sizeof(_authToken), "%08lx%08lx", (unsigned long)a, (unsigned long)b);
-    _authExpiresMs = millis() + 30UL * 60UL * 1000UL;
+    _authExpiresMs = millis() + WEB_AUTH_SESSION_MS;
 }
 
 void WebInterface::handleRoot() {
@@ -1674,13 +1718,30 @@ void WebInterface::handleAuthPost() {
         return;
     }
 
+    uint32_t now = millis();
+    if (deadlinePending(now, _authBlockedUntilMs)) {
+        uint32_t waitSeconds = (_authBlockedUntilMs - now + 999UL) / 1000UL;
+        char retryAfter[12];
+        snprintf(retryAfter, sizeof(retryAfter), "%lu", (unsigned long)waitSeconds);
+        _server.sendHeader("Retry-After", retryAfter);
+        sendError(429, "Too many PIN attempts; try again shortly");
+        return;
+    }
+
     const char* pin = doc["pin"].as<const char*>();
     if (!networkManager.verifyWebPin(pin)) {
         clearAuthToken();
+        if (_authFailedAttempts < 10) _authFailedAttempts++;
+        uint8_t shift = _authFailedAttempts > 6 ? 6 : _authFailedAttempts;
+        uint32_t backoffMs = 1000UL << shift;
+        if (backoffMs > WEB_AUTH_MAX_BACKOFF_MS) backoffMs = WEB_AUTH_MAX_BACKOFF_MS;
+        _authBlockedUntilMs = now + backoffMs;
         sendError(401, "Incorrect PIN");
         return;
     }
 
+    _authFailedAttempts = 0;
+    _authBlockedUntilMs = 0;
     networkManager.unlockDevice(pin);
     issueAuthToken();
     const NetworkConfig& c = networkManager.getConfig();
@@ -1725,6 +1786,7 @@ void WebInterface::handleSchemaGet() {
     CountingPrint counter;
     streamSchema(counter);
 
+    addCommonSecurityHeaders();
     _server.sendHeader("Cache-Control", "no-store");
     _server.setContentLength(counter.length);
     _server.send(200, "application/json", "", 0);
@@ -2143,6 +2205,7 @@ void WebInterface::handleStatus() {
     if (rejectOpenSetupAccess()) return;
 
     // Prefer chunked streaming to keep status allocation-free. Fall back to a JsonDocument response for clients/servers that reject chunked mode.
+    addCommonSecurityHeaders();
     _server.sendHeader("Cache-Control", "no-store");
     if (_server.chunkedResponseModeStart(200, PSTR("application/json"))) {
         ServerBufferedPrint out(_server);
@@ -2161,6 +2224,7 @@ void WebInterface::handleEventsGet() {
     if (rejectOpenSetupAccess()) return;
 
     // A lightweight one-shot Server-Sent Event response. The browser reconnects and gets a fresh status event rather than holding a long-lived connection.
+    addCommonSecurityHeaders();
     _server.sendHeader("Cache-Control", "no-store");
     if (_server.chunkedResponseModeStart(200, PSTR("text/event-stream"))) {
         _server.sendContent_P(PSTR("retry: 1000\n"));
@@ -2972,6 +3036,7 @@ void WebInterface::handleErrorsGet() {
 
 void WebInterface::handleErrorsPost() {
     if (rejectOpenSetupAccess()) return;
+    if (rejectCrossOriginWrite()) return;
     if (requireWriteAccess()) return;
 
     errorHandler.clearLogs();
