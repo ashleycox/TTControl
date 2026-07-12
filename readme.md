@@ -105,6 +105,7 @@ Default angles depend on phase mode and can be adjusted.
 - **3-Phase Mode:** 0°, 120°, 240°.
 - **4-Phase Mode:** Disabled by default. Set `ENABLE_4_CHANNEL_SUPPORT` to `1` in `config.h` to enable optional four-channel/Premotec bridge presets.
 - **Configurable Phase Mode:** Phase mode configurable in menu (global setting), three-phase default. Standard firmware builds expose 1-3 phase modes; four-channel support is an explicit opt-in.
+- **Inactive Outputs:** PWM channels above the selected phase count are held at the neutral midpoint. Phase mode therefore remains effective even when mute relays are not fitted.
 - **Phase Offset Adjustment:** 0.1° resolution, -360 to +360 degrees.
 - **Independent Channel Offsets:** Independent phase offset adjustment (per-channel).
 - **Fixed Reference:** Phase A is always fixed at 0 degrees.
@@ -169,6 +170,7 @@ When `CLOSED_LOOP_SPEED_ENABLE` is `1`, GP6/GP7 become optional speed feedback i
 - **Controller Limits:** Update interval and RPM filter alpha are global. Deadband, lock tolerance/time, PID gains, integral limit, total correction limit, correction slew rate, and ramp-tracking gain/limit are configurable per speed.
 - **Guided Tuning:** OLED, Serial Monitor, and web bench controls provide a guided sequence for sensor setup, monitor-only validation, Kp tuning, Ki tuning, limit selection, and verification. The firmware reports a current recommendation such as checking the sensor signal, increasing Kp, adding small Ki, reducing hunting, or reviewing correction saturation. The Tune Apply action can apply the current safe recommendation directly.
 - **Stability Metrics:** Runtime metrics track valid and locked samples/time, average and peak RPM error, correction saturation time, dropout events, direction faults, plausibility faults, lock timeouts, amplitude recovery events, and error sign changes.
+- **Base-Frequency Calibration:** After at least 20 valid samples and 80% lock time, OLED, serial, and web controls can preview the average closed-loop correction, apply it to the current speed's base frequency in RAM, or apply and save it.
 - **Trend Capture:** The controller keeps a rolling closed-loop trend buffer with target RPM, measured RPM, error, correction, valid-signal state, and lock state for recent samples.
 - **Sensor Health:** Feedback diagnostics report accepted transitions, total transitions, invalid/debounced percentages, interval min/max/average, and interval jitter to help identify noise, missed counts, or unsuitable debounce settings.
 - **Safety Actions:** Signal dropout, correction saturation, implausible RPM readings, lock timeout, and quadrature reverse direction can be ignored, warned, held/open-loop where applicable, or escalated to motor stop depending on the configured action.
@@ -219,7 +221,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
   - **Scroll and Adjust:** Use the primary encoder to freely scroll the menu list. Turn the secondary encoder to instantly "adjust" the currently highlighted value without needing to click into it.
   - **Coarse/Fine Editing:** Click the primary encoder to explicitly enter "Edit Mode." The primary encoder now acts as a fine adjustment knob (1X steps), while the secondary encoder acts as a coarse adjustment knob (10X steps), allowing extremely rapid traversal of large values.
 - **Primary Encoder Interaction:**
-  - **Short Press:** Start/Stop Motor (or Wake from Standby).
+  - **Short Press:** Start/Stop Motor (or Wake from Standby). A running motor stops as soon as the button is released; it does not wait for the double-press window.
   - **Double Press:** Enter Main Menu.
   - **Hold (Dashboard):** Enter Standby.
   - **Hold (Menu):** Back one menu level; from Main Menu, cancel and exit.
@@ -227,7 +229,7 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
   - **Rotate:** Change Speed (33/45/78).
   - **Press + Rotate:** Cycle Status Views (Standard -> Stats -> Dim).
 - **Status Modes:**
-  - **Standard:** Large RPM display, state label, frequency readout, pitch/ramp bar, and start/brake/ramp progress when active.
+  - **Standard:** Large RPM display, state label, frequency readout, pitch/ramp bar, and start/brake/ramp progress when active. Closed-loop builds show measured RPM and use the lock icon only for a real feedback lock.
   - **Stats:** Session Runtime + Total Runtime.
   - **Dim:** Minimal display with low brightness (auto-dim supported).
 - **Auto Features:**
@@ -295,6 +297,8 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Accessibility Preferences:** The browser UI includes a remembered home page, large controls, visible focus states, reduced-motion support, semantic regions and form grouping, text status indicators that do not rely on colour alone, and labelled validation errors. Live refreshes avoid replacing a form while it contains keyboard focus.
 - **Read-Only Guest Mode:** Fresh network defaults enable read-only mode. Dashboard and status pages remain visible, while write actions require the configured web PIN until the option is disabled. The PIN can be changed from the OLED Network menu or web Network page.
 - **Browser Write Protection:** Browser writes require same-origin JSON requests. Successful PIN unlocks create random, inactivity-limited sessions; repeated failed PIN attempts receive progressively longer backoff. Security headers restrict framing, content types, referrers, and script/style sources.
+- **Strict API Input:** Settings, network, preference, and control writes reject incorrect JSON types instead of coercing text, booleans, and numbers. Responses include API version `1` in the `X-TTControl-API-Version` header.
+- **Apply Timing:** Settings help and save feedback identify values that apply immediately, on the next motor start or stop, or on the next relay transition.
 - **Shared PIN Protection:** The same PIN also supports the device UI lock. Enabling Device UI Lock from the browser, OLED System menu, or Serial Monitor requires PIN unlock before browser or serial writes and before entering the OLED settings menu.
 - **Amplifier Status:** The web status API reports amplifier temperature and thermal state when `AMP_MONITOR_ENABLE` is compiled in; the dashboard and telemetry views show the same information.
 - **Closed-Loop Status:** When `CLOSED_LOOP_SPEED_ENABLE` is compiled in, the web status API, dashboard, telemetry, diagnostics, preset JSON, backups, and bench report include control mode, sensor mode, target/requested/ramp/reference RPM, pitch target mode, live RPM, correction state, saturation, amplitude recovery, direction, pin state, setup capture state, tuning guidance, stability metrics, sensor health, and recent trend samples.
@@ -317,12 +321,12 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Non-Volatile Storage:** Non-volatile settings storage in Pico flash FS.
 - **Flash Capacity:** The Pimoroni Pico+2 has 16MB of flash, which can be split at compile time. A standard Pico has more than enough flash for this application also.
 - **Wear Levelling:** Flash wear levelling.
-- **Factory Reset:** Factory reset with two-level confirmation.
+- **Factory Reset:** Factory reset with two-level confirmation. The motor must be stopped before reset; outputs are forced off before LittleFS is formatted.
 - **Hardware Safe Mode Boot:** A catastrophic state recovery mechanism.
   - Holding down the primary encoder button during system power-on intercepts the boot sequence, bypassing loading configuration from Flash entirely.
   - The system boots directly into a safe, factory-default RAM state using the primary motor defaults, with waveform amplitude initially at 0%, no filters, and standard offsets.
-  - This prevents boot-looping or hardware damage caused by corrupted or dangerous parameters, allowing the user to examine the system or overwrite the corrupted settings.
-  - Safe Mode does not append to or clear the persistent error log, so merely entering recovery cannot write to flash.
+  - This prevents boot-looping or hardware damage caused by corrupted or dangerous parameters and keeps serial diagnostics available for inspection before a normal reboot.
+  - Safe Mode is read-only for the entire boot session. Settings, presets, runtime counters, boot confirmation, network configuration, and error logs are not written or reloaded. Wi-Fi remains off until a normal reboot.
 - **Critical Confirmations:** Confirmations for critical settings, such as phase mode and max amplitude changes.
 - **Settings File Schema:**
   - **Storage Location:** Stored on LittleFS.
@@ -382,9 +386,10 @@ The different FIR profiles provide distinct frequency responses. "Aggressive" pr
 - **Error Reporting:** Error code system to display errors on screen (configurable in menu) and via serial output (configurable in flag).
 - **Error Display Duration:** Error codes should be displayed on OLED or LCD for a configurable duration (default 10s, configurable in menu).
 - **Error Clearing:** Pressing encoder clears the error.
-- **Safety Shutdown:** Critical error paths call emergency stop, mute relays, disable waveform output, and drop standby power when standby support is enabled; warning and informational dialogs do not alter relay state.
+- **Safety Shutdown:** Critical error paths call emergency stop, mute relays, disable waveform output, and drop standby power when standby support is enabled. Start and relay-test paths remain interlocked until reboot, and the OLED shows the fault and recovery instruction.
 - **Amplifier Thermal Events:** Amplifier temperature warnings, thermal cutout trips, and amplifier over-temperature shutdowns are logged as `ERR_AMP_THERMAL`.
 - **Reset-Cause Events:** Each boot logs the best-effort reset cause reported by the Arduino-Pico core, including watchdog, soft reset, run-pin reset, power-on, brownout, debug, glitch, or unknown reset.
+- **Session IDs:** Error-log lines and status diagnostics include a random boot-session ID so entries can be grouped across watchdog resets even though millisecond timestamps restart at zero.
 
 ## 3. User Interface
 
@@ -445,6 +450,7 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `cl tune suggest` | Show the current closed-loop tuning recommendation only |
 | `cl tune apply` | Apply the current safe tuning recommendation, when one is available |
 | `cl tune stop` | Stop the guided tuning workflow |
+| `cl calibrate preview\|apply\|save` | Preview, apply in RAM, or save a base-frequency adjustment derived from stable average closed-loop correction |
 | `diag safety` | Run a non-actuating safety diagnostic covering settings ranges, thermal thresholds, and expected start/stop/emergency/standby outcomes |
 | `wifi help` | List Serial Monitor Wi-Fi setup commands when network support is enabled |
 | `wifi status` | Show current network state, active IP address, SSID, AP status, MAC, and RSSI |
@@ -462,7 +468,8 @@ Connect at 115200 baud. The CLI supports a registry of settings that can be acce
 | `wifi reset` | Restore network defaults and reconnect |
 | `error dump` | Dump error log |
 | `error clear` | Clear error log |
-| `f` | Factory Reset |
+| `f` or `factory reset` | Request factory reset confirmation |
+| `factory reset confirm` | Erase settings and restore defaults; the motor must be stopped |
 
 #### Available Settings Keys
 
@@ -733,6 +740,9 @@ Visible only when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
     - **Apply:** Reconfigure feedback immediately.
     - **Reset PID:** Clear controller state and feedback counters.
     - **Sensor Test:** Show current feedback signal and RPM status.
+    - **Base Preview:** Show the current base frequency, average correction, and proposed calibrated value.
+    - **Base Apply:** Apply the proposed base frequency in RAM.
+    - **Base Save:** Apply and persist the proposed base frequency.
   - **Setup**
     - **Setup Start:** Begin a one-revolution setup capture.
     - **Setup Stat:** Show captured count, direction, and suggested counts/rev.
