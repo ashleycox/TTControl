@@ -30,6 +30,7 @@ static const size_t WEB_RESPONSE_CHUNK_BYTES = 768;
 static const size_t WEB_JSON_BODY_MAX_BYTES = 12 * 1024;
 static const uint32_t WEB_AUTH_SESSION_MS = 30UL * 60UL * 1000UL;
 static const uint32_t WEB_AUTH_MAX_BACKOFF_MS = 60UL * 1000UL;
+static const char* WEB_API_VERSION = "1";
 
 static bool deadlinePending(uint32_t now, uint32_t deadline) {
     return deadline != 0 && (int32_t)(now - deadline) < 0;
@@ -323,7 +324,8 @@ function sameValue(a,b){if(typeof a==="number"||typeof b==="number")return Math.
 function diffs(from,to){const a=flatten(from),b=flatten(to),keys=new Set([...Object.keys(a),...Object.keys(b)]),out=[];keys.forEach(k=>{if(!sameValue(a[k],b[k]))out.push({path:k,from:a[k],to:b[k]})});return out}
 function displayValue(path,value){if(typeof value==="boolean")return value?"on":"off";const parts=path.split(".");let f=null;if(parts[0]==="global")f=findField(globalFields(),parts[1]);if(parts[0]==="network")f=findField(networkFields,parts[1]);if(parts[0]==="speeds"){const key=parts[2]==="phaseOffset"?`phase${parts[3]}`:parts[2];f=findField(speedFields,key)}if(f&&f.t==="select")return optionLabel(f.o,value);return String(value)}
 function validIpAddr(v){return /^(\d{1,3}\.){3}\d{1,3}$/.test(v)&&v.split(".").every(x=>Number(x)>=0&&Number(x)<=255)}
-function fieldHelpMeta(field){const bits=[];if(field.unit)bits.push(`Unit: ${field.unit}`);if(field.t==="number")bits.push(`Range: ${field.min} to ${field.max}, step ${field.step}`);if(field.t==="select")bits.push(`Choices: ${(options[field.o]||[]).map(o=>o[1]).join(", ")}`);if(field.maxLength)bits.push(`Maximum length: ${field.maxLength}`);if(field.t==="password"&&field.minLength)bits.push(`Minimum length when changed: ${field.minLength}`);bits.push(`Key: ${field.k}`);return bits}
+function applyTimingForKey(key){const nextStart=new Set(["maxAmplitude","freqDependentAmplitude","vfLowFreq","vfLowBoost","vfMidFreq","vfMidBoost","rampType","softStartCurve","autoStart","softStartDuration","reducedAmplitude","amplitudeDelay","startupKick","startupKickDuration","startupKickRampDuration"]),nextStop=new Set(["brakeMode","brakeDuration","brakePulseGap","brakeStartFreq","brakeStopFreq","softStopCutoff"]),stopped=new Set(["relayActiveHigh","muteRelayLinkStandby","muteRelayLinkStartStop","powerOnRelayDelay"]);if(nextStart.has(key))return"Applies on the next motor start";if(nextStop.has(key))return"Applies on the next stop";if(stopped.has(key))return"Change while stopped; applies on the next relay transition";return"Applies immediately"}
+function fieldHelpMeta(field){const bits=[];if(field.unit)bits.push(`Unit: ${field.unit}`);if(field.t==="number")bits.push(`Range: ${field.min} to ${field.max}, step ${field.step}`);if(field.t==="select")bits.push(`Choices: ${(options[field.o]||[]).map(o=>o[1]).join(", ")}`);if(field.maxLength)bits.push(`Maximum length: ${field.maxLength}`);if(field.t==="password"&&field.minLength)bits.push(`Minimum length when changed: ${field.minLength}`);bits.push(applyTimingForKey(field.k));bits.push(`Key: ${field.k}`);return bits}
 function fieldHelpHtml(id,field){const meta=fieldHelpMeta(field),help=field.help||"No extra guidance is available for this setting.";return `<div id="${id}_detail" class="help-panel hide"><p>${esc(help)}</p>${field.safety?`<p><strong>Safety-related:</strong> changes can affect motor drive, relay state, or output behavior.</p>`:""}<p class="setting-meta">${esc(meta.join(" | "))}</p></div>`}
 function toggleFieldHelp(button){const panel=$(button.dataset.help);if(!panel)return;const open=panel.classList.toggle("hide")===false;button.setAttribute("aria-expanded",String(open))}
 function makeField(scope,field,value,index){const id=inputId(scope,field.k,index);const wrap=document.createElement("div");wrap.className=`field${field.safety?" safety":""}`;wrap.dataset.search=`${field.l||""} ${field.help||""} ${field.k||""}`.toLowerCase();const helpButton=`<button type="button" class="help-button" data-help="${id}_detail" aria-controls="${id}_detail" aria-expanded="false" aria-label="Help for ${esc(field.l)}">Help</button>`;const help=fieldHelpHtml(id,field);const err=`<div id="${id}_err" class="field-error" aria-live="polite"></div>`;const described=`aria-describedby="${id}_detail ${id}_err" aria-invalid="false"`;if(field.t==="checkbox"){wrap.innerHTML=`<div class="field-head"><label class="check-row"><input id="${id}" type="checkbox" ${described}${value?" checked":""}> <span>${esc(field.l)}</span></label>${helpButton}</div>${help}${err}`;wrap.querySelector("[data-help]").onclick=e=>toggleFieldHelp(e.currentTarget);return wrap}let control="";if(field.t==="select"){control=`<select id="${id}" ${described}>${(options[field.o]||[]).map(([v,l])=>`<option value="${v}"${Number(value)===Number(v)?" selected":""}>${esc(l)}</option>`).join("")}</select>`}else{const type=field.t==="password"?"password":field.t==="text"?"text":"number";let attrs=` type="${type}" value="${esc(value??"")}" ${described}`;if(field.t==="number")attrs+=` min="${field.min}" max="${field.max}" step="${field.step}"`;if(field.maxLength)attrs+=` maxlength="${field.maxLength}"`;if(field.t==="password")attrs+=` autocomplete="new-password"`;control=`<input id="${id}"${attrs}>`}wrap.innerHTML=`<div class="field-head"><label for="${id}">${esc(field.l)}</label>${helpButton}</div>${control}${help}${err}`;wrap.querySelector("[data-help]").onclick=e=>toggleFieldHelp(e.currentTarget);return wrap}
@@ -357,7 +359,7 @@ function captureSpeedTab(){if(!settingsData||!$("speedSettings").children.length
 function renderSpeedSettings(){if(!settingsData)return;if(!is78Enabled()&&speedTab===2)speedTab=0;document.querySelectorAll("[data-speed-tab]").forEach(b=>{const selected=Number(b.dataset.speedTab)===speedTab;b.setAttribute("aria-selected",String(selected));b.tabIndex=selected?0:-1});const root=$("speedSettings");root.innerHTML="";const speed=settingsData.speeds[speedTab];for(const [title,fields] of fieldGroups(speedFields,speedFieldGroups))appendFieldGroup(root,`${speedNames[speedTab]} ${title}`,fields,"speed",speed,speedTab);wireForm($("settings"),()=>{validateSettingsForm(false);updateSettingsDirty()});updateSettingsDirty();filterSettings();sync78Controls(authState&&authState.required&&!authState.unlocked)}
 async function loadSchema(){const s=await api("/api/schema");speedNames=s.speedNames||speedNames;options=s.options||{};globalGroups=s.globalGroups||[];speedFields=s.speedFields||[];networkFields=s.networkFields||[]}
 async function loadSettings(){settingsData=await api("/api/settings");baselineSettings=settingsComparable(settingsData);renderSettings();renderCalibrationTools()}
-async function applySettings(save){if(!validateSettingsForm(true)){setLive("Fix setting errors before applying");return}if(save){const review=reviewSettingsChanges();if(review&&review!=="No pending setting changes."&&!confirm(`Save these changes?\n\n${review.slice(0,1200)}`))return}settingsData=await api("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(currentSettings(save))});baselineSettings=settingsComparable(settingsData);renderSettings();addEvent(save?"Settings saved":"Settings applied");setLive(save?"Settings saved":"Settings applied")}
+async function applySettings(save){if(!validateSettingsForm(true)){setLive("Fix setting errors before applying");return}const changes=baselineSettings?diffs(baselineSettings,settingsComparable(currentSettings(false))):[],deferred=changes.filter(x=>{const p=x.path.split(".");return applyTimingForKey(p[0]==="speeds"?p[2]:p[1])!=="Applies immediately"});if(save){const review=reviewSettingsChanges();if(review&&review!=="No pending setting changes."&&!confirm(`Save these changes?\n\n${review.slice(0,1200)}`))return}settingsData=await api("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(currentSettings(save))});baselineSettings=settingsComparable(settingsData);renderSettings();addEvent(save?"Settings saved":"Settings applied");const base=save?"Settings saved":"Settings applied";setLive(deferred.length?`${base}. ${deferred.length} change${deferred.length===1?"":"s"} will take effect on the next motor or relay transition.`:base)}
 function speedSelect(id){return `<select id="${id}">${speedNames.map((n,i)=>`<option value="${i}"${i===2&&!is78Enabled()?" hidden":""}>${n}</option>`).join("")}</select>`}
 function renderCalStepper(){const names=["Frequency","Phase","Kick","Brake","Amplitude"],stepper=$("calStepper");if(!stepper)return;stepper.innerHTML=names.map((n,i)=>`<button data-cal-step="${i}" aria-current="${i===activeCalStep?"step":"false"}"><span class="ico" aria-hidden="true">${i+1}</span>${n}</button>`).join("");stepper.querySelectorAll("[data-cal-step]").forEach(b=>b.onclick=()=>{activeCalStep=Number(b.dataset.calStep);renderCalStepper();document.querySelectorAll("#calibrationTools .cal-card").forEach((p,i)=>p.classList.toggle("active-cal",i===activeCalStep))})}
 function renderCalibrationTools(){if(!settingsData)return;const root=$("calibrationTools");if(!root)return;root.innerHTML=`<div class="panel cal-card"><h2>Speed frequency</h2><div class="field"><label for="calSpeed">Speed</label>${speedSelect("calSpeed")}</div><div class="field"><label for="calFreq">Frequency Hz</label><input id="calFreq" type="number" min="10" max="1500" step="0.1"></div><div class="button-row"><button data-cal="frequency">Apply</button><button data-cal="frequencySave" class="primary">Save</button></div></div><div class="panel cal-card"><h2>Phase offsets</h2><div class="field"><label for="calPhaseSpeed">Speed</label>${speedSelect("calPhaseSpeed")}</div>${[1,2,3,4].map(i=>`<div class="field"><label for="calPhase${i}">Phase ${i} degrees</label><input id="calPhase${i}" type="number" min="-360" max="360" step="0.1"></div>`).join("")}<div class="button-row"><button data-cal="phase">Apply</button><button data-cal="phaseSave" class="primary">Save</button></div></div><div class="panel cal-card"><h2>Startup kick</h2><div class="field"><label for="calKickSpeed">Speed</label>${speedSelect("calKickSpeed")}</div><div class="field"><label for="calKick">Kick multiplier</label><input id="calKick" type="number" min="1" max="4" step="1"></div><div class="field"><label for="calKickDur">Kick duration sec</label><input id="calKickDur" type="number" min="0" max="15" step="1"></div><div class="field"><label for="calKickRamp">Kick ramp sec</label><input id="calKickRamp" type="number" min="0" max="15" step="0.1"></div><div class="button-row"><button data-cal="kick">Apply</button><button data-cal="kickSave" class="primary">Save</button></div></div><div class="panel cal-card"><h2>Braking</h2><div class="field"><label for="calBrakeMode">Brake mode</label><select id="calBrakeMode">${(options.brakeMode||[]).map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join("")}</select></div><div class="field"><label for="calBrakeDur">Duration sec</label><input id="calBrakeDur" type="number" min="0" max="10" step="0.1"></div><div class="field"><label for="calBrakeStart">Start frequency Hz</label><input id="calBrakeStart" type="number" min="10" max="200" step="1"></div><div class="field"><label for="calBrakeStop">Stop frequency Hz</label><input id="calBrakeStop" type="number" min="0" max="50" step="1"></div><div class="button-row"><button data-cal="brake">Apply</button><button data-cal="brakeSave" class="primary">Save</button></div></div><div class="panel cal-card"><h2>Amplitude</h2><div class="field"><label for="calAmpSpeed">Speed</label>${speedSelect("calAmpSpeed")}</div><div class="field"><label for="calMaxAmp">Global maximum amplitude percent</label><input id="calMaxAmp" type="number" min="0" max="100" step="1"></div><div class="field"><label for="calRedAmp">Reduced amplitude percent</label><input id="calRedAmp" type="number" min="10" max="100" step="1"></div><div class="button-row"><button data-cal="amp">Apply</button><button data-cal="ampSave" class="primary">Save</button></div></div>`;if(activeCalStep>4)activeCalStep=0;document.querySelectorAll("#calibrationTools .cal-card").forEach((p,i)=>p.classList.toggle("active-cal",i===activeCalStep));renderCalStepper();document.querySelectorAll("[data-cal]").forEach(b=>b.onclick=()=>applyCalibration(b.dataset.cal));fillCalibration()}
@@ -391,7 +393,7 @@ function renderStatus(){if(!statusData)return;const m=statusData.motor,ampText=s
 async function loadStatus(){statusData=await api("/api/status");renderStatus()}
 function startStatusStream(){if(!("EventSource" in window)){setInterval(loadStatus,1000);return}let fallback=false;const es=new EventSource("/api/events");es.addEventListener("status",e=>{try{statusData=JSON.parse(e.data);renderStatus()}catch(err){}});es.onerror=()=>{if(!fallback&&!telemetry.length){fallback=true;es.close();setInterval(loadStatus,1000)}}}
 async function setSpeedControl(speed){if(Number(speed)===2&&!is78Enabled()){const msg=disabled78Message();alert(msg);setLive(msg);return}await control("setSpeed",{speed:Number(speed)})}
-async function control(action,extra={}){const enteringEcoStandby=action==="toggleStandby"&&isEcoStandbyMode()&&!isStandbyActive();await api("/api/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action},extra))});addEvent(`Command ${action}`);if(enteringEcoStandby){if(statusData&&statusData.motor){statusData.motor.standby=true;statusData.motor.state="STANDBY";statusData.motor.running=false}setLive("Eco standby active. Wake from the device controls to reconnect Wi-Fi.");renderStatus();return}await loadStatus()}
+async function control(action,extra={}){const enteringEcoStandby=action==="toggleStandby"&&isEcoStandbyMode()&&!isStandbyActive();const result=await api("/api/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({action},extra))});addEvent(`Command ${action}`);if(result.calibration?.message)setLive(result.calibration.message);if(enteringEcoStandby){if(statusData&&statusData.motor){statusData.motor.standby=true;statusData.motor.state="STANDBY";statusData.motor.running=false}setLive("Eco standby active. Wake from the device controls to reconnect Wi-Fi.");renderStatus();return result}await loadStatus();return result}
 function currentPresetShape(){const g=settingsComparable(currentSettings(false)).global,out={pm:g.phaseMode,maxAmp:g.maxAmplitude,ssCurve:g.softStartCurve,fda:g.freqDependentAmplitude,vfLF:g.vfLowFreq,vfLB:g.vfLowBoost,vfMF:g.vfMidFreq,vfMB:g.vfMidBoost,brkMd:g.brakeMode,brkDur:g.brakeDuration,brkPG:g.brakePulseGap,brkSF:g.brakeStartFreq,brkStF:g.brakeStopFreq,brkCut:g.softStopCutoff,speeds:settingsData.speeds.map(s=>({f:s.frequency,minF:s.minFrequency,maxF:s.maxFrequency,ph:[...s.phaseOffset],ssD:s.softStartDuration,rAmp:s.reducedAmplitude,aDly:s.amplitudeDelay,kick:s.startupKick,kDur:s.startupKickDuration,kRmp:s.startupKickRampDuration,fTyp:s.filterType,iir:s.iirAlpha,fir:s.firProfile}))};if(g.closedLoopEnabled!==undefined){const tune=settingsData.speeds.map(s=>({db:s.closedLoopDeadbandRpm,lock:s.closedLoopLockToleranceRpm,lockMs:s.closedLoopLockTimeMs,kp:s.closedLoopKp,ki:s.closedLoopKi,kd:s.closedLoopKd,iLim:s.closedLoopIntegralLimitHz,cLim:s.closedLoopCorrectionLimitHz,slew:s.closedLoopSlewLimitHzPerSec,rKp:s.closedLoopRampKp,rLim:s.closedLoopRampCorrectionLimitHz}));Object.assign(out,{clEn:g.closedLoopEnabled,clCtrl:g.closedLoopControlMode,clMd:g.closedLoopSensorMode,clT:[g.closedLoopTargetRpm33,g.closedLoopTargetRpm45,g.closedLoopTargetRpm78],clCpr:g.closedLoopCountsPerRev,clEdge:g.closedLoopPulseEdge,clQuad:g.closedLoopQuadratureMode,clRev:g.closedLoopReverseDirection,clDir:g.closedLoopDirectionFaultAction,clDb:g.closedLoopDebounceUs,clTo:g.closedLoopTimeoutMs,clEng:g.closedLoopEngageDelayMs,clUpd:g.closedLoopUpdateIntervalMs,clAlpha:g.closedLoopFilterAlpha,clDbnd:tune[0].db,clLock:tune[0].lock,clLockMs:tune[0].lockMs,clKp:tune[0].kp,clKi:tune[0].ki,clKd:tune[0].kd,clILim:tune[0].iLim,clCLim:tune[0].cLim,clSlew:tune[0].slew,clDrop:g.closedLoopDropoutAction,clReqSig:g.closedLoopRequireSignalBeforeEngage,clReqNear:g.closedLoopRequireNearTargetBeforeEngage,clEngTol:g.closedLoopEngageToleranceRpm,clRamp:g.closedLoopRampMode,clRampKp:tune[0].rKp,clRampLim:tune[0].rLim,clPitchMode:g.closedLoopPitchTargetMode,clTune:tune,clPitchSlew:g.closedLoopPitchSlewRpmPerSec,clPitchReset:g.closedLoopPitchResetThresholdRpm,clSatMs:g.closedLoopSaturationTimeMs,clSatAct:g.closedLoopSaturationAction,clMinRpm:g.closedLoopPlausibilityMinRpm,clMaxRpm:g.closedLoopPlausibilityMaxRpm,clPlausAct:g.closedLoopPlausibilityAction,clLockTo:g.closedLoopLockTimeoutMs,clLockAct:g.closedLoopLockTimeoutAction,clAmpRec:g.closedLoopAmpRecoveryMode,clAmpRecMs:g.closedLoopAmpRecoveryDelayMs})}return out}
 function presetPathLabel(path){const names={pm:"Phase mode",maxAmp:"Maximum amplitude",ssCurve:"Soft start curve",fda:"V/f blend",vfLF:"V/f low frequency",vfLB:"V/f low boost",vfMF:"V/f mid frequency",vfMB:"V/f mid boost",clEn:"Closed-loop enabled",clCtrl:"Closed-loop control mode",clMd:"Closed-loop sensor mode",clCpr:"Closed-loop counts per revolution",clEdge:"Closed-loop pulse edge",clQuad:"Closed-loop quadrature decode",clRev:"Closed-loop reverse direction",clDir:"Closed-loop direction fault",clDb:"Closed-loop debounce",clTo:"Closed-loop timeout",clEng:"Closed-loop engage delay",clUpd:"Closed-loop update interval",clAlpha:"Closed-loop filter alpha",clDbnd:"Closed-loop deadband",clLock:"Closed-loop lock tolerance",clLockMs:"Closed-loop lock time",clKp:"Closed-loop Kp",clKi:"Closed-loop Ki",clKd:"Closed-loop Kd",clILim:"Closed-loop integral limit",clCLim:"Closed-loop correction limit",clSlew:"Closed-loop slew limit",clDrop:"Closed-loop dropout action",clReqSig:"Closed-loop require signal",clReqNear:"Closed-loop require near target",clEngTol:"Closed-loop engage tolerance",clRamp:"Closed-loop ramp correction",clRampKp:"Closed-loop ramp Kp",clRampLim:"Closed-loop ramp correction limit",clPitchMode:"Closed-loop pitch target mode",clPitchSlew:"Closed-loop pitch target slew",clPitchReset:"Closed-loop pitch reset threshold",clSatMs:"Closed-loop saturation time",clSatAct:"Closed-loop saturation action",clMinRpm:"Closed-loop minimum plausible RPM",clMaxRpm:"Closed-loop maximum plausible RPM",clPlausAct:"Closed-loop plausibility action",clLockTo:"Closed-loop lock timeout",clLockAct:"Closed-loop lock timeout action",clAmpRec:"Closed-loop amplitude recovery",clAmpRecMs:"Closed-loop amplitude recovery delay",brkMd:"Brake mode",brkDur:"Brake duration",brkPG:"Brake pulse gap",brkSF:"Brake start frequency",brkStF:"Brake stop frequency",brkCut:"Soft stop cutoff",f:"Frequency",minF:"Minimum frequency",maxF:"Maximum frequency",ssD:"Soft start duration",rAmp:"Reduced amplitude",aDly:"Amplitude delay",kick:"Startup kick",kDur:"Startup kick duration",kRmp:"Startup kick ramp",fTyp:"Filter type",iir:"IIR alpha",fir:"FIR profile"};const p=path.split(".");if(p[0]==="clT")return `${speedNames[Number(p[1])]} target RPM`;if(p[0]==="speeds"){if(p[2]==="ph")return `${speedNames[Number(p[1])]} phase ${Number(p[3])+1} offset`;return `${speedNames[Number(p[1])]} ${names[p[2]]||p[2]}`}return names[path]||path}
 function renderPresetDiff(slot,title,d,report=null){const box=$(`presetPreview${slot}`);if(!box)return;box.classList.remove("hide");const diffText=d&&d.length?d.slice(0,36).map(x=>`${presetPathLabel(x.path)}: ${displayValue(x.path,x.from)} -> ${displayValue(x.path,x.to)}`).join("\n")+(d.length>36?`\n${d.length-36} more changes.`:""):"No differences from current motor settings.";if(report){renderReport(box,title,report,`<h4>Previewed changes</h4><pre>${esc(diffText)}</pre>`);return}box.textContent=`${title}\n${diffText}`}
@@ -412,7 +414,7 @@ if(!root||currentTab!=="bench")return;
 if(root.contains(document.activeElement))return;
 const m=statusData?.motor||{},a=statusData?.amp||{},ampText=a.enabled?`${Number(a.temperatureC).toFixed(1)} C, ${a.thermalOk?"OK":"TRIPPED"}`:"not enabled",cl=m.closedLoop||{},setup=cl.setup||{},clTile=closedLoopTileHtml(cl);
 const metrics=cl.metrics||{},tune=cl.tuning||{},health=cl.health||{},trend=cl.trend||[],lastTrend=trend[trend.length-1]||{},lockPct=metrics.validSamples?Math.round((metrics.lockedSamples||0)*100/metrics.validSamples):0;
-const clSetupCard=cl.compiled?`<div class="bench-card"><h3>Closed-loop setup</h3><p>Status: ${esc(cl.enabled?closedLoopStatusText(cl):"off")}</p><p>Pitch target: ${esc(optionLabel("closedLoopPitchTargetMode",cl.pitchTargetMode))}, reference ${Number(cl.referenceTargetRpm||0).toFixed(3)} RPM, offset ${Number(cl.pitchOffsetRpm||0).toFixed(3)} RPM</p><p>Setup: ${setup.active?`${Number(setup.countDelta||0)} counts, ${Number(setup.invalidDelta||0)} invalid, ${Number(setup.debouncedDelta||0)} debounced`:"idle"}</p><p>Suggested counts/rev: ${Number(setup.suggestedCountsPerRev||0)}</p><p>Pins: A ${setup.pinAHigh?"high":"low"}, B ${setup.pinBHigh?"high":"low"}</p><p>Tune: ${esc(tune.stepName||"Idle")} - ${esc(tune.recommendation||"-")}</p><p>Stability: lock ${lockPct}%, avg ${Number(metrics.averageAbsErrorRpm||0).toFixed(3)} RPM, peak ${Number(metrics.peakAbsErrorRpm||0).toFixed(3)} RPM</p><p>Events: ${Number(metrics.dropoutEvents||0)} dropouts, ${Number(metrics.saturationEvents||0)} saturation</p><p>Sensor: ${Number(health.acceptedTransitions||0)} accepted, invalid ${Number(health.invalidTransitionPercent||0).toFixed(1)}%, debounced ${Number(health.debouncedTransitionPercent||0).toFixed(1)}%, jitter ${Number(health.averageJitterPercent||0).toFixed(2)}%</p><p>Trend: ${trend.length} samples${trend.length?`, error ${Number(lastTrend.errorRpm||0).toFixed(3)} RPM, correction ${Number(lastTrend.correctionHz||0).toFixed(3)} Hz`:""}</p><div class="button-row"><button data-bench="closedLoopReset">Reset controller</button><button data-bench="closedLoopSetupStart">Start setup</button><button data-bench="closedLoopSetupApply">Apply setup</button><button data-bench="closedLoopSetupStop">Stop setup</button><button data-bench="closedLoopTuneStart">Tune start</button><button data-bench="closedLoopTuneNext">Tune next</button><button data-bench="closedLoopTuneApply"${tune.canApplyRecommendation?"":" disabled"}>Tune apply</button><button data-bench="closedLoopTuneStop">Tune stop</button></div></div>`:"";
+const clSetupCard=cl.compiled?`<div class="bench-card"><h3>Closed-loop setup</h3><p>Status: ${esc(cl.enabled?closedLoopStatusText(cl):"off")}</p><p>Pitch target: ${esc(optionLabel("closedLoopPitchTargetMode",cl.pitchTargetMode))}, reference ${Number(cl.referenceTargetRpm||0).toFixed(3)} RPM, offset ${Number(cl.pitchOffsetRpm||0).toFixed(3)} RPM</p><p>Setup: ${setup.active?`${Number(setup.countDelta||0)} counts, ${Number(setup.invalidDelta||0)} invalid, ${Number(setup.debouncedDelta||0)} debounced`:"idle"}</p><p>Suggested counts/rev: ${Number(setup.suggestedCountsPerRev||0)}</p><p>Pins: A ${setup.pinAHigh?"high":"low"}, B ${setup.pinBHigh?"high":"low"}</p><p>Tune: ${esc(tune.stepName||"Idle")} - ${esc(tune.recommendation||"-")}</p><p>Stability: lock ${lockPct}%, avg ${Number(metrics.averageAbsErrorRpm||0).toFixed(3)} RPM, peak ${Number(metrics.peakAbsErrorRpm||0).toFixed(3)} RPM, correction ${Number(metrics.averageCorrectionHz||0).toFixed(3)} Hz</p><p>Events: ${Number(metrics.dropoutEvents||0)} dropouts, ${Number(metrics.saturationEvents||0)} saturation</p><p>Sensor: ${Number(health.acceptedTransitions||0)} accepted, invalid ${Number(health.invalidTransitionPercent||0).toFixed(1)}%, debounced ${Number(health.debouncedTransitionPercent||0).toFixed(1)}%, jitter ${Number(health.averageJitterPercent||0).toFixed(2)}%</p><p>Trend: ${trend.length} samples${trend.length?`, error ${Number(lastTrend.errorRpm||0).toFixed(3)} RPM, correction ${Number(lastTrend.correctionHz||0).toFixed(3)} Hz`:""}</p><div class="button-row"><button data-bench="closedLoopReset">Reset controller</button><button data-bench="closedLoopSetupStart">Start setup</button><button data-bench="closedLoopSetupApply">Apply setup</button><button data-bench="closedLoopSetupStop">Stop setup</button><button data-bench="closedLoopTuneStart">Tune start</button><button data-bench="closedLoopTuneNext">Tune next</button><button data-bench="closedLoopTuneApply"${tune.canApplyRecommendation?"":" disabled"}>Tune apply</button><button data-bench="closedLoopTuneStop">Tune stop</button><button data-bench="closedLoopBasePreview">Preview base</button><button data-bench="closedLoopBaseApply">Apply base</button><button data-bench="closedLoopBaseSave">Save base</button></div></div>`:"";
 root.innerHTML=`<div class="panel section-head"><h2>Bench test</h2><div class="dash-grid"><div class="dash-tile"><span>Motor state</span><strong>${esc(m.state||"-")}</strong></div><div class="dash-tile"><span>Relay test</span><strong>${m.relayTest?"On":"Off"}</strong></div><div class="dash-tile"><span>Amplifier</span><strong>${esc(ampText)}</strong></div>${clTile}</div></div><div class="bench-grid"><div class="bench-card"><h3>Pre-check</h3><div class="button-row"><button id="benchRefresh">Refresh diagnostics</button><button class="danger" data-bench="emergencyStop">Emergency stop</button><button data-bench="stop">Stop</button></div><p>Safe mode: ${diagnosticsData?.safeMode?"yes":"no"}</p><p>Network: ${esc(statusData?.network?.status||"-")} ${esc(statusData?.network?.ip||"")}</p></div><div class="bench-card"><h3>Relay outputs</h3><div class="field"><label for="benchRelayStage">Relay output</label><select id="benchRelayStage">${relayStageOptions()}</select></div><div class="button-row"><button data-bench="relayTest">Set output</button><button data-bench="relayOff">All off</button></div></div><div class="bench-card"><h3>Brake test</h3><div class="button-row"><button class="good" data-bench="start">Start motor</button><button class="danger" data-bench="stop">Brake stop</button><button class="danger" data-bench="emergencyStop">Emergency stop</button></div></div><div class="bench-card"><h3>Speed and pitch</h3><div class="button-row"><button data-bench-speed="0">33 RPM</button><button data-bench-speed="1">45 RPM</button><button data-bench-speed="2">78 RPM</button><button data-bench="resetPitch">Reset pitch</button></div><div class="field"><label for="benchPitch">Pitch percent</label><input id="benchPitch" type="number" min="-50" max="50" step="0.1" value="${m.pitch!==undefined?Number(m.pitch).toFixed(1):"0"}"></div><button id="benchSetPitch">Set pitch</button></div>${clSetupCard}<div class="bench-card"><h3>Report</h3><div class="button-row"><button id="benchMakeReport">Generate report</button></div><textarea id="benchReport" aria-label="Bench test report">${esc(benchReportText())}</textarea></div></div>`;
 $("benchRelayStage").value=String(m.relayStage||0);
 $("benchRefresh").onclick=()=>loadDiagnostics().catch(e=>setLive(e.message));
@@ -852,9 +854,27 @@ static int clampIntValue(int value, int minValue, int maxValue) {
     return value;
 }
 
+static bool jsonMutationValid = true;
+static char jsonMutationError[96] = "";
+
+static void beginJsonMutation() {
+    jsonMutationValid = true;
+    jsonMutationError[0] = 0;
+}
+
+static void rejectJsonValue(const char* key, const char* expected) {
+    if (!jsonMutationValid) return;
+    jsonMutationValid = false;
+    snprintf(jsonMutationError, sizeof(jsonMutationError), "%s must be %s", key, expected);
+}
+
 static void copyJsonString(char* target, size_t targetSize, JsonVariant value, bool allowEmpty) {
     // Copy only fields explicitly present in the request. Empty strings can be allowed for credentials that the UI is intentionally clearing.
     if (value.isNull() || !target || targetSize == 0) return;
+    if (!value.is<const char*>()) {
+        rejectJsonValue("text field", "a string");
+        return;
+    }
     const char* text = value.as<const char*>();
     if (!text) return;
     if (!allowEmpty && text[0] == 0) return;
@@ -864,22 +884,42 @@ static void copyJsonString(char* target, size_t targetSize, JsonVariant value, b
 
 static void setBool(JsonObject obj, const char* key, bool& target) {
     JsonVariant value = obj[key];
-    if (!value.isNull()) target = value.as<bool>();
+    if (value.isNull()) return;
+    if (!value.is<bool>()) {
+        rejectJsonValue(key, "a boolean");
+        return;
+    }
+    target = value.as<bool>();
 }
 
 static void setByte(JsonObject obj, const char* key, uint8_t& target, int minValue, int maxValue) {
     JsonVariant value = obj[key];
-    if (!value.isNull()) target = (uint8_t)clampIntValue(value.as<int>(), minValue, maxValue);
+    if (value.isNull()) return;
+    if (!value.is<int>()) {
+        rejectJsonValue(key, "an integer");
+        return;
+    }
+    target = (uint8_t)clampIntValue(value.as<int>(), minValue, maxValue);
 }
 
 static void setUInt16(JsonObject obj, const char* key, uint16_t& target, int minValue, int maxValue) {
     JsonVariant value = obj[key];
-    if (!value.isNull()) target = (uint16_t)clampIntValue(value.as<int>(), minValue, maxValue);
+    if (value.isNull()) return;
+    if (!value.is<int>()) {
+        rejectJsonValue(key, "an integer");
+        return;
+    }
+    target = (uint16_t)clampIntValue(value.as<int>(), minValue, maxValue);
 }
 
 static void setFloat(JsonObject obj, const char* key, float& target, float minValue, float maxValue) {
     JsonVariant value = obj[key];
-    if (!value.isNull()) target = clampFloatValue(value.as<float>(), minValue, maxValue);
+    if (value.isNull()) return;
+    if (!value.is<float>()) {
+        rejectJsonValue(key, "a number");
+        return;
+    }
+    target = clampFloatValue(value.as<float>(), minValue, maxValue);
 }
 
 static bool parseIpString(const char* text, uint8_t out[4]) {
@@ -1496,6 +1536,7 @@ void WebInterface::sendStaticHtml(PGM_P content, size_t contentLength) {
 }
 
 void WebInterface::addCommonSecurityHeaders() {
+    _server.sendHeader("X-TTControl-API-Version", WEB_API_VERSION);
     _server.sendHeader("X-Content-Type-Options", "nosniff");
     _server.sendHeader("X-Frame-Options", "DENY");
     _server.sendHeader("Referrer-Policy", "no-referrer");
@@ -1537,6 +1578,11 @@ bool WebInterface::parseBody(JsonDocument& doc) {
     releaseRawBody();
     if (error) {
         sendError(400, error.c_str());
+        return false;
+    }
+
+    if (!doc.is<JsonObject>()) {
+        sendError(400, "JSON request body must be an object");
         return false;
     }
 
@@ -1764,7 +1810,13 @@ void WebInterface::handlePreferencesPost() {
 
     NetworkConfig& c = networkManager.getConfig();
     uint8_t previousHomePage = c.webHomePage;
+    beginJsonMutation();
     setByte(doc.as<JsonObject>(), "homePage", c.webHomePage, 0, WEB_HOME_PAGE_COUNT - 1);
+    if (!jsonMutationValid) {
+        c.webHomePage = previousHomePage;
+        sendError(400, jsonMutationError);
+        return;
+    }
     if (!networkManager.save()) {
         c.webHomePage = previousHomePage;
         sendError(500, "Failed to save web preference");
@@ -1794,6 +1846,7 @@ void WebInterface::populateStatus(JsonDocument& doc) {
     doc["firmware"] = FIRMWARE_VERSION;
     doc["buildDate"] = BUILD_DATE;
     doc["safeMode"] = safeModeActive;
+    doc["sessionId"] = errorHandler.getSessionId();
 
     JsonObject motorJson = doc["motor"].to<JsonObject>();
     motorJson["state"] = motorStateName();
@@ -1808,6 +1861,9 @@ void WebInterface::populateStatus(JsonDocument& doc) {
     motorJson["motionProgress"] = motor.getMotionProgress();
     motorJson["speedRamping"] = motor.isSpeedRamping();
     motorJson["relayTest"] = motor.isRelayTestMode();
+    motorJson["outputInterlocked"] = errorHandler.hasCriticalError();
+    motorJson["criticalCode"] = (int)errorHandler.getCriticalCode();
+    motorJson["criticalMessage"] = errorHandler.getCriticalMessage();
     motorJson["relayStage"] = motor.getRelayTestStage();
     motorJson["relayStageCount"] = motor.getRelayTestStageCount();
 #if CLOSED_LOOP_SPEED_ENABLE
@@ -1888,6 +1944,7 @@ void WebInterface::populateStatus(JsonDocument& doc) {
     metricsJson["averageAbsErrorRpm"] = metrics.averageAbsErrorRpm;
     metricsJson["peakAbsErrorRpm"] = metrics.peakAbsErrorRpm;
     metricsJson["lastErrorRpm"] = metrics.lastErrorRpm;
+    metricsJson["averageCorrectionHz"] = metrics.averageCorrectionHz;
     JsonObject tuneJson = closedLoop["tuning"].to<JsonObject>();
     tuneJson["active"] = tuning.active;
     tuneJson["step"] = tuning.step;
@@ -1998,6 +2055,7 @@ void WebInterface::streamStatus(Print& out) {
     writeStringProp(out, first, "firmware", FIRMWARE_VERSION);
     writeStringProp(out, first, "buildDate", BUILD_DATE);
     writeBoolProp(out, first, "safeMode", safeModeActive);
+    writeUIntProp(out, first, "sessionId", errorHandler.getSessionId());
 
     beginObjectProp(out, first, "motor");
     bool objectFirst = true;
@@ -2013,6 +2071,9 @@ void WebInterface::streamStatus(Print& out) {
     writeFloatProp(out, objectFirst, "motionProgress", motor.getMotionProgress());
     writeBoolProp(out, objectFirst, "speedRamping", motor.isSpeedRamping());
     writeBoolProp(out, objectFirst, "relayTest", motor.isRelayTestMode());
+    writeBoolProp(out, objectFirst, "outputInterlocked", errorHandler.hasCriticalError());
+    writeIntProp(out, objectFirst, "criticalCode", (long)errorHandler.getCriticalCode());
+    writeStringProp(out, objectFirst, "criticalMessage", errorHandler.getCriticalMessage());
     writeIntProp(out, objectFirst, "relayStage", motor.getRelayTestStage());
     writeIntProp(out, objectFirst, "relayStageCount", motor.getRelayTestStageCount());
 #if CLOSED_LOOP_SPEED_ENABLE
@@ -2100,6 +2161,7 @@ void WebInterface::streamStatus(Print& out) {
     writeFloatProp(out, metricsFirst, "averageAbsErrorRpm", metrics.averageAbsErrorRpm);
     writeFloatProp(out, metricsFirst, "peakAbsErrorRpm", metrics.peakAbsErrorRpm);
     writeFloatProp(out, metricsFirst, "lastErrorRpm", metrics.lastErrorRpm);
+    writeFloatProp(out, metricsFirst, "averageCorrectionHz", metrics.averageCorrectionHz);
     out.write('}');
 
     beginObjectProp(out, nestedFirst, "tuning");
@@ -2380,6 +2442,17 @@ void WebInterface::handleSettingsPost() {
 
     // Apply only provided fields, clamp each value, then run full normalization before applying motor/waveform settings.
     GlobalSettings& g = settings.get();
+    GlobalSettings previous = g;
+    beginJsonMutation();
+    if (!doc["global"].isNull() && !doc["global"].is<JsonObject>()) {
+        rejectJsonValue("global", "an object");
+    }
+    if (!doc["speeds"].isNull() && !doc["speeds"].is<JsonArray>()) {
+        rejectJsonValue("speeds", "an array");
+    }
+    if (!doc["save"].isNull() && !doc["save"].is<bool>()) {
+        rejectJsonValue("save", "a boolean");
+    }
     JsonObject global = doc["global"].as<JsonObject>();
     if (!global.isNull()) {
         setByte(global, "phaseMode", g.phaseMode, 1, MAX_PHASE_MODE);
@@ -2491,6 +2564,10 @@ void WebInterface::handleSettingsPost() {
     JsonArray speeds = doc["speeds"].as<JsonArray>();
     if (!speeds.isNull()) {
         for (size_t i = 0; i < 3 && i < speeds.size(); i++) {
+            if (!speeds[i].is<JsonObject>()) {
+                rejectJsonValue("speed entry", "an object");
+                continue;
+            }
             JsonObject speed = speeds[i].as<JsonObject>();
             if (speed.isNull()) continue;
             SpeedSettings& s = g.speeds[i];
@@ -2498,9 +2575,16 @@ void WebInterface::handleSettingsPost() {
             setFloat(speed, "minFrequency", s.minFrequency, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ);
             setFloat(speed, "maxFrequency", s.maxFrequency, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ);
             JsonArray phase = speed["phaseOffset"].as<JsonArray>();
+            if (!speed["phaseOffset"].isNull() && !speed["phaseOffset"].is<JsonArray>()) {
+                rejectJsonValue("phaseOffset", "an array");
+            }
             if (!phase.isNull()) {
                 for (size_t p = 0; p < 4 && p < phase.size(); p++) {
-                    s.phaseOffset[p] = clampFloatValue(phase[p].as<float>(), -360.0f, 360.0f);
+                    if (!phase[p].is<float>()) {
+                        rejectJsonValue("phaseOffset value", "a number");
+                    } else {
+                        s.phaseOffset[p] = clampFloatValue(phase[p].as<float>(), -360.0f, 360.0f);
+                    }
                 }
             }
             setFloat(speed, "softStartDuration", s.softStartDuration, 0.0f, 10.0f);
@@ -2529,6 +2613,12 @@ void WebInterface::handleSettingsPost() {
         }
     }
 
+    if (!jsonMutationValid) {
+        g = previous;
+        sendError(400, jsonMutationError);
+        return;
+    }
+
     g.schemaVersion = SETTINGS_SCHEMA_VERSION;
     settings.normalize();
     motor.applySettings();
@@ -2549,14 +2639,28 @@ void WebInterface::handleControl() {
 
     JsonDocument doc;
     if (!parseBody(doc)) return;
+    if (!doc["action"].is<const char*>()) {
+        sendError(400, "action must be a string");
+        return;
+    }
     const char* action = doc["action"].as<const char*>();
     if (!action) {
         sendError(400, "Missing action");
         return;
     }
 
+    bool includeCalibration = false;
+    float calibrationCurrentHz = 0.0f;
+    float calibrationProposedHz = 0.0f;
+    float calibrationCorrectionHz = 0.0f;
+    char calibrationMessage[128] = "";
+
     // Control actions execute immediately and return only an ok/error envelope.
     if (strcmp(action, "start") == 0) {
+        if (errorHandler.hasCriticalError()) {
+            sendError(423, "Start blocked by critical fault; correct the fault and reboot");
+            return;
+        }
         if (motor.isRelayTestMode()) {
             sendError(409, "Exit relay test before starting");
             return;
@@ -2570,13 +2674,25 @@ void WebInterface::handleControl() {
         if (motor.isRelayTestMode()) motor.endRelayTest();
         motor.stop();
     } else if (strcmp(action, "toggleStartStop") == 0) {
+        if (!motor.isRunning() && errorHandler.hasCriticalError()) {
+            sendError(423, "Start blocked by critical fault; correct the fault and reboot");
+            return;
+        }
         if (motor.isStandby()) motor.toggleStandby();
         else motor.toggleStartStop();
     } else if (strcmp(action, "toggleStandby") == 0) {
+        if (motor.isStandby() && errorHandler.hasCriticalError()) {
+            sendError(423, "Wake blocked by critical fault; correct the fault and reboot");
+            return;
+        }
         motor.toggleStandby();
     } else if (strcmp(action, "cycleSpeed") == 0) {
         motor.cycleSpeed();
     } else if (strcmp(action, "setSpeed") == 0) {
+        if (!doc["speed"].is<int>()) {
+            sendError(400, "speed must be an integer");
+            return;
+        }
         int speed = clampIntValue(doc["speed"].as<int>(), 0, 2);
         if (speed == SPEED_78 && !settings.get().enable78rpm) {
             sendError(409, "78 RPM is disabled");
@@ -2586,6 +2702,10 @@ void WebInterface::handleControl() {
     } else if (strcmp(action, "resetPitch") == 0) {
         motor.resetPitch();
     } else if (strcmp(action, "setPitch") == 0) {
+        if (!doc["pitch"].is<float>()) {
+            sendError(400, "pitch must be a number");
+            return;
+        }
         motor.setPitch(doc["pitch"].as<float>());
 #if CLOSED_LOOP_SPEED_ENABLE
     } else if (strcmp(action, "closedLoopReset") == 0) {
@@ -2619,11 +2739,38 @@ void WebInterface::handleControl() {
         }
     } else if (strcmp(action, "closedLoopTuneStop") == 0) {
         motor.cancelClosedLoopTuning();
+    } else if (strcmp(action, "closedLoopBasePreview") == 0) {
+        includeCalibration = true;
+        if (!motor.getBaseFrequencyCalibration(calibrationCurrentHz, calibrationProposedHz,
+                calibrationCorrectionHz, calibrationMessage, sizeof(calibrationMessage))) {
+            sendError(409, calibrationMessage);
+            return;
+        }
+    } else if (strcmp(action, "closedLoopBaseApply") == 0 || strcmp(action, "closedLoopBaseSave") == 0) {
+        includeCalibration = true;
+        if (!motor.getBaseFrequencyCalibration(calibrationCurrentHz, calibrationProposedHz,
+                calibrationCorrectionHz, calibrationMessage, sizeof(calibrationMessage))) {
+            sendError(409, calibrationMessage);
+            return;
+        }
+        if (!motor.applyBaseFrequencyCalibration(calibrationMessage, sizeof(calibrationMessage))) {
+            sendError(409, calibrationMessage);
+            return;
+        }
+        if (strcmp(action, "closedLoopBaseSave") == 0 && !settings.save(false, true)) {
+            sendError(500, "Base frequency applied in RAM but could not be saved");
+            return;
+        }
 #endif
     } else if (strcmp(action, "relayTest") == 0) {
+        if (!doc["stage"].is<int>()) {
+            sendError(400, "stage must be an integer");
+            return;
+        }
         uint8_t stage = (uint8_t)clampIntValue(doc["stage"].as<int>(), 0, motor.getRelayTestStageCount() - 1);
         if (!motor.isRelayTestMode() && !motor.beginRelayTest()) {
-            sendError(409, "Stop motor before relay test");
+            sendError(errorHandler.hasCriticalError() ? 423 : 409,
+                errorHandler.hasCriticalError() ? "Relay test blocked by critical fault" : "Stop motor before relay test");
             return;
         }
         motor.setRelayTestStage(stage);
@@ -2636,6 +2783,11 @@ void WebInterface::handleControl() {
         }
         settings.resetSessionRuntime();
     } else if (strcmp(action, "factoryReset") == 0) {
+        if (motor.isMoving()) {
+            sendError(409, "Stop the motor before factory reset");
+            return;
+        }
+        motor.emergencyStop();
         if (!settings.factoryReset()) {
             sendError(500, "Factory reset failed");
             return;
@@ -2657,6 +2809,13 @@ void WebInterface::handleControl() {
 
     JsonDocument out;
     out["ok"] = true;
+    if (includeCalibration) {
+        JsonObject calibration = out["calibration"].to<JsonObject>();
+        calibration["currentHz"] = calibrationCurrentHz;
+        calibration["averageCorrectionHz"] = calibrationCorrectionHz;
+        calibration["proposedHz"] = calibrationProposedHz;
+        calibration["message"] = calibrationMessage;
+    }
     sendJson(200, out);
 }
 
@@ -2748,6 +2907,7 @@ void WebInterface::handleNetworkPost() {
 
     NetworkConfig& c = networkManager.getConfig();
     NetworkConfig previous = c;
+    beginJsonMutation();
     const char* pin = doc["webPin"].as<const char*>();
     if (!openSetup && pin && pin[0]) {
         size_t pinLength = strlen(pin);
@@ -2764,6 +2924,9 @@ void WebInterface::handleNetworkPost() {
             return;
         }
     }
+
+    if (!doc["clearPassword"].isNull() && !doc["clearPassword"].is<bool>()) rejectJsonValue("clearPassword", "a boolean");
+    if (!doc["clearApPassword"].isNull() && !doc["clearApPassword"].is<bool>()) rejectJsonValue("clearApPassword", "a boolean");
 
     setBool(doc.as<JsonObject>(), "enabled", c.enabled);
     setByte(doc.as<JsonObject>(), "mode", c.mode, NETWORK_MODE_AP, NETWORK_MODE_STA_AP);
@@ -2799,6 +2962,12 @@ void WebInterface::handleNetworkPost() {
     uint8_t* ipTargets[] = {c.staticIp, c.gateway, c.subnet, c.dns};
     for (uint8_t i = 0; i < 4; i++) {
         if (!doc[ipKeys[i]].isNull()) memcpy(ipTargets[i], parsedIps[i], 4);
+    }
+
+    if (!jsonMutationValid) {
+        c = previous;
+        sendError(400, jsonMutationError);
+        return;
     }
 
     bool deferEcoStandbyStop = c.enabled &&
@@ -2871,6 +3040,8 @@ void WebInterface::handleDiagnosticsGet() {
     doc["firmware"] = FIRMWARE_VERSION;
     doc["buildDate"] = BUILD_DATE;
     doc["safeMode"] = safeModeActive;
+    doc["sessionId"] = errorHandler.getSessionId();
+    doc["apiVersion"] = WEB_API_VERSION;
 
     JsonObject flags = doc["flags"].to<JsonObject>();
     flags["NETWORK_ENABLE"] = NETWORK_ENABLE;

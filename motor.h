@@ -57,6 +57,7 @@ struct ClosedLoopMetrics {
     float averageAbsErrorRpm;
     float peakAbsErrorRpm;
     float lastErrorRpm;
+    float averageCorrectionHz;
 };
 
 // Circular trend sample used by the web dashboard for recent closed-loop motion.
@@ -120,6 +121,7 @@ public:
     
     // --- Accessors ---
     bool isRunning() { return _state == STATE_RUNNING || _state == STATE_STARTING; }
+    bool isMoving() { return _state == STATE_STARTING || _state == STATE_RUNNING || _state == STATE_STOPPING; }
     bool isStandby() { return _state == STATE_STANDBY; }
     bool isSweepingMode() { return _isSweepingMode; }
     bool isSpeedRamping() { return _isSpeedRamping; }
@@ -146,6 +148,8 @@ public:
     void beginClosedLoopTuning();
     void advanceClosedLoopTuning();
     bool applyClosedLoopTuningSuggestion(char* out, size_t outSize);
+    bool getBaseFrequencyCalibration(float& currentHz, float& proposedHz, float& averageCorrectionHz, char* out, size_t outSize);
+    bool applyBaseFrequencyCalibration(char* out, size_t outSize);
     void cancelClosedLoopTuning();
     
     // --- Relay Control ---
@@ -243,6 +247,7 @@ private:
     ClosedLoopMetrics _closedLoopMetrics;
     float _closedLoopErrorSumRpm;
     float _closedLoopAbsErrorSumRpm;
+    float _closedLoopCorrectionSumHz;
     uint32_t _closedLoopMetricsLastSampleSequence;
     uint32_t _closedLoopMetricsLastSampleMs;
     int8_t _closedLoopLastErrorSign;
@@ -301,6 +306,7 @@ private:
     uint32_t _lastSettingsChange;
 
     void restoreSweepPhaseOffsets();
+    void setCommandedFrequency(float frequency);
 };
 
 #endif // MOTOR_H

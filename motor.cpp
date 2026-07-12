@@ -92,6 +92,7 @@ MotorController::MotorController() {
     memset(&_closedLoopMetrics, 0, sizeof(_closedLoopMetrics));
     _closedLoopErrorSumRpm = 0.0f;
     _closedLoopAbsErrorSumRpm = 0.0f;
+    _closedLoopCorrectionSumHz = 0.0f;
     _closedLoopMetricsLastSampleSequence = 0;
     _closedLoopMetricsLastSampleMs = 0;
     _closedLoopLastErrorSign = 0;
@@ -164,6 +165,7 @@ void MotorController::begin() {
 
 void MotorController::startSymmetricSweep(float minSep, float maxSep, float speed) {
     if (_relayTestMode) return;
+    if (errorHandler.hasCriticalError()) return;
     if (settings.get().phaseMode == PHASE_4) return; // Invalid for 4-phase twin motors
 
     SpeedSettings& activeSpeed = settings.getCurrentSpeedSettings();
@@ -229,7 +231,7 @@ void MotorController::update() {
                         _isKickRamping = true;
                     } else {
                         // Jump immediately to target
-                        waveform.setFrequency(_targetFreq);
+                        setCommandedFrequency(_targetFreq);
                     }
                 }
             }
@@ -239,15 +241,15 @@ void MotorController::update() {
                 float elapsed = now - _kickRampStartTime;
                 if (elapsed >= _kickRampDuration) {
                     _isKickRamping = false;
-                    waveform.setFrequency(_targetFreq);
+                    setCommandedFrequency(_targetFreq);
                 } else {
                     float t = elapsed / _kickRampDuration;
                     float currentF = _kickRampStartFreq - ((_kickRampStartFreq - _targetFreq) * t);
-                    waveform.setFrequency(currentF);
+                    setCommandedFrequency(currentF);
                 }
             } else if (!_isKicking) {
                 // Ensure we are exactly at target frequency if not kicking/ramping
-                if (waveform.getFrequency() != _targetFreq) waveform.setFrequency(_targetFreq);
+                if (waveform.getFrequency() != _targetFreq) setCommandedFrequency(_targetFreq);
             }
 
             // 3. Amplitude Soft Start Logic
@@ -333,8 +335,7 @@ void MotorController::update() {
                         _isSpeedRamping = false;
                         _closedLoopRampTargetRpm = 0.0f;
                         _currentFreq = _rampTargetFreq;
-                        waveform.setFrequency(_currentFreq);
-                        currentFrequency = _currentFreq;
+                        setCommandedFrequency(_currentFreq);
                         speedFeedback.reset();
                         scheduleClosedLoopEngage(now);
                     } else {
@@ -356,8 +357,7 @@ void MotorController::update() {
                         }
 #endif
                         _currentFreq = commandedFreq;
-                        waveform.setFrequency(_currentFreq);
-                        currentFrequency = _currentFreq;
+                        setCommandedFrequency(_currentFreq);
                     }
                 } else {
                     float commandedFreq = _targetFreq;
@@ -375,8 +375,7 @@ void MotorController::update() {
 #endif
                     if (_currentFreq != commandedFreq) {
                         _currentFreq = commandedFreq;
-                        waveform.setFrequency(_currentFreq);
-                        currentFrequency = _currentFreq; // Update global for UI
+                        setCommandedFrequency(_currentFreq);
                     }
                 }
 
@@ -429,7 +428,9 @@ void MotorController::update() {
                             s.phaseOffset[2] = currentSep * 2.0;
                         }
 
-                        waveform.updateSettings(_targetFreq, s);
+                        waveform.updateSettings(_targetFreq, s, settings.get().phaseMode);
+                        _currentFreq = _targetFreq;
+                        currentFrequency = _currentFreq;
                     }
                 }
             }
@@ -514,13 +515,18 @@ void MotorController::update() {
      * press or encoder step.
      */
     if (_settingsDirty && (now - _lastSettingsChange > 2000)) {
-        settings.save();
-        _settingsDirty = false;
+        if (settings.save()) {
+            _settingsDirty = false;
+        } else if (safeModeActive) {
+            // Safe Mode intentionally keeps the selected speed in RAM only.
+            _settingsDirty = false;
+        }
     }
 }
 
 void MotorController::start() {
     if (_relayTestMode) return;
+    if (errorHandler.hasCriticalError()) return;
     if (_state == STATE_RUNNING || _state == STATE_STARTING) return;
 
     if (_state == STATE_STANDBY) {
@@ -549,10 +555,10 @@ void MotorController::start() {
     if (s.startupKick > 1) {
         _isKicking = true;
         _kickEndTime = hal.getMillis() + (s.startupKickDuration * 1000);
-        waveform.setFrequency(_targetFreq * s.startupKick);
+        setCommandedFrequency(_targetFreq * s.startupKick);
     } else {
         _isKicking = false;
-        waveform.setFrequency(_targetFreq);
+        setCommandedFrequency(_targetFreq);
     }
 
     // Unmute relays if linked to start/stop. The actual relay writes may be delayed/staggered by setRelays().
@@ -560,8 +566,8 @@ void MotorController::start() {
         setRelays(true);
     }
 
-    waveform.setEnabled(true);
     waveform.setAmplitude(0.0);
+    waveform.setEnabled(true);
 }
 
 void MotorController::stop() {
@@ -577,10 +583,10 @@ void MotorController::stop() {
         _brakePulseState = true;
         _brakePulseLastToggle = hal.getMillis();
         // Reverse frequency for braking torque
-        waveform.setFrequency(-_targetFreq);
+        setCommandedFrequency(-_targetFreq);
         waveform.setAmplitude(_targetAmp);
     } else if (settings.get().brakeMode == BRAKE_RAMP) {
-        waveform.setFrequency(settings.get().brakeStartFreq);
+        setCommandedFrequency(settings.get().brakeStartFreq);
     }
 
     if (settings.get().pitchResetOnStop) {
@@ -596,6 +602,7 @@ void MotorController::handleBraking(uint32_t now) {
     if (elapsed >= duration) {
         _state = STATE_STOPPED;
         _currentAmp = 0.0;
+        waveform.setAmplitude(0.0);
         waveform.setEnabled(false);
 
         if (settings.get().muteRelayLinkStartStop) {
@@ -603,7 +610,7 @@ void MotorController::handleBraking(uint32_t now) {
         }
 
         // Reset frequency to positive so the next start does not inherit reverse braking direction.
-        waveform.setFrequency(fabsf(_targetFreq));
+        setCommandedFrequency(fabsf(_targetFreq));
         return;
     }
 
@@ -613,7 +620,7 @@ void MotorController::handleBraking(uint32_t now) {
         float startF = settings.get().brakeStartFreq;
         float stopF = settings.get().brakeStopFreq;
         float currentF = startF - ((startF - stopF) * (elapsed / duration));
-        waveform.setFrequency(currentF);
+        setCommandedFrequency(currentF);
 
         // Ramp amplitude down
         _currentAmp = _targetAmp * (1.0 - (elapsed / duration));
@@ -644,7 +651,7 @@ void MotorController::handleBraking(uint32_t now) {
         } else {
             // Ramp frequency down
             float currentF = startF - ((startF - stopF) * (elapsed / duration));
-            waveform.setFrequency(currentF);
+            setCommandedFrequency(currentF);
             // Maintain full intended amplitude throughout the coast to ensure load tracks frequency
             waveform.setAmplitude(_targetAmp);
         }
@@ -691,6 +698,7 @@ void MotorController::toggleStartStop() {
 void MotorController::toggleStandby() {
     if (_relayTestMode) return;
     if (!ENABLE_STANDBY) return;
+    if (_state == STATE_STANDBY && errorHandler.hasCriticalError()) return;
 
     if (_state == STATE_STANDBY) {
         // Waking up
@@ -721,7 +729,9 @@ void MotorController::toggleStandby() {
         settings.resetSessionRuntime();
 
         // Save Total Runtime (Silent)
-        settings.save(false);
+        if (!settings.save(false) && !safeModeActive) {
+            errorHandler.report(ERR_SETTINGS_CORRUPT, "Runtime settings save failed", false);
+        }
     }
     currentMotorState = _state;
 }
@@ -798,7 +808,7 @@ void MotorController::setSpeed(SpeedMode mode) {
             _rampTargetRpm = calculateClosedLoopTargetRpmForSpeed(mode);
             _targetFreq = newTarget;
             resetClosedLoopControl(false);
-            waveform.updateSettings(_rampStartFreq, s);
+            waveform.updateSettings(_rampStartFreq, s, settings.get().phaseMode);
         } else {
             // Instant switch
             _isSpeedRamping = false;
@@ -806,14 +816,14 @@ void MotorController::setSpeed(SpeedMode mode) {
             _currentFreq = _targetFreq;
             currentFrequency = _currentFreq;
             scheduleClosedLoopEngage(hal.getMillis());
-            waveform.updateSettings(_currentFreq, s);
+            waveform.updateSettings(_currentFreq, s, settings.get().phaseMode);
         }
     } else {
         _targetFreq = newTarget;
         _currentFreq = _targetFreq;
         currentFrequency = _currentFreq;
         resetClosedLoopControl(false);
-        waveform.updateSettings(_currentFreq, s);
+        waveform.updateSettings(_currentFreq, s, settings.get().phaseMode);
     }
 
     // Defer save to avoid blocking
@@ -869,7 +879,7 @@ void MotorController::applySettings() {
     } else {
         resetClosedLoopControl(false);
     }
-    waveform.updateSettings(_currentFreq, s);
+    waveform.updateSettings(_currentFreq, s, settings.get().phaseMode);
 }
 
 void MotorController::resetClosedLoop() {
@@ -1324,6 +1334,7 @@ void MotorController::resetClosedLoopMetrics() {
     memset(_closedLoopTrend, 0, sizeof(_closedLoopTrend));
     _closedLoopErrorSumRpm = 0.0f;
     _closedLoopAbsErrorSumRpm = 0.0f;
+    _closedLoopCorrectionSumHz = 0.0f;
     _closedLoopMetricsLastSampleSequence = 0;
     _closedLoopMetricsLastSampleMs = 0;
     _closedLoopLastErrorSign = 0;
@@ -1396,8 +1407,10 @@ void MotorController::recordClosedLoopMetrics(uint32_t now, const SpeedFeedbackS
     _closedLoopMetrics.lastErrorRpm = error;
     _closedLoopErrorSumRpm += error;
     _closedLoopAbsErrorSumRpm += absError;
+    _closedLoopCorrectionSumHz += _closedLoopCorrectionHz;
     _closedLoopMetrics.averageErrorRpm = _closedLoopErrorSumRpm / (float)_closedLoopMetrics.validSamples;
     _closedLoopMetrics.averageAbsErrorRpm = _closedLoopAbsErrorSumRpm / (float)_closedLoopMetrics.validSamples;
+    _closedLoopMetrics.averageCorrectionHz = _closedLoopCorrectionSumHz / (float)_closedLoopMetrics.validSamples;
     if (absError > _closedLoopMetrics.peakAbsErrorRpm) {
         _closedLoopMetrics.peakAbsErrorRpm = absError;
     }
@@ -1416,6 +1429,66 @@ void MotorController::recordClosedLoopMetrics(uint32_t now, const SpeedFeedbackS
     (void)now;
     (void)feedback;
 #endif
+}
+
+bool MotorController::getBaseFrequencyCalibration(float& currentHz,
+                                                  float& proposedHz,
+                                                  float& averageCorrectionHz,
+                                                  char* out,
+                                                  size_t outSize) {
+#if CLOSED_LOOP_SPEED_ENABLE
+    if (out && outSize > 0) out[0] = 0;
+    SpeedFeedbackStatus feedback = speedFeedback.getStatus();
+    currentHz = settings.getCurrentSpeedSettings().frequency;
+    averageCorrectionHz = _closedLoopMetrics.averageCorrectionHz;
+    proposedHz = currentHz;
+
+    if (_state != STATE_RUNNING || !settings.get().closedLoopEnabled ||
+        settings.get().closedLoopControlMode != CLOSED_LOOP_CONTROL_CORRECT) {
+        if (out && outSize > 0) snprintf(out, outSize, "Run closed-loop correction at the target speed first.");
+        return false;
+    }
+    if (!feedback.signalValid || !feedback.locked || _closedLoopMetrics.validSamples < 20) {
+        if (out && outSize > 0) snprintf(out, outSize, "Wait for a stable lock with at least 20 valid samples.");
+        return false;
+    }
+    uint32_t lockPercent = (_closedLoopMetrics.lockedSamples * 100UL) / _closedLoopMetrics.validSamples;
+    if (lockPercent < 80 || !isfinite(averageCorrectionHz)) {
+        if (out && outSize > 0) snprintf(out, outSize, "Calibration needs at least 80%% lock time.");
+        return false;
+    }
+
+    SpeedSettings& speed = settings.getCurrentSpeedSettings();
+    proposedHz = clampToSpeedSettings(currentHz + averageCorrectionHz, speed);
+    if (out && outSize > 0) {
+        snprintf(out, outSize, "Base %.3f Hz, average correction %+.3f Hz, proposed %.3f Hz.",
+            currentHz, averageCorrectionHz, proposedHz);
+    }
+    return true;
+#else
+    currentHz = proposedHz = averageCorrectionHz = 0.0f;
+    if (out && outSize > 0) snprintf(out, outSize, "Closed loop is not compiled in.");
+    return false;
+#endif
+}
+
+bool MotorController::applyBaseFrequencyCalibration(char* out, size_t outSize) {
+    float currentHz;
+    float proposedHz;
+    float correctionHz;
+    char preview[128];
+    if (!getBaseFrequencyCalibration(currentHz, proposedHz, correctionHz, preview, sizeof(preview))) {
+        if (out && outSize > 0) snprintf(out, outSize, "%s", preview);
+        return false;
+    }
+
+    settings.getCurrentSpeedSettings().frequency = proposedHz;
+    settings.normalize();
+    applySettings();
+    resetClosedLoopControl(true);
+    if (_state == STATE_RUNNING) scheduleClosedLoopEngage(hal.getMillis());
+    if (out && outSize > 0) snprintf(out, outSize, "Applied base frequency %.3f Hz in RAM.", proposedHz);
+    return true;
 }
 
 void MotorController::reportClosedLoopAction(const char* message, uint8_t action, bool& latch) {
@@ -1842,6 +1915,7 @@ uint8_t MotorController::getRelayTestStageCount() {
 }
 
 bool MotorController::beginRelayTest() {
+    if (errorHandler.hasCriticalError()) return false;
     if (_state == STATE_STARTING || _state == STATE_RUNNING || _state == STATE_STOPPING) {
         return false;
     }
@@ -1962,8 +2036,15 @@ void MotorController::restoreSweepPhaseOffsets() {
     }
 
     if (_currentSpeedMode == _sweepOriginalSpeedMode) {
-        waveform.updateSettings(_targetFreq, originalSpeed);
+        waveform.updateSettings(_targetFreq, originalSpeed, settings.get().phaseMode);
     }
 
     _sweepHasOriginalPhase = false;
+}
+
+void MotorController::setCommandedFrequency(float frequency) {
+    frequency = clampOutputFrequency(frequency);
+    _currentFreq = frequency;
+    currentFrequency = frequency;
+    waveform.setFrequency(frequency);
 }

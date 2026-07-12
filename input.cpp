@@ -169,7 +169,12 @@ void InputManager::update() {
                 _pendingEvent = EVT_BACK; // Long Press (>3s)
             } else {
                 // Short Press - Check for double click
-                if (_waitingForDoubleClick) {
+                if (currentMotorState == STATE_RUNNING || currentMotorState == STATE_STARTING) {
+                    // A running motor must stop on release without waiting for the menu double-click window.
+                    _waitingForDoubleClick = false;
+                    _clickCount = 0;
+                    _pendingEvent = EVT_SELECT;
+                } else if (_waitingForDoubleClick) {
                     _clickCount++;
                 } else {
                     _waitingForDoubleClick = true;

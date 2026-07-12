@@ -169,7 +169,7 @@ void loop() {
          * filled, so fallback logic can distinguish a real boot from a crash
          * during early initialization.
          */
-        if (!settingsBootConfirmed && waveform.getLastBufferFillMs() != 0) {
+        if (!safeModeActive && !settingsBootConfirmed && waveform.getLastBufferFillMs() != 0) {
             settings.markBootSuccessful();
             settingsBootConfirmed = true;
         }

@@ -52,7 +52,7 @@ public:
     
     void setAmplitude(float amp); // 0.0 to 1.0
     
-    void updateSettings(float freq, const SpeedSettings& s);
+    void updateSettings(float freq, const SpeedSettings& s, uint8_t phaseMode);
     
     void setEnabled(bool enabled);
     
@@ -82,6 +82,7 @@ private:
         FilterType filterType;
         float iirAlpha;
         FirProfile firProfile;
+        uint8_t activePhaseOutputs;
     };
     
     WaveformState _stateA;

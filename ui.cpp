@@ -14,6 +14,8 @@
 #include "waveform.h"
 #include "system_monitor.h"
 #include "network_manager.h"
+#include "error_handler.h"
+#include "speed_feedback.h"
 #include <Fonts/FreeSans12pt7b.h>
 
 // The dashboard uses four-character state labels so the top row still has space for frequency and the lock icon on a 128px display.
@@ -162,7 +164,7 @@ void UserInterface::update() {
 
     // Auto-standby only applies when stopped; a running record should continue until explicit user or fault action stops it.
     uint8_t stbyDelay = settings.get().autoStandbyDelay;
-    if (stbyDelay > 0 && !motor.isRunning() && !motor.isStandby()) {
+    if (stbyDelay > 0 && motor.getState() == STATE_STOPPED) {
         if (elapsed > (stbyDelay * 60)) {
             motor.toggleStandby();
             _lastInputTime = now;
@@ -233,9 +235,12 @@ void UserInterface::handleInput() {
     if (motor.isSweepingMode()) {
         if (evt == EVT_SELECT || evt == EVT_DOUBLE_CLICK || evt == EVT_BACK || evt == EVT_EXIT) {
             motor.stopSymmetricSweep(true);
-            settings.save(false, true);
-            showMessage("Locked & Saved!", 2000);
-            exitMenu();
+            if (settings.save(false, true)) {
+                showMessage("Locked & Saved!", 2000);
+                exitMenu();
+            } else {
+                showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
+            }
         }
         // Encoder rotation is intentionally ignored during the sweep so the diagnostic value is controlled only by the configured sweep range.
         return;
@@ -476,7 +481,9 @@ void UserInterface::draw() {
     display.clearDisplay();
 
     // Draw priority is safety/status first, then modal dialogs, then the active menu/dashboard surface.
-    if (_showingError) {
+    if (errorHandler.hasCriticalError()) {
+        drawCriticalInterlock();
+    } else if (_showingError) {
         drawError();
     } else if (_showingConfirm) {
         drawConfirm();
@@ -689,10 +696,12 @@ void UserInterface::drawDashboard() {
         display.setCursor(freqX, 4);
         display.print(freqBuf);
 
-        // Lock icon means "running and no programmed ramp is active"; feedback lock status is reported through serial/web diagnostics.
-        if (motor.getState() == STATE_RUNNING && !motor.isSpeedRamping()) {
+#if CLOSED_LOOP_SPEED_ENABLE
+        SpeedFeedbackStatus feedback = speedFeedback.getStatus();
+        if (feedback.configured && feedback.locked) {
             display.drawBitmap(112, 0, icon_lock_bits, 16, 16, SSD1306_WHITE);
         }
+#endif
     }
 
     // Mode 1: runtime counters.
@@ -838,6 +847,14 @@ void UserInterface::drawDashboard() {
 
     SpeedMode s = motor.getSpeed();
     const char* speedStr;
+    char measuredSpeed[12];
+#if CLOSED_LOOP_SPEED_ENABLE
+    SpeedFeedbackStatus feedback = speedFeedback.getStatus();
+    if (feedback.configured && feedback.signalValid) {
+        snprintf(measuredSpeed, sizeof(measuredSpeed), "%.2f", feedback.filteredRpm);
+        speedStr = measuredSpeed;
+    } else
+#endif
     if (s == SPEED_33) speedStr = "33.3";
     else if (s == SPEED_45) speedStr = "45.0";
     else speedStr = "78.0";
@@ -1071,6 +1088,30 @@ void UserInterface::drawError() {
     display.println(_errorMsg);
 
     if (millis() - _errorStartTime > _errorDuration) _showingError = false;
+}
+
+void UserInterface::drawCriticalInterlock() {
+    display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    display.setTextSize(1);
+    display.setCursor(20, 4);
+    display.print("OUTPUT LOCKED");
+
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 21);
+    display.print("Fault ");
+    display.print((int)errorHandler.getCriticalCode());
+
+    const char* message = errorHandler.getCriticalMessage();
+    char line[22];
+    snprintf(line, sizeof(line), "%.21s", message ? message : "Critical fault");
+    display.setCursor(0, 33);
+    display.print(line);
+
+    display.setCursor(0, 47);
+    display.print("Correct fault, then");
+    display.setCursor(0, 57);
+    display.print("reboot controller");
 }
 
 void UserInterface::navigateTo(MenuPage* page) {

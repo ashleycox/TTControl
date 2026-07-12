@@ -409,7 +409,10 @@ static void handleUiLockCommand(const String& input) {
             return;
         }
         networkManager.setDeviceLockEnabled(enabled);
-        networkManager.save();
+        if (!networkManager.save()) {
+            Serial.println("UI lock save failed.");
+            return;
+        }
         Serial.print("UI lock ");
         Serial.println(enabled ? "enabled." : "disabled.");
         return;
@@ -422,8 +425,7 @@ static void handleUiLockCommand(const String& input) {
             Serial.println("PIN must be 4 to 8 characters.");
             return;
         }
-        networkManager.save();
-        Serial.println("PIN saved.");
+        Serial.println(networkManager.save() ? "PIN saved." : "PIN save failed.");
     }
 }
 
@@ -1145,8 +1147,15 @@ static void handleWifiWizardInput(String input) {
             }
             if (parsedBool) {
                 NetworkConfig& cfg = networkManager.getConfig();
+                NetworkConfig previous = cfg;
                 cfg = wifiWizardConfig;
-                networkManager.save();
+                if (!networkManager.save()) {
+                    cfg = previous;
+                    Serial.println("Network settings save failed.");
+                    wifiWizardActive = false;
+                    wifiWizardStep = WIFI_WIZARD_IDLE;
+                    return;
+                }
                 networkManager.restart();
                 wifiWizardActive = false;
                 wifiWizardStep = WIFI_WIZARD_IDLE;
@@ -1757,6 +1766,8 @@ void handleSerialCommands() {
         if (input == "start") {
             if (motor.isRelayTestMode()) {
                 Serial.println("Exit relay test before starting.");
+            } else if (errorHandler.hasCriticalError()) {
+                Serial.println("Start blocked by critical fault. Reboot after correcting the fault.");
             } else {
                 motor.start();
                 Serial.println("Motor Started");
@@ -1803,9 +1814,20 @@ void handleSerialCommands() {
             motor.resetPitch();
             Serial.println("Pitch Reset");
         }
-        else if (input == "f") {
+        else if (input == "f" || input == "factory reset") {
+            Serial.println("Factory reset not started. Type 'factory reset confirm' to erase settings.");
+        }
+        else if (input == "factory reset confirm") {
+            if (motor.isMoving()) {
+                Serial.println("Stop the motor before factory reset.");
+                return;
+            }
             Serial.println("Factory Resetting...");
-            settings.factoryReset();
+            motor.emergencyStop();
+            if (!settings.factoryReset()) {
+                Serial.println("Factory reset failed.");
+                return;
+            }
             settings.load();
             motor.endRelayTest();
             motor.applySettings();
@@ -1989,6 +2011,8 @@ void handleSerialCommands() {
 void printStatus() {
     // Status is intentionally concise enough for repeated serial polling but still includes safety-critical thermal, waveform, and lock state.
     Serial.println("--- TT Control Status ---");
+    Serial.print("Session: ");
+    Serial.println(errorHandler.getSessionId(), HEX);
     Serial.print("State: ");
     Serial.println(motorStateName());
     
@@ -2311,6 +2335,7 @@ static void handleClosedLoopCommand(const String& input) {
         Serial.println("cl tune status - Show tuning guidance and stability metrics");
         Serial.println("cl tune suggest - Show current tuning recommendation");
         Serial.println("cl tune stop - Stop guided tuning");
+        Serial.println("cl calibrate preview|apply|save - Use stable average correction to tune base frequency");
         return;
     }
 
@@ -2335,6 +2360,31 @@ static void handleClosedLoopCommand(const String& input) {
     if (command == "reset") {
         motor.resetClosedLoop();
         Serial.println("Closed-loop controller reset.");
+        return;
+    }
+
+    if (command == "calibrate") {
+        String calibrationCommand = args.size() >= 2 ? args[1] : "preview";
+        calibrationCommand.toLowerCase();
+        char message[128];
+        if (calibrationCommand == "preview") {
+            float currentHz;
+            float proposedHz;
+            float correctionHz;
+            motor.getBaseFrequencyCalibration(currentHz, proposedHz, correctionHz, message, sizeof(message));
+            Serial.println(message);
+        } else if (calibrationCommand == "apply" || calibrationCommand == "save") {
+            if (!motor.applyBaseFrequencyCalibration(message, sizeof(message))) {
+                Serial.println(message);
+                return;
+            }
+            Serial.println(message);
+            if (calibrationCommand == "save") {
+                Serial.println(settings.save(true, true) ? "Base frequency saved." : "Base frequency save failed.");
+            }
+        } else {
+            Serial.println("Usage: cl calibrate preview|apply|save");
+        }
         return;
     }
 
@@ -2591,7 +2641,8 @@ void printHelp() {
     Serial.println("diag safety - Dry-run safety diagnostic");
     Serial.println("wifi help|status|wizard|scan|connect");
     Serial.println("error dump, error clear");
-    Serial.println("f - Factory Reset");
+    Serial.println("f | factory reset - Request factory reset confirmation");
+    Serial.println("factory reset confirm - Erase settings and restore defaults");
 }
 
 static void printWifiHelp() {
@@ -2905,7 +2956,10 @@ static void handleWifiConnectCommand(const std::vector<String>& args) {
         cfg.apChannel = NETWORK_DEFAULT_AP_CHANNEL;
     }
 
-    networkManager.save();
+    if (!networkManager.save()) {
+        Serial.println("Station credential save failed.");
+        return;
+    }
     networkManager.restart();
     Serial.println("Station credentials saved. Reconnecting in Station + setup AP mode.");
 }
@@ -2953,14 +3007,20 @@ static void handleWifiCommand(const String& input) {
     } else if (command == "clear") {
         handleWifiClearCommand(args);
     } else if (command == "apply" || command == "save") {
-        networkManager.save();
+        if (!networkManager.save()) {
+            Serial.println("Network settings save failed.");
+            return;
+        }
         networkManager.restart();
         Serial.println("Network settings saved. Reconnecting.");
     } else if (command == "restart" || command == "reconnect") {
         networkManager.restart();
         Serial.println("Network services restarted.");
     } else if (command == "reset" || command == "defaults") {
-        networkManager.resetDefaults();
+        if (!networkManager.resetDefaults()) {
+            Serial.println("Network reset failed.");
+            return;
+        }
         networkManager.restart();
         Serial.println("Network defaults restored. Network services restarted.");
     } else {
@@ -3113,8 +3173,7 @@ static void handlePresetCommand(const String& input) {
         }
         int slot = slotNumber - 1;
         if (slot >= 0 && slot < MAX_PRESET_SLOTS) {
-            settings.savePreset(slot);
-            Serial.println("Preset saved.");
+            Serial.println(settings.savePreset(slot) ? "Preset saved." : "Preset save failed.");
         } else {
             Serial.println("Invalid preset slot (1-5).");
         }
@@ -3149,7 +3208,9 @@ static void handleRelayTestCommand(const String& input) {
     }
 
     if (!motor.isRelayTestMode() && !motor.beginRelayTest()) {
-        Serial.println("Stop motor before relay test.");
+        Serial.println(errorHandler.hasCriticalError() ?
+            "Relay test blocked by critical fault. Reboot after correcting the fault." :
+            "Stop motor before relay test.");
         return;
     }
 

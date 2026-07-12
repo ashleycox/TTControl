@@ -59,10 +59,16 @@ public:
     
     // Check if a critical error has occurred since boot
     bool hasCriticalError() { return _criticalError; }
+    ErrorCode getCriticalCode() const { return _criticalCode; }
+    const char* getCriticalMessage() const { return _criticalMessage; }
+    uint32_t getSessionId() const { return _sessionId; }
     
 private:
     // Latched until reboot. The UI and diagnostics use this to show that a critical fault occurred even if outputs have already been shut down.
     bool _criticalError;
+    ErrorCode _criticalCode;
+    char _criticalMessage[96];
+    uint32_t _sessionId;
     
     void logToFile(ErrorCode code, const char* message);
 };

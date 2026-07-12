@@ -40,6 +40,7 @@ WaveformGenerator::WaveformGenerator() {
     _stateA.filterType = FILTER_NONE;
     _stateA.iirAlpha = 0.0;
     _stateA.firProfile = FIR_GENTLE;
+    _stateA.activePhaseOutputs = DEFAULT_PHASE_MODE;
     for(int i=0; i<4; i++) _stateA.phaseOffsets[i] = 0;
     
     // Start pending and active states identical so the first swap is safe even before any settings have been applied.
@@ -329,7 +330,7 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
         // Calculate samples for enabled phases; unused channels stay at the neutral sample before the 512 PWM offset is applied.
         int16_t samples[4];
         for (int ch = 0; ch < 4; ch++) {
-            samples[ch] = (ch < MAX_ACTIVE_PHASE_OUTPUTS) ? generateSample(ch) : 0;
+            samples[ch] = (ch < state->activePhaseOutputs) ? generateSample(ch) : 0;
             _lastSamples[ch] = samples[ch];
         }
         
@@ -420,7 +421,7 @@ void WaveformGenerator::setAmplitude(float amp) {
     unlockState();
 }
 
-void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s) {
+void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s, uint8_t phaseMode) {
     // Atomically publish a complete waveform tune: frequency, filters, and phase offsets. This is the preferred path during speed changes.
     if (!isfinite(freq)) freq = 0.0f;
     if (freq > MAX_OUTPUT_FREQUENCY_HZ) freq = MAX_OUTPUT_FREQUENCY_HZ;
@@ -432,6 +433,8 @@ void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s) {
     _pendingState->filterType = (FilterType)s.filterType;
     _pendingState->iirAlpha = isfinite(s.iirAlpha) ? s.iirAlpha : 0.5f;
     _pendingState->firProfile = (FirProfile)s.firProfile;
+    if (phaseMode < PHASE_1 || phaseMode > MAX_ACTIVE_PHASE_OUTPUTS) phaseMode = DEFAULT_PHASE_MODE;
+    _pendingState->activePhaseOutputs = phaseMode;
     
     for(int i=0; i<4; i++) {
         _pendingState->phaseOffsets[i] = phaseOffsetToAccumulator(s.phaseOffset[i]);

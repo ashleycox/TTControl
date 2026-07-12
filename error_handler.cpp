@@ -18,13 +18,24 @@ ErrorHandler errorHandler;
 
 ErrorHandler::ErrorHandler() {
     _criticalError = false;
+    _criticalCode = ERR_NONE;
+    _criticalMessage[0] = 0;
+    _sessionId = 0;
 }
 
 void ErrorHandler::begin() {
     // Filesystem initialization is handled by Settings before ErrorHandler starts.
+    if (_sessionId == 0) {
+        _sessionId = rp2040.hwrand32();
+        if (_sessionId == 0) _sessionId = micros() ^ (uint32_t)(uintptr_t)this;
+    }
 }
 
 void ErrorHandler::logEvent(ErrorCode code, const char* message) {
+    if (_sessionId == 0) {
+        _sessionId = rp2040.hwrand32();
+        if (_sessionId == 0) _sessionId = micros() ^ (uint32_t)(uintptr_t)this;
+    }
     // logEvent is for informational boot/runtime entries. It does not trigger UI alerts or motor actions.
     Serial.print("ERROR ");
     Serial.print(code);
@@ -38,6 +49,8 @@ void ErrorHandler::report(ErrorCode code, const char* message, bool critical) {
     if (critical) {
         // Stop outputs before doing file/UI work so safety action is not delayed by flash or display operations.
         _criticalError = true;
+        _criticalCode = code;
+        snprintf(_criticalMessage, sizeof(_criticalMessage), "%s", message ? message : "Critical fault");
         motor.emergencyStop();
     }
     
@@ -72,6 +85,10 @@ void ErrorHandler::logToFile(ErrorCode code, const char* message) {
 
     f = LittleFS.open("/error.log", "a");
     if (f) {
+        char session[9];
+        snprintf(session, sizeof(session), "%08lx", (unsigned long)_sessionId);
+        f.print(session);
+        f.print(",");
         f.print(hal.getMillis());
         f.print(",");
         f.print(code);

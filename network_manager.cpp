@@ -191,6 +191,13 @@ NetworkManager::NetworkManager()
 }
 
 void NetworkManager::begin() {
+    if (safeModeActive) {
+        setDefaults();
+        _config.enabled = false;
+        _loaded = true;
+        setStatus("Safe Mode");
+        return;
+    }
     // Load config first. The network may stay fully stopped in Eco standby mode even when networking is enabled.
     load();
 #if NETWORK_ENABLE
@@ -289,6 +296,7 @@ void NetworkManager::stop() {
 }
 
 bool NetworkManager::save() {
+    if (safeModeActive) return false;
     // Normalize access-control defaults before writing. A locked/read-only web UI must always have a PIN.
     _config.magic = NETWORK_CONFIG_MAGIC;
     _config.version = NETWORK_CONFIG_VERSION;
@@ -306,6 +314,7 @@ bool NetworkManager::save() {
 }
 
 bool NetworkManager::resetDefaults() {
+    if (safeModeActive) return false;
     setDefaults();
     return save();
 }

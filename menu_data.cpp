@@ -184,7 +184,10 @@ void saveMenuChangesAndExit() {
     motor.endRelayTest();
     settings.normalize();
     motor.applySettings();
-    settings.save(false, true);
+    if (!settings.save(false, true)) {
+        ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
+        return;
+    }
     ui.exitMenu();
 }
 
@@ -205,9 +208,17 @@ void actionCancelExit() {
 }
 
 void actionFactoryReset() {
+    if (motor.isMoving()) {
+        ui.showError("Stop Motor First", 2000);
+        return;
+    }
     // Confirmation keeps the destructive filesystem format behind a second click.
     ui.showConfirm("Factory Reset?", [](){
-        settings.factoryReset();
+        motor.emergencyStop();
+        if (!settings.factoryReset()) {
+            ui.showError("Reset Failed", 2000);
+            return;
+        }
         settings.load();
         motor.endRelayTest();
         motor.applySettings();
@@ -232,8 +243,8 @@ static void saveSecurityPin() {
         ui.showMessage("PIN 4-8 chars", 1500);
         return;
     }
-    networkManager.save();
-    ui.showMessage("PIN Saved", 1000);
+    if (networkManager.save()) ui.showMessage("PIN Saved", 1000);
+    else ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
 }
 
 static void actionEnterSecurity() {
@@ -252,8 +263,8 @@ static void actionEnterSecurity() {
 
     MenuAction* enableLock = new MenuAction("Enable Lock", [](){
         networkManager.setDeviceLockEnabled(true);
-        networkManager.save();
-        ui.showMessage("Lock Enabled", 1000);
+        if (networkManager.save()) ui.showMessage("Lock Enabled", 1000);
+        else ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
         actionEnterSecurity();
     });
     enableLock->setVisibleWhen([](){ return !networkManager.isDeviceLockEnabled(); });
@@ -261,8 +272,8 @@ static void actionEnterSecurity() {
 
     MenuAction* disableLock = new MenuAction("Disable Lock", [](){
         networkManager.setDeviceLockEnabled(false);
-        networkManager.save();
-        ui.showMessage("Lock Disabled", 1000);
+        if (networkManager.save()) ui.showMessage("Lock Disabled", 1000);
+        else ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
         actionEnterSecurity();
     });
     disableLock->setVisibleWhen([](){ return networkManager.isDeviceLockEnabled(); });
@@ -332,9 +343,12 @@ void buildPresetSlotMenu(int slot) {
     pageSlot->addItem(new MenuAction("Load", [](){
         if (settings.loadPreset(currentSlot)) {
             motor.applySettings();
-            settings.save(false, true);
-            ui.showMessage("Loaded!", 2000);
-            ui.exitMenu(); // Exit to apply
+            if (settings.save(false, true)) {
+                ui.showMessage("Loaded!", 2000);
+                ui.exitMenu(); // Exit to apply
+            } else {
+                ui.showError("Loaded, Save Failed", 2000);
+            }
         } else {
             ui.showError("Empty Slot", 2000);
         }
@@ -343,9 +357,12 @@ void buildPresetSlotMenu(int slot) {
     // Save writes the active settings snapshot to the chosen slot.
     pageSlot->addItem(new MenuAction("Save", [](){
         ui.showConfirm("Overwrite?", [](){
-            settings.savePreset(currentSlot);
-            ui.showMessage("Saved!", 2000);
-            ui.back();
+            if (settings.savePreset(currentSlot)) {
+                ui.showMessage("Saved!", 2000);
+                ui.back();
+            } else {
+                ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
+            }
         });
     }));
 
@@ -358,16 +375,19 @@ void buildPresetSlotMenu(int slot) {
 
     // MenuText only updates nameBuffer; Apply Name commits it to settings.
     pageSlot->addItem(new MenuAction("Apply Name", [](){
-        settings.renamePreset(currentSlot, nameBuffer);
-        ui.showMessage("Renamed!", 1000);
+        if (settings.renamePreset(currentSlot, nameBuffer)) ui.showMessage("Renamed!", 1000);
+        else ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
     }));
 
     // Reset Action
     pageSlot->addItem(new MenuAction("Clear", [](){
         ui.showConfirm("Clear Slot?", [](){
-            settings.resetPreset(currentSlot);
-            ui.showMessage("Cleared!", 2000);
-            ui.back();
+            if (settings.resetPreset(currentSlot)) {
+                ui.showMessage("Cleared!", 2000);
+                ui.back();
+            } else {
+                ui.showError(safeModeActive ? "Safe Mode Read Only" : "Clear Failed", 2000);
+            }
         });
     }));
 
@@ -456,8 +476,8 @@ void actionEnterBrakeTune() {
     }));
 
     pageBrakeTune->addItem(new MenuAction("Save Brake", [](){
-        settings.save(false, true);
-        ui.showMessage("Brake Saved", 1000);
+        if (settings.save(false, true)) ui.showMessage("Brake Saved", 1000);
+        else ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
     }));
 
     pageBrakeTune->addItem(new MenuAction("Back", [](){ ui.back(); }));
@@ -552,7 +572,10 @@ void actionEnterNetwork() {
     addBackItem(pageNetworkWeb);
 
     pageNetwork->addItem(new MenuAction("Apply", [](){
-        networkManager.save();
+        if (!networkManager.save()) {
+            ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
+            return;
+        }
         networkManager.restart();
         ui.showMessage("Network Applied", 1500);
     }));
@@ -560,7 +583,10 @@ void actionEnterNetwork() {
         NetworkConfig& cfg = networkManager.getConfig();
         cfg.enabled = true;
         cfg.mode = NETWORK_MODE_AP;
-        networkManager.save();
+        if (!networkManager.save()) {
+            ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
+            return;
+        }
         networkManager.restart();
         ui.showMessage("Setup AP On", 1500);
     }));
@@ -657,6 +683,31 @@ void actionClosedLoopTuneApply() {
 void actionClosedLoopTuneStop() {
     motor.cancelClosedLoopTuning();
     ui.showMessage("Tune Stopped", 1200);
+}
+
+void actionClosedLoopBasePreview() {
+    float currentHz;
+    float proposedHz;
+    float correctionHz;
+    char msg[120];
+    motor.getBaseFrequencyCalibration(currentHz, proposedHz, correctionHz, msg, sizeof(msg));
+    ui.showMessage(msg, 3000);
+}
+
+void actionClosedLoopBaseApply() {
+    char msg[120];
+    if (motor.applyBaseFrequencyCalibration(msg, sizeof(msg))) ui.showMessage(msg, 2500);
+    else ui.showError(msg, 2500);
+}
+
+void actionClosedLoopBaseSave() {
+    char msg[120];
+    if (!motor.applyBaseFrequencyCalibration(msg, sizeof(msg))) {
+        ui.showError(msg, 2500);
+        return;
+    }
+    if (settings.save(false, true)) ui.showMessage("Base Frequency Saved", 2000);
+    else ui.showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
 }
 
 void actionEnterClosedLoop() {
@@ -879,6 +930,9 @@ void actionEnterClosedLoop() {
         ui.showMessage("PID Reset", 1000);
     }));
     pageClosedLoopActions->addItem(new MenuAction("Sensor Test", actionClosedLoopStatus));
+    pageClosedLoopActions->addItem(new MenuAction("Base Preview", actionClosedLoopBasePreview));
+    pageClosedLoopActions->addItem(new MenuAction("Base Apply", actionClosedLoopBaseApply));
+    pageClosedLoopActions->addItem(new MenuAction("Base Save", actionClosedLoopBaseSave));
 
     pageClosedLoopSetup->addItem(new MenuAction("Setup Start", actionClosedLoopSetupStart));
     pageClosedLoopSetup->addItem(new MenuAction("Setup Stat", actionClosedLoopSetupStatus));

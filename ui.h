@@ -125,6 +125,7 @@ private:
     void drawConfirm();
     void drawMessage();
     void drawError();
+    void drawCriticalInterlock();
     void drawGoodbye();
     
     // Optional serial mirror for UI tests without the OLED in view.

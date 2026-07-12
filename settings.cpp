@@ -8,6 +8,7 @@
 
 #include "settings.h"
 #include "error_handler.h"
+#include "globals.h"
 #include <ArduinoJson.h>
 #include <math.h>
 
@@ -910,6 +911,7 @@ bool writeBootMarkerState(uint8_t state) {
 // --- Helper Functions for Preset Management ---
 
 bool Settings::loadFromSlot(uint8_t slot, GlobalSettings& target) {
+    if (safeModeActive) return false;
     // Slot indexes are zero-based internally even though user-facing labels are one-based in serial/web text.
     char path[32];
     snprintf(path, sizeof(path), "/preset_%d.bin", slot);
@@ -917,20 +919,27 @@ bool Settings::loadFromSlot(uint8_t slot, GlobalSettings& target) {
 }
 
 bool Settings::saveToSlot(uint8_t slot, const GlobalSettings& source) {
+    if (safeModeActive) return false;
     char path[32];
     snprintf(path, sizeof(path), "/preset_%d.bin", slot);
     return writeSettingsBlob(path, PRESET_FILE_MAGIC, source);
 }
 
 bool Settings::renamePreset(uint8_t slot, const char* name) {
+    if (safeModeActive) return false;
     if (slot >= MAX_PRESET_SLOTS || !name) return false;
+    char previous[17];
+    memcpy(previous, _data.presetNames[slot], sizeof(previous));
     // Names are fixed width in GlobalSettings; truncate rather than resizing the persisted struct.
     strncpy(_data.presetNames[slot], name, 16);
     _data.presetNames[slot][16] = 0; // Ensure null termination
-    return save();
+    if (save()) return true;
+    memcpy(_data.presetNames[slot], previous, sizeof(previous));
+    return false;
 }
 
 void Settings::duplicatePreset(uint8_t src, uint8_t dest) {
+    if (safeModeActive) return;
     if (src >= MAX_PRESET_SLOTS || dest >= MAX_PRESET_SLOTS) return;
     GlobalSettings temp;
     if (loadFromSlot(src, temp)) {
@@ -944,8 +953,12 @@ void Settings::resetSessionRuntime() {
 }
 
 bool Settings::resetTotalRuntime() {
+    if (safeModeActive) return false;
+    uint32_t previous = _data.totalRuntime;
     _data.totalRuntime = 0;
-    return save();
+    if (save()) return true;
+    _data.totalRuntime = previous;
+    return false;
 }
 
 Settings::Settings() {
@@ -1020,6 +1033,11 @@ void Settings::handlePendingRollback() {
 }
 
 void Settings::load() {
+    if (safeModeActive) {
+        setDefaults();
+        _lastRuntimeUpdate = millis();
+        return;
+    }
     GlobalSettings loaded;
     bool migrated = false;
     if (loadSettingsBlob(_filename, SETTINGS_FILE_MAGIC, loaded, &migrated)) {
@@ -1039,6 +1057,10 @@ void Settings::load() {
 }
 
 bool Settings::save(bool verbose, bool rollbackProtected) {
+    if (safeModeActive) {
+        if (verbose) Serial.println("Safe Mode is read-only; settings were not saved.");
+        return false;
+    }
     if (rollbackProtected) {
         // Preserve a known-good copy before writing the candidate settings file.
         GlobalSettings knownGood;
@@ -1071,6 +1093,7 @@ bool Settings::save(bool verbose, bool rollbackProtected) {
 }
 
 void Settings::markBootSuccessful() {
+    if (safeModeActive) return;
     // Called after Core 1 fills a waveform buffer. At that point the current settings have survived enough of boot to become the new known-good copy.
     uint8_t markerState = readBootMarkerState();
     if (markerState == SETTINGS_BOOT_NONE && !_bootCandidateActive) return;
@@ -1083,12 +1106,20 @@ void Settings::markBootSuccessful() {
 }
 
 bool Settings::resetDefaults() {
+    if (safeModeActive) {
+        setDefaults();
+        return false;
+    }
     setDefaults();
     writeBootMarkerState(SETTINGS_BOOT_NONE);
     return save();
 }
 
 bool Settings::factoryReset() {
+    if (safeModeActive) return false;
+    if (currentMotorState == STATE_STARTING || currentMotorState == STATE_RUNNING || currentMotorState == STATE_STOPPING) {
+        return false;
+    }
     // Format filesystem to clear all settings, presets, logs, and boot markers.
     if (!LittleFS.format()) return false;
     _rollbackApplied = false;
@@ -1492,6 +1523,7 @@ void Settings::setDefaults() {
 }
 
 bool Settings::loadPreset(uint8_t slot) {
+    if (safeModeActive) return false;
     if (slot >= MAX_PRESET_SLOTS) return false;
 
     // Loading a preset replaces the active global settings in RAM. The caller is responsible for applying the new motor/waveform settings.
@@ -1505,12 +1537,14 @@ bool Settings::loadPreset(uint8_t slot) {
 }
 
 bool Settings::savePreset(uint8_t slot) {
+    if (safeModeActive) return false;
     if (slot >= MAX_PRESET_SLOTS) return false;
     // The compatible blob remains a GlobalSettings payload; loadPreset() deliberately applies only its motor-tuning subset.
     return saveToSlot(slot, _data);
 }
 
 bool Settings::resetPreset(uint8_t slot) {
+    if (safeModeActive) return false;
     if (slot >= MAX_PRESET_SLOTS) return false;
 
     char path[32];
