@@ -119,8 +119,12 @@ void WaveformGenerator::setupPWM() {
         _sampleRateHz = FALLBACK_SAMPLE_RATE_HZ;
     }
     
-    pwm_init(_pwmSlice0, &config, true);
-    pwm_init(_pwmSlice1, &config, true);
+    // Configure both carrier slices while stopped, then align their counters before enabling them in one register write.
+    pwm_init(_pwmSlice0, &config, false);
+    pwm_init(_pwmSlice1, &config, false);
+    pwm_set_counter(_pwmSlice0, 0);
+    pwm_set_counter(_pwmSlice1, 0);
+    pwm_set_mask_enabled((1u << _pwmSlice0) | (1u << _pwmSlice1));
 }
 
 void WaveformGenerator::setupDMA() {
