@@ -62,6 +62,13 @@ MotorController::MotorController() {
     _isReducedAmp = false;
     _brakePulseLastToggle = 0;
     _brakePulseState = false;
+    _activeBrakeMode = BRAKE_OFF;
+    _activeBrakeDurationMs = 0.0f;
+    _activeBrakePulseGapMs = 0.0f;
+    _activeBrakeStartFreq = 0.0f;
+    _activeBrakeStopFreq = 0.0f;
+    _activeSoftStopCutoff = 0.0f;
+    _activeBrakeMuteOnComplete = false;
     _relaysActive = false;
     _relayActivationPending = false;
     _relayStageTime = 0;
@@ -165,7 +172,7 @@ void MotorController::begin() {
     if (settings.get().bootSpeed <= 2) {
         _currentSpeedMode = (SpeedMode)settings.get().bootSpeed;
     } else {
-        _currentSpeedMode = settings.get().currentSpeed;
+        _currentSpeedMode = (SpeedMode)settings.get().currentSpeed;
     }
     if (_currentSpeedMode == SPEED_78 && !settings.get().enable78rpm) {
         _currentSpeedMode = SPEED_33;
@@ -532,7 +539,7 @@ void MotorController::start() {
     if (_relayTestMode) return;
     if (errorHandler.hasCriticalError()) return;
     if (powerStage.hasFault()) return;
-    if (_state == STATE_RUNNING || _state == STATE_STARTING) return;
+    if (_state == STATE_RUNNING || _state == STATE_STARTING || _state == STATE_STOPPING) return;
 
     if (_state == STATE_STANDBY) {
         _state = STATE_STOPPED;
@@ -583,24 +590,34 @@ void MotorController::start() {
 
 void MotorController::stop() {
     if (_relayTestMode) return;
-    if (_state == STATE_STOPPED || _state == STATE_STANDBY) return;
+    if (_state == STATE_STOPPED || _state == STATE_STANDBY || _state == STATE_STOPPING) return;
 
     _state = STATE_STOPPING;
     powerStage.notifyStopping();
     _stateStartTime = hal.getMillis();
     resetClosedLoopControl(false);
 
+    // Snapshot every parameter used by the active stop. Settings may be edited
+    // remotely while braking, but an in-progress hardware sequence must remain
+    // internally consistent until the outputs have been interlocked off.
+    _activeBrakeMode = effectiveBrakeMode();
+    _activeBrakeDurationMs = settings.get().brakeDuration * 1000.0f;
+    _activeBrakePulseGapMs = settings.get().brakePulseGap * 1000.0f;
+    _activeBrakeStartFreq = settings.get().brakeStartFreq;
+    _activeBrakeStopFreq = settings.get().brakeStopFreq;
+    _activeSoftStopCutoff = settings.get().softStopCutoff;
+    _activeBrakeMuteOnComplete = settings.get().muteRelayLinkStartStop;
+
     // Configure braking before entering the periodic braking handler.
-    BrakeMode brakeMode = effectiveBrakeMode();
-    if (brakeMode == BRAKE_PULSE) {
+    if (_activeBrakeMode == BRAKE_PULSE) {
         _brakePulseState = true;
         _brakePulseLastToggle = hal.getMillis();
         // Reverse frequency for braking torque
         setCommandedFrequency(-_targetFreq);
         _currentAmp = _targetAmp;
         applyDriveAmplitude();
-    } else if (brakeMode == BRAKE_RAMP) {
-        setCommandedFrequency(settings.get().brakeStartFreq);
+    } else if (_activeBrakeMode == BRAKE_RAMP) {
+        setCommandedFrequency(_activeBrakeStartFreq);
     }
 
     if (settings.get().pitchResetOnStop) {
@@ -609,9 +626,8 @@ void MotorController::stop() {
 }
 
 void MotorController::handleBraking(uint32_t now) {
-    float duration = settings.get().brakeDuration * 1000.0;
+    float duration = _activeBrakeDurationMs;
     float elapsed = now - _stateStartTime;
-    BrakeMode brakeMode = effectiveBrakeMode();
 
     // Check if braking is complete
     if (elapsed >= duration) {
@@ -621,7 +637,7 @@ void MotorController::handleBraking(uint32_t now) {
         powerStage.disable();
         waveform.setEnabled(false);
 
-        if (settings.get().muteRelayLinkStartStop) {
+        if (_activeBrakeMuteOnComplete) {
             setRelays(false); // Mute
         }
 
@@ -631,10 +647,10 @@ void MotorController::handleBraking(uint32_t now) {
     }
 
     // Handle specific braking modes
-    if (brakeMode == BRAKE_RAMP) {
+    if (_activeBrakeMode == BRAKE_RAMP) {
         // Linearly ramp frequency down
-        float startF = settings.get().brakeStartFreq;
-        float stopF = settings.get().brakeStopFreq;
+        float startF = _activeBrakeStartFreq;
+        float stopF = _activeBrakeStopFreq;
         float currentF = startF - ((startF - stopF) * (elapsed / duration));
         setCommandedFrequency(currentF);
 
@@ -642,9 +658,9 @@ void MotorController::handleBraking(uint32_t now) {
         _currentAmp = _targetAmp * (1.0 - (elapsed / duration));
         applyDriveAmplitude();
     }
-    else if (brakeMode == BRAKE_PULSE) {
+    else if (_activeBrakeMode == BRAKE_PULSE) {
         // Pulse the reverse torque on/off
-        float gap = settings.get().brakePulseGap * 1000.0;
+        float gap = _activeBrakePulseGapMs;
         if (now - _brakePulseLastToggle >= gap) {
             _brakePulseLastToggle = now;
             _brakePulseState = !_brakePulseState;
@@ -657,10 +673,10 @@ void MotorController::handleBraking(uint32_t now) {
             }
         }
     }
-    else if (brakeMode == BRAKE_SOFT_STOP) {
+    else if (_activeBrakeMode == BRAKE_SOFT_STOP) {
         // Active Coasting: Gently bring frequency down to the configured cutoff point while maintaining driving torque
         float startF = fabsf(_targetFreq);
-        float stopF = settings.get().softStopCutoff;
+        float stopF = _activeSoftStopCutoff;
 
         // If we're already below the cutoff, or duration is 0, just stop instantly like BRAKE_OFF
         if (startF <= stopF || duration <= 0) {
@@ -764,6 +780,7 @@ void MotorController::toggleStartStop() {
 void MotorController::toggleStandby() {
     if (_relayTestMode) return;
     if (!ENABLE_STANDBY) return;
+    if (_state == STATE_STOPPING) return;
     if (_state == STATE_STANDBY && errorHandler.hasCriticalError()) return;
 
     if (_state == STATE_STANDBY) {
@@ -848,6 +865,9 @@ void MotorController::adjustSpeed(int delta) {
 }
 
 void MotorController::setSpeed(SpeedMode mode) {
+    // A configured braking sequence owns frequency and phase progression until
+    // it completes. Speed selection can be changed once the state is stopped.
+    if (_state == STATE_STOPPING) return;
     if (mode < SPEED_33 || mode > SPEED_78) mode = SPEED_33;
     if (mode == SPEED_78 && !settings.get().enable78rpm) mode = SPEED_45;
     if (_currentSpeedMode == mode) return;
@@ -899,6 +919,7 @@ void MotorController::setSpeed(SpeedMode mode) {
 
 void MotorController::setPitch(float percent) {
     // Pitch is a shared percentage; frequency is recalculated from it in update() so changing pitch does not immediately do waveform work from input code.
+    if (_state == STATE_STOPPING) return;
     if (!isfinite(percent)) percent = 0.0f;
     if (percent > _pitchRange) percent = _pitchRange;
     if (percent < -_pitchRange) percent = -_pitchRange;
@@ -915,6 +936,7 @@ void MotorController::togglePitchRange() {
 }
 
 void MotorController::adjustPitchFreq(float deltaHz) {
+    if (_state == STATE_STOPPING) return;
     // Calculate current pitch in Hz
     float baseFreq = settings.getCurrentSpeedSettings().frequency;
     if (!isfinite(deltaHz)) deltaHz = 0.0f;
@@ -2096,7 +2118,7 @@ float MotorController::getMotionProgress() {
     }
 
     if (_state == STATE_STOPPING) {
-        float duration = settings.get().brakeDuration * 1000.0;
+        float duration = _activeBrakeDurationMs;
         if (duration <= 0.0) return 1.0;
         float progress = (float)(now - _stateStartTime) / duration;
         if (progress < 0.0) progress = 0.0;

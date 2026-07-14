@@ -211,6 +211,13 @@ private:
     // Braking
     uint32_t _brakePulseLastToggle;
     bool _brakePulseState;
+    BrakeMode _activeBrakeMode;
+    float _activeBrakeDurationMs;
+    float _activeBrakePulseGapMs;
+    float _activeBrakeStartFreq;
+    float _activeBrakeStopFreq;
+    float _activeSoftStopCutoff;
+    bool _activeBrakeMuteOnComplete;
     
     // Relay Control
     bool _relaysActive;

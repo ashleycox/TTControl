@@ -10,7 +10,7 @@
 #define GLOBALS_H
 
 #include "types.h"
-#include <Adafruit_SSD1306.h>
+#include "display.h"
 
 // Forward declarations keep every module from needing the full class headers. Include the concrete header in .cpp files when member functions are used.
 class Settings;
@@ -27,9 +27,6 @@ extern Settings settings;
 extern WaveformGenerator waveform;
 extern MotorController motor;
 extern UserInterface ui;
-
-// The OLED driver is also global because the UI owns drawing but setup() owns I2C/display initialization.
-extern Adafruit_SSD1306 display;
 
 /*
  * --- Shared State Variables ---

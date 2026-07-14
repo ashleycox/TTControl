@@ -198,6 +198,7 @@ static const char* rampTypeName(uint8_t ramp) {
     return ramp == RAMP_SCURVE ? "S-Curve" : "Linear";
 }
 
+#if CLOSED_LOOP_SPEED_ENABLE
 static const char* closedLoopSensorName(uint8_t mode) {
     return mode == CLOSED_LOOP_SENSOR_QUADRATURE ? "Quadrature" : "Pulse";
 }
@@ -237,6 +238,7 @@ static const char* closedLoopDirectionName(int8_t direction) {
     if (direction == SPEED_FEEDBACK_DIR_REVERSE) return "Reverse";
     return "Unknown";
 }
+#endif
 
 static void printPresetList();
 static void printSettingsDump();
@@ -245,11 +247,13 @@ static void handleRelayTestCommand(const String& input);
 static void handleWifiCommand(const String& input);
 static void updateWifiSerialTasks();
 static void printSafetyDiagnostic();
+#if CLOSED_LOOP_SPEED_ENABLE
 static void printClosedLoopStatus();
 static void handleClosedLoopCommand(const String& input);
 static void printClosedLoopSetupStatus();
 static void printClosedLoopHealth();
 static void printClosedLoopTrend();
+#endif
 
 static int clampInt(int value, int minValue, int maxValue) {
     if (value < minValue) return minValue;
@@ -599,9 +603,11 @@ static WifiWizardStep wifiWizardStep = WIFI_WIZARD_IDLE;
 static NetworkConfig wifiWizardConfig;
 static String wifiWizardScanSsids[WIFI_WIZARD_MAX_SCAN_RESULTS];
 static uint8_t wifiWizardScanCount = 0;
+#if NETWORK_ENABLE
 static bool wifiScanActive = false;
 static bool wifiScanForWizard = false;
 static uint32_t wifiScanStartedMs = 0;
+#endif
 
 static bool wizardNeedsStation() {
     // Station prompts are only needed when the selected mode will connect to an existing Wi-Fi network.
@@ -866,8 +872,8 @@ static bool startWifiScan(bool forWizard) {
 #endif
 }
 
-static void finishWifiScan(int count) {
 #if NETWORK_ENABLE
+static void finishWifiScan(int count) {
     // Store only unique named SSIDs for wizard selection; hidden networks can still be typed manually.
     wifiScanActive = false;
     wifiWizardScanCount = 0;
@@ -911,10 +917,8 @@ static void finishWifiScan(int count) {
         setWifiWizardStep(WIFI_WIZARD_SSID);
     }
     wifiScanForWizard = false;
-#else
-    (void)count;
-#endif
 }
+#endif
 
 static void updateWifiSerialTasks() {
 #if NETWORK_ENABLE
@@ -1901,6 +1905,8 @@ void handleSerialCommands() {
         if (input == "start") {
             if (motor.isRelayTestMode()) {
                 Serial.println("Exit relay test before starting.");
+            } else if (motor.getState() == STATE_STOPPING) {
+                Serial.println("Start blocked until braking completes.");
             } else if (errorHandler.hasCriticalError()) {
                 Serial.println("Start blocked by critical fault. Reboot after correcting the fault.");
             } else {
@@ -1917,6 +1923,10 @@ void handleSerialCommands() {
             }
         }
         else if (input.startsWith("speed ")) {
+            if (motor.getState() == STATE_STOPPING) {
+                Serial.println("Speed change blocked until braking completes.");
+                return;
+            }
             int s = -1;
             if (!parseStrictInt(input.substring(6), s)) {
                 Serial.println("Invalid speed index (0-2)");
@@ -1935,6 +1945,10 @@ void handleSerialCommands() {
             }
         }
         else if (input == "s") {
+            if (motor.getState() == STATE_STOPPING) {
+                Serial.println("Speed change blocked until braking completes.");
+                return;
+            }
             motor.cycleSpeed();
             Serial.println("Speed Cycled");
         }
@@ -1942,10 +1956,18 @@ void handleSerialCommands() {
             printStatus();
         }
         else if (input == "t") {
+            if (motor.getState() == STATE_STOPPING) {
+                Serial.println("Standby blocked until braking completes.");
+                return;
+            }
             motor.toggleStandby();
             Serial.println("Standby Toggled");
         }
         else if (input == "p") {
+            if (motor.getState() == STATE_STOPPING) {
+                Serial.println("Pitch reset blocked until braking completes.");
+                return;
+            }
             motor.resetPitch();
             Serial.println("Pitch Reset");
         }
@@ -1966,6 +1988,13 @@ void handleSerialCommands() {
             settings.load();
             motor.endRelayTest();
             motor.applySettings();
+#if NETWORK_ENABLE
+            if (!networkManager.resetDefaults()) {
+                Serial.println("Motor settings reset, but network defaults could not be saved.");
+                return;
+            }
+            networkManager.restart();
+#endif
             Serial.println("Factory reset complete.");
         }
         else if (input == "help") {
@@ -1999,6 +2028,8 @@ void handleSerialCommands() {
         else if (input == "brake test start") {
             if (motor.isRelayTestMode()) {
                 Serial.println("Exit relay test before starting.");
+            } else if (motor.getState() == STATE_STOPPING) {
+                Serial.println("Start blocked until braking completes.");
             } else {
                 if (motor.isStandby()) motor.toggleStandby();
                 motor.start();
@@ -2017,8 +2048,7 @@ void handleSerialCommands() {
             errorHandler.dumpLog(Serial);
         }
         else if (input == "error clear") {
-            errorHandler.clearLogs();
-            Serial.println("Error Log Cleared");
+            Serial.println(errorHandler.clearLogs() ? "Error log cleared." : "Error log clear failed.");
         }
         else if (input == "diag safety") {
             printSafetyDiagnostic();
@@ -2038,6 +2068,10 @@ void handleSerialCommands() {
             Serial.println("---------------------");
         }
         else if (input.startsWith("set ")) {
+            if (motor.getState() == STATE_STOPPING) {
+                Serial.println("Setting changes blocked until braking completes.");
+                return;
+            }
             int firstSpace = input.indexOf(' ');
             int secondSpace = input.indexOf(' ', firstSpace + 1);
             
@@ -2224,6 +2258,25 @@ void printStatus() {
     Serial.print(", State: ");
     Serial.println(networkManager.isDeviceLocked() ? "LOCKED" : "OPEN");
 
+    Serial.print("Display: ");
+    Serial.print(displayManager.driverName());
+    Serial.print(" via ");
+    Serial.print(displayManager.transportName());
+    Serial.print(" / ");
+    Serial.print(displayManager.wiringProfileName());
+    Serial.print(", ");
+    Serial.print(displayManager.physicalWidth());
+    Serial.print('x');
+    Serial.print(displayManager.physicalHeight());
+    Serial.print(", ");
+    if (!displayManager.capabilities().physicalPanel) {
+        Serial.println("headless");
+    } else if (!displayManager.isAvailable()) {
+        Serial.println("unavailable");
+    } else {
+        Serial.println(displayManager.isPowered() ? "on" : "sleeping");
+    }
+
 #if CLOSED_LOOP_SPEED_ENABLE
     printClosedLoopStatus();
 #endif
@@ -2298,8 +2351,8 @@ void printStatus() {
     Serial.println("-------------------------");
 }
 
-static void printClosedLoopStatus() {
 #if CLOSED_LOOP_SPEED_ENABLE
+static void printClosedLoopStatus() {
     // Closed-loop status combines sensor health, controller output, and tuning recommendations so a single command is enough for bench diagnosis.
     SpeedFeedbackStatus feedback = speedFeedback.getStatus();
 
@@ -2395,11 +2448,9 @@ static void printClosedLoopStatus() {
     Serial.print("CL Tune Apply: ");
     Serial.println(tuning.canApplyRecommendation ? "available" : "none");
     printClosedLoopHealth();
-#endif
 }
 
 static void printClosedLoopHealth() {
-#if CLOSED_LOOP_SPEED_ENABLE
     SpeedFeedbackStatus feedback = speedFeedback.getStatus();
 
     Serial.print("CL Health: accepted ");
@@ -2425,11 +2476,9 @@ static void printClosedLoopHealth() {
     Serial.print(" us (");
     Serial.print(feedback.averageJitterPercent, 2);
     Serial.println("%)");
-#endif
 }
 
 static void printClosedLoopTrend() {
-#if CLOSED_LOOP_SPEED_ENABLE
     // Trend points are oldest-to-newest from MotorController's ring buffer.
     Serial.println("--- Closed-Loop Trend ---");
     uint8_t count = motor.getClosedLoopTrendCount();
@@ -2459,11 +2508,9 @@ static void printClosedLoopTrend() {
         Serial.println(point.locked ? "locked" : "unlocked");
     }
     Serial.println("-------------------------");
-#endif
 }
 
 static void printClosedLoopSetupStatus() {
-#if CLOSED_LOOP_SPEED_ENABLE
     SpeedFeedbackSetupStatus setup = speedFeedback.getSetupStatus();
 
     Serial.println("--- Closed-Loop Setup ---");
@@ -2496,11 +2543,9 @@ static void printClosedLoopSetupStatus() {
     Serial.print("Suggested reverse: ");
     Serial.println(yesNoText(setup.suggestedReverseDirection));
     Serial.println("-------------------------");
-#endif
 }
 
 static void handleClosedLoopCommand(const String& input) {
-#if CLOSED_LOOP_SPEED_ENABLE
     // Closed-loop commands are parsed with quoted args for consistency with the Wi-Fi command parser, even though most subcommands are single words.
     String rest = input.length() > 2 ? input.substring(2) : "";
     rest.trim();
@@ -2672,10 +2717,8 @@ static void handleClosedLoopCommand(const String& input) {
     } else {
         Serial.println("Unknown setup command. Use start, status, apply, or stop.");
     }
-#else
-    (void)input;
-#endif
 }
+#endif
 
 static void printSafetyDiagnostic() {
     // Dry-run only: verifies configuration ranges and reports what action commands would do without touching relays, PWM, or motor state.
@@ -3373,6 +3416,10 @@ static void handlePresetCommand(const String& input) {
     }
 
     if (input.startsWith("preset load ")) {
+        if (motor.getState() == STATE_STOPPING) {
+            Serial.println("Preset load blocked until braking completes.");
+            return;
+        }
         int slotNumber = 0;
         if (!parseStrictInt(input.substring(12), slotNumber)) {
             Serial.println("Invalid preset slot (1-5).");

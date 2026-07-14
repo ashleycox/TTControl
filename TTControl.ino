@@ -7,11 +7,9 @@
  */
 
 #include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 
 #include "config.h"
+#include "display.h"
 #include "types.h"
 #include "globals.h"
 #include "settings.h"
@@ -33,8 +31,6 @@
  * Keeping ownership here makes the Arduino sketch the composition root for the
  * firmware while the modules stay focused on behavior.
  */
-Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
-
 Settings settings;
 WaveformGenerator waveform;
 MotorController motor;
@@ -111,17 +107,26 @@ void setup() {
     errorHandler.logEvent(ERR_RESET_CAUSE, resetMsg);
     systemMonitor.begin();
 
-    // Initialize Display (I2C)
-    Wire.setSDA(PIN_I2C0_SDA);
-    Wire.setSCL(PIN_I2C0_SCL);
-    Wire.begin();
-    
-    if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS)) {
-        Serial.println(F("SSD1306 allocation failed"));
-        // Keep booting so serial diagnostics and safe hardware defaults remain available even when the OLED is disconnected or failed.
+    // Display failure is non-fatal: the logical canvas, serial CLI, web UI, and safe hardware defaults remain available.
+    if (!displayManager.begin()) {
+        if (SERIAL_MONITOR_ENABLE) {
+            Serial.print(F("Display initialization failed: "));
+            Serial.println(displayManager.driverName());
+        }
+    } else if (SERIAL_MONITOR_ENABLE) {
+        Serial.print(F("Display: "));
+        Serial.print(displayManager.driverName());
+        Serial.print(F(" via "));
+        Serial.print(displayManager.transportName());
+        Serial.print(F(" / "));
+        Serial.print(displayManager.wiringProfileName());
+        Serial.print(F(" ("));
+        Serial.print(displayManager.physicalWidth());
+        Serial.print('x');
+        Serial.print(displayManager.physicalHeight());
+        Serial.println(')');
     }
-    display.clearDisplay();
-    display.display();
+    displayManager.setBrightness(settings.get().displayBrightness);
 
     // UI and motor startup are separated: UI sets up displays and inputs, then MotorController applies relay and waveform-safe defaults.
     ui.begin();
@@ -133,7 +138,7 @@ void setup() {
     networkManager.begin();
     webInterface.begin();
     
-    Serial.println("Core 0 Setup Complete");
+    if (SERIAL_MONITOR_ENABLE) Serial.println("Core 0 Setup Complete");
     
     /*
      * Enable Watchdog Timer (2000ms timeout)
@@ -161,6 +166,7 @@ void loop() {
     networkManager.update();
     webInterface.update();
     systemMonitor.update();
+    ui.render();
     systemMonitor.endCore0Loop();
     
     // Feed the watchdog only after waveform generation has proved it is alive. If Core 1 or DMA service stalls, the watchdog reset is the safest outcome.
@@ -195,7 +201,7 @@ void setup1() {
     waveform.begin();
     core1HeartbeatMs = hal.getMillis();
     
-    Serial.println("Core 1 Setup Complete");
+    if (SERIAL_MONITOR_ENABLE) Serial.println("Core 1 Setup Complete");
 }
 
 void loop1() {

@@ -14,7 +14,7 @@ The setup wizard covers:
 - Setup access point fallback, name, password, and channel.
 - Network or Eco standby.
 
-The same settings can be entered through the OLED Network menu or the [Serial interface](serial-interface.md). Blank browser password fields retain the saved credential; the removal controls clear it explicitly.
+The same settings can be entered through the local Network menu or the [Serial interface](serial-interface.md). Blank browser password fields retain the saved credential; the removal controls clear it explicitly.
 
 ## Pages
 
@@ -25,7 +25,7 @@ The same settings can be entered through the OLED Network menu or the [Serial in
 - **Network:** Station, access point, addressing, standby, and access-control settings.
 - **Presets:** Load, save, rename, clear, compare, import, and export.
 - **Bench:** Pre-checks, supported relay tests, brake checks, speed and pitch checks, closed-loop setup and tuning, amplifier state, and a bench report.
-- **Diagnostics:** Firmware and build information, feature flags, pin assignments, network state, stored-file state, output status, and recent browser events.
+- **Diagnostics:** Firmware and build information, display driver/transport/wiring profile/geometry/state, feature flags, pin assignments, network state, stored-file state, output status, and recent browser events.
 - **Errors:** Stored error log and clear action.
 
 The selected home page is stored on the device. System, Light, Dark, and High Contrast themes are available, together with large controls and reduced-motion support.
@@ -41,6 +41,8 @@ The settings schema and Bench page follow the compiled output backend:
 
 The 78 RPM controls are hidden when 78 RPM is disabled. Requests from an out-of-date page are still checked and rejected by the firmware.
 
+During Stopping, start, standby, speed, pitch, general-settings, and preset-load writes return HTTP 409 until the active braking sequence completes. Stop remains idempotent and does not restart the braking timer.
+
 ## Access control
 
 Fresh network defaults enable read-only guest mode and Device UI Lock. Status pages remain available, but changes require the shared 4-8 character PIN.
@@ -51,7 +53,7 @@ Fresh network defaults enable read-only guest mode and Device UI Lock. Status pa
 - Open setup mode cannot reach motor, preset, log, diagnostic, or general settings routes.
 - Password and PIN fields are write-only. Status and diagnostics report whether a credential exists but never return it.
 - Security headers restrict framing, referrers, content types, and script or style sources.
-- Device UI Lock also protects Serial Monitor writes and OLED menu entry. Physical stop and standby controls remain available for safety.
+- Device UI Lock also protects Serial Monitor writes and local menu entry. Physical stop and standby controls remain available for safety.
 
 ## Applying settings
 
@@ -75,7 +77,7 @@ Network settings use their own versioned, CRC-checked LittleFS file with tempora
 ## Related documentation
 
 - [Features](features.md)
-- [OLED user interface](user-interface.md)
+- [User interface](user-interface.md)
 - [Serial interface](serial-interface.md)
 - [Closed-loop control](closed-loop-control.md)
 - [Settings and presets](settings-and-presets.md)

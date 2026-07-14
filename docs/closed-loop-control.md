@@ -66,7 +66,7 @@ Closed-loop error records include the target, measured RPM, error, correction, s
 
 ## Sensor setup
 
-The OLED, Serial Monitor, and web Bench page can capture one manually turned platter revolution. The result reports:
+The local display, Serial Monitor, and web Bench page can capture one manually turned platter revolution. The result reports:
 
 - Accepted and rejected transitions.
 - Captured count.
@@ -101,11 +101,11 @@ Runtime diagnostics include:
 - Interval jitter.
 - A rolling trend of target, measured RPM, error, correction, signal, and lock state.
 
-These values are available through the OLED tools, [Serial interface](serial-interface.md), web dashboard and Bench page, diagnostics, status API, preset JSON, and full backup when the feature is compiled.
+These values are available through the local-display tools, [Serial interface](serial-interface.md), web dashboard and Bench page, diagnostics, status API, preset JSON, and full backup when the feature is compiled.
 
 ## Related documentation
 
-The complete OLED menu is listed in [OLED user interface](user-interface.md), and all `cl_*` keys and commands are listed in [Serial interface](serial-interface.md).
+The complete local menu is listed in [User interface](user-interface.md), and all `cl_*` keys and commands are listed in [Serial interface](serial-interface.md).
 
 - [Features](features.md)
 - [Web interface](web-interface.md)

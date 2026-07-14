@@ -19,29 +19,29 @@ The [complete feature reference](docs/features.md) covers operating ranges, feat
 - Optional [pulse or quadrature closed-loop speed control](docs/closed-loop-control.md).
 - Optional amplifier temperature and thermal-cut-out monitoring.
 - Five [motor-tuning presets](docs/settings-and-presets.md) with JSON import and export.
-- [OLED menu](docs/user-interface.md), [Serial Monitor interface](docs/serial-interface.md), and an optional [local web interface](docs/web-interface.md) on Wi-Fi boards.
+- A [local display UI](docs/user-interface.md), [Serial Monitor interface](docs/serial-interface.md), and an optional [local web interface](docs/web-interface.md) on Wi-Fi boards.
 - CRC-checked LittleFS settings, known-good rollback, Safe Mode, and a persistent error log, covered in [Settings and presets](docs/settings-and-presets.md).
 
 ## Supported hardware
 
 | Component | Standard configuration |
 | :--- | :--- |
-| Microcontroller | [Pimoroni PicoPlus2](https://shop.pimoroni.com/products/pimoroni-pico-plus-2), Pimoroni PicoPlus2W, or [Raspberry Pi Pico 2 W](https://www.raspberrypi.com/products/raspberry-pi-pico-2/) |
+| Microcontroller | RP2350 primary: [Pimoroni PicoPlus2](https://shop.pimoroni.com/products/pimoroni-pico-plus-2), PicoPlus2W, or [Raspberry Pi Pico 2/Pico 2 W](https://www.raspberrypi.com/products/raspberry-pi-pico-2/). RP2040 compatibility: Raspberry Pi Pico or Pico W. |
 | Arduino core | [Earle Philhower Arduino-Pico](https://github.com/earlephilhower/arduino-pico) |
-| Display | SSD1306 128x64 OLED on I2C0 at `0x3C` |
+| Display | SSD1306 128x64 OLED on I2C0 at `0x3C` by default; native layouts support SH1106, SH1107, SSD1327, ST7735, ST7789, SPI wiring profiles, and headless builds |
 | Main control | Rotary encoder with push switch |
 | Default output | Three-PWM bridge with shared enable and active-low fault |
 | Alternative output | Up to four channels of filtered PWM for linear amplifiers |
 | Storage | LittleFS; 8MB recommended on the 16MB PicoPlus2 |
 
-The controller is built around the [RP2350](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf). Required libraries and further development resources are linked from [Build and hardware configuration](docs/build-configuration.md#resources).
+The controller is built around the [RP2350](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf); RP2040 support is retained as a compatibility target without replacing RP2350 hardware paths. Required libraries and further development resources are linked from [Build and hardware configuration](docs/build-configuration.md#resources).
 
 ## Build
 
 The standard non-Wi-Fi Pimoroni PicoPlus2 build is:
 
 ```sh
-arduino-cli compile --fqbn rp2040:rp2040:pimoroni_pico_plus_2 .
+arduino-cli compile --fqbn rp2040:rp2040:pimoroni_pico_plus_2:flash=16777216_8388608 .
 ```
 
 This selects the three-PWM bridge backend. The linear backend can be selected without editing `config.h`:
@@ -59,7 +59,8 @@ Board targets, Wi-Fi builds, pins, feature flags, and optional build checks are 
 | :--- | :--- |
 | [Features](docs/features.md) | Complete feature catalogue, operating ranges, optional subsystems, safety behaviour, and diagnostics. |
 | [Output configuration](docs/output-configuration.md) | Bridge and linear wiring, enable paths, PWM behaviour, braking safety, phase enables, and commissioning checks. |
-| [OLED user interface](docs/user-interface.md) | Encoder controls, dashboard views, complete menu reference, and bridge/linear menu differences. |
+| [Display architecture and hardware](docs/display.md) | Display components, supported controllers, libraries, wiring, standard-Pico pin budget, compile options, scaling and diagnostics. |
+| [User interface](docs/user-interface.md) | Encoder controls, dashboard views, complete menu reference, and bridge/linear menu differences. |
 | [Serial interface](docs/serial-interface.md) | Commands, settings keys, diagnostics, and input injection. |
 | [Web interface](docs/web-interface.md) | Network setup, browser pages, access control, backend-aware controls, and status transport. |
 | [Closed-loop control](docs/closed-loop-control.md) | Sensor modes, engagement, tuning, safety actions, calibration, and diagnostics. |
@@ -80,7 +81,7 @@ Board targets, Wi-Fi builds, pins, feature flags, and optional build checks are 
 
 Settings edited in the menu remain in RAM until **Save & Exit** is selected. Holding from the Main Menu cancels the edit session and reloads the saved configuration.
 
-The complete control map and menu tree are in [OLED user interface](docs/user-interface.md). The [Serial interface](docs/serial-interface.md) runs at 115200 baud when enabled; enter `help` for commands, `status` for the current operating state, or `list` for registered settings.
+The complete control map and menu tree are in [User interface](docs/user-interface.md). The [Serial interface](docs/serial-interface.md) runs at 115200 baud when enabled; enter `help` for commands, `status` for the current operating state and display backend, or `list` for registered settings.
 
 ## Output selection
 
@@ -102,7 +103,7 @@ Read [Output configuration](docs/output-configuration.md) before connecting a po
 
 [Settings and presets](docs/settings-and-presets.md) are stored as versioned, CRC-checked LittleFS records. A newly saved configuration is confirmed only after waveform servicing starts successfully on the next boot. If that boot does not complete, the known-good settings file is restored on the following boot.
 
-Hold the primary encoder during power-on to enter Safe Mode. Safe Mode ignores saved configuration, uses conservative RAM defaults, keeps Wi-Fi off, and prevents flash writes for that boot session. Serial diagnostics remain available.
+Hold the primary encoder during power-on to enter Safe Mode. Safe Mode ignores saved configuration, uses conservative RAM defaults, keeps Wi-Fi off, and prevents flash writes for that boot session. Serial diagnostics remain available when `SERIAL_MONITOR_ENABLE` is `1`.
 
 Factory reset requires confirmation and cannot run while the motor is moving.
 
@@ -124,13 +125,19 @@ The backend-specific start, stop, fault, and commissioning procedures are in [Ou
 | :--- | :--- |
 | `TTControl.ino` | Core 0 and Core 1 setup and loops |
 | `config.h` | Hardware selection, pins, feature flags, defaults, and schema versions |
+| `display.cpp`, `display_backend*` | Native logical canvas, display manager, controller backends, transport, scaling, power and refresh policy |
+| `ui.cpp` | Display-independent dashboards, menus, dialogs, and screensavers |
 | `motor.cpp` | Motor state machine, ramping, braking, and relay sequencing |
 | `waveform.cpp` | DDS, PWM, DMA, waveform buffers, and interrupt handling |
 | `power_stage.cpp` | Bridge enable, reset, sleep, phase-enable, and fault handling |
-| `menu_data.cpp` | Data-driven OLED menu tree |
+| `menu_data.cpp` | Data-driven local-display menu tree |
 | `serial_cmd.cpp` | Serial command and setting registry |
 | `settings.cpp` | LittleFS settings, migration, presets, and JSON import/export |
 | `network_manager.cpp` | Wi-Fi configuration and connection lifecycle |
 | `web_interface.cpp` | Embedded browser interface and JSON APIs |
 | `speed_feedback.cpp` | Optional pulse and quadrature feedback |
 | `amp_monitor.cpp` | Optional amplifier thermal monitoring |
+
+## Licence
+
+No standalone licence file is included. The source-file notices prohibit commercial use or reproduction without written permission and contractual agreement. External libraries remain governed by their own licences. Publication of this repository does not grant rights beyond those notices; contact the author before reuse.

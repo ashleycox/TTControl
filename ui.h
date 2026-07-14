@@ -10,9 +10,9 @@
 #define UI_H
 
 #include <Arduino.h>
-#include <Adafruit_SSD1306.h>
 #include <vector>
 #include "config.h"
+#include "display.h"
 #include "types.h"
 #include "globals.h"
 #include "input.h"
@@ -26,8 +26,11 @@ public:
     // Initialize input hardware, build the static menu tree, and show the blocking boot splash before the main loop starts.
     void begin();
 
-    // Poll input, apply idle policies, advance animations, and redraw once.
+    // Poll input, apply idle policies, and advance UI state without blocking on display I/O.
     void update();
+
+    // Render at the configured frame rate. Called late in the Core 0 loop after motor and service work.
+    void render();
     
     /*
      * --- Navigation ---
@@ -88,7 +91,7 @@ private:
     // Bouncing-text screensaver position and velocity.
     int _saverX, _saverY, _saverDX, _saverDY;
     
-    // Reserved slide state for menu transitions. Current drawing switches pages immediately but keeps the fields for future animation work.
+    // Slide-in state for menu page changes.
     int _transitionDirection; // 0=None, 1=Forward, -1=Backward
     float _transitionProgress; // 0.0 to 1.0
     
@@ -99,14 +102,10 @@ private:
     int _statusMode; // 0=Standard, 1=Stats, 2=Dim, 3=Scope, 4=CPU, 5=Memory, 6=Flash
     
     // Menu scroll animation state.
-    MenuPage* _nextPage;
     float _smoothScrollY;
     
-    // Last contrast sent to the SSD1306; avoids repeated I2C commands.
-    uint8_t _lastBrightness;
-    
     // Matrix and Lissajous screensaver animation state.
-    uint8_t _matrixDrops[16]; // Y positions for 16 columns (128/8 = 16)
+    int16_t _matrixDrops[(DISPLAY_LOGICAL_WIDTH + 7) / 8];
     float _lissajousPhase;
     
     void drawMatrixRain();
@@ -115,7 +114,7 @@ private:
     // Inactivity clock drives auto standby, dim, and display sleep.
     uint32_t _lastInputTime;
     
-    // Input and drawing are split so update() has one clear sequence: poll, handle, policy, animate, draw.
+    // Input and drawing are split so update() only polls, handles policy, and advances state.
     void handleInput();
     void draw();
     void drawDashboard();
@@ -128,7 +127,7 @@ private:
     void drawCriticalInterlock();
     void drawGoodbye();
     
-    // Optional serial mirror for UI tests without the OLED in view.
+    // Optional serial mirror for UI tests without the physical display in view.
     void dumpDisplayToSerial();
 
     // Standby transition animation state.

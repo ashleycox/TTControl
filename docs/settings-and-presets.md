@@ -24,13 +24,13 @@ This protects against a validly written but unusable configuration. It does not 
 
 ## Presets
 
-There are five preset slots by default, controlled by `MAX_PRESET_SLOTS`. A preset can be loaded, saved, renamed, cleared, imported, or exported.
+There are exactly five preset slots. `MAX_PRESET_SLOTS` is fixed at five by a compile-time assertion because the stored directory, local interface, serial protocol and web interface use that layout. A preset can be loaded, saved, renamed, cleared, imported, or exported. Clearing deletes the slot and restores its default name; it does not create a default preset payload.
 
 Preset names are limited to 16 characters. Presets contain motor-tuning data, including:
 
 - Per-speed frequency, phase, gain, filters, amplitude, and startup values.
 - Global motor topology, phase count, ramping, braking, and output-tuning values.
-- Per-speed closed-loop tuning and the global pitch target mode when closed-loop support is compiled.
+- Per-speed closed-loop tuning and the global pitch target mode. These fields remain in the storage and JSON schema even when the closed-loop controller is compiled out.
 
 Loading a preset does not replace:
 
@@ -43,7 +43,7 @@ Loading a preset does not replace:
 
 JSON import accepts the current preset layout. Older single-value closed-loop tuning keys remain accepted and are copied to all three speed records. Import validates the data before replacing a slot.
 
-The relevant OLED actions are listed in [OLED user interface](user-interface.md), and command-line import and export are listed in [Serial interface](serial-interface.md).
+The relevant local-display actions are listed in [User interface](user-interface.md), and command-line import and export are listed in [Serial interface](serial-interface.md).
 
 ## Full backup
 
@@ -66,7 +66,7 @@ Safe Mode is read-only for the whole boot session:
 - Network configuration and error logs are not written.
 - Wi-Fi remains off.
 
-Serial diagnostics remain available. Leave Safe Mode through the OLED action, which reboots the controller and attempts a normal flash load.
+Serial diagnostics remain available when `SERIAL_MONITOR_ENABLE` is `1`. Leave Safe Mode by rebooting, or use the local-display exit action when a display is compiled; the next boot attempts a normal flash load unless the encoder is held again.
 
 ## Flash wear
 

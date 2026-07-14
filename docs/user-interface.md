@@ -1,6 +1,6 @@
-# OLED user interface
+# User interface
 
-TT Control uses a 128x64 SSD1306 display and a rotary encoder. Menu entries are added from the compiled feature set, so an option which does not apply to the selected hardware is omitted rather than shown greyed out.
+TT Control uses a one-bit display surface and a rotary encoder. The default physical panel is a 128x64 SSD1306 OLED. SH1106, SH1107, SSD1327, ST7735, ST7789 and headless builds use the same interface through the [display layer](display.md). The UI draws at the configured logical dimensions. Menu entries are added from the compiled feature set, so an option which does not apply to the selected hardware is omitted rather than shown greyed out.
 
 ## Basic operation
 
@@ -18,6 +18,16 @@ TT Control uses a 128x64 SSD1306 display and a rotary encoder. Menu entries are 
 
 With the optional pitch encoder fitted, turning it adjusts the highlighted value without entering edit mode. In edit mode the primary encoder makes fine adjustments and the pitch encoder makes coarse adjustments.
 
+## Display layouts
+
+| Layout | Default panels | Menu rows | Display details |
+| :--- | :--- | ---: | :--- |
+| Compact | SSD1306/SH1106 128x64 | 5 | Single-height body text, compact status header and compact diagnostic plots. |
+| Medium | SH1107/SSD1327 128x128; rotated ST7735 160x128 | 8 | Card layout for runtime and health data, labelled RPM and a larger XY plot. |
+| Large | ST7789 240x240 | 10 | Double-height body text, larger controls and modals, and full-width diagnostic plots. |
+
+All layouts share the same menu tree and safety behaviour. The compact layout is selected at 72 pixels high or less. The large layout requires at least 200x160 pixels. Other supported sizes use the medium layout. The physical backend scales the frame only when the configured logical and physical dimensions differ, as described in [Display architecture and hardware](display.md).
+
 ## Dashboard views
 
 - **Standard:** Target or measured speed, motor state, frequency, pitch or ramp deviation, and start or braking progress. Closed-loop builds use measured RPM when the signal is valid and show the lock icon only for a real feedback lock.
@@ -28,7 +38,7 @@ With the optional pitch encoder fitted, turning it adjusts the highlighted value
 - **Memory:** Heap and optional PSRAM use.
 - **Flash:** Sketch and LittleFS use.
 
-CPU, Memory, and Flash can be removed from the dashboard cycle in the Display menu. Standard, Stats, Dim, and Scope remain available.
+Stats, CPU, Memory, and Flash can be removed from the dashboard cycle in the Display menu. Standard, Dim, and Scope remain available.
 
 ## Output-backend menu differences
 
@@ -116,6 +126,8 @@ The curve remains at 100% above its base frequency and follows the absolute comm
 
 **Brake Tune** repeats the mode-specific **Duration**, **Pulse Gap**, **Start Hz**, **Stop Hz**, or **Cutoff Hz** setting as appropriate. **Start Motor** begins a test run, **Brake Stop** applies the selected stop, and **Save Brake** persists the result.
 
+While the motor is in Stopping, local menu edits are frozen and menu entry is blocked. Editing resumes only after the configured braking sequence has completed.
+
 ## Power Control
 
 - **Rly: ActHi:** Relay polarity. Linear mode only; shown when standby or mute-relay hardware is compiled.
@@ -130,12 +142,12 @@ Within **Relay Test**, **Output** selects the active stage, **All Off** de-energ
 
 ## Display
 
-- **Brightness:** OLED contrast from 0-255.
+- **Brightness:** OLED contrast or a configured TFT backlight level from 0-255. A TFT with a fixed backlight ignores brightness changes.
 - **Sleep Dly:** Display sleep delay.
 - **Scrn Saver:** Enables the standby screensaver.
 - **Saver Mode:** Bounce, Matrix, or Lissajous.
 - **Auto Dim:** Delay before the running display dims.
-- **Show Runtime:** Stored display preference. The current OLED renderer does not yet use it to hide the Stats page.
+- **Show Runtime:** Controls availability of the Stats dashboard page.
 - **Show CPU / Show Memory / Show Flash:** Controls availability of the corresponding dashboard pages.
 - **Err Display / Err Dur:** Controls on-screen error messages and their duration.
 
@@ -261,7 +273,7 @@ Selecting a preset slot opens these actions:
 - **Load:** Loads the slot into RAM and applies it.
 - **Save:** Stores the current motor settings in the slot.
 - **Apply Name:** Renames the slot from the edit buffer.
-- **Clear:** Restores the slot defaults.
+- **Clear:** Deletes the stored slot and restores its default name.
 
 See [Settings and presets](settings-and-presets.md) for persistence and preset scope.
 

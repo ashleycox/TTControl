@@ -1,6 +1,6 @@
 # Serial interface
 
-Connect at 115200 baud. Enter `help` for commands or `list` for registered settings and their current values. Commands which depend on optional hardware are registered only when that feature is compiled.
+When `SERIAL_MONITOR_ENABLE` is `1`, connect at 115200 baud. Enter `help` for commands or `list` for registered settings and their current values. Closed-loop commands and feature-specific setting keys are present only when their feature is compiled. The `wifi` command remains present in non-network builds and reports that Wi-Fi is unavailable.
 
 ## Commands
 
@@ -13,7 +13,7 @@ Connect at 115200 baud. Enter `help` for commands or `list` for registered setti
 | `s` | Cycle through enabled speeds. |
 | `t` | Toggle standby. |
 | `p` | Reset pitch. |
-| `status` / `i` | Show motor, waveform, output backend, resource, and optional monitor status. |
+| `status` / `i` | Show motor, waveform, output backend, display driver/transport/wiring profile/geometry/power, resource, and optional monitor status. |
 | `list` | List registered settings and values. |
 | `set <key> <value>` | Set a registered value. Numbers are parsed strictly and constrained to the setting range. |
 | `get <key>` | Read a registered value. |
@@ -21,7 +21,7 @@ Connect at 115200 baud. Enter `help` for commands or `list` for registered setti
 | `reboot` | Reboot through the watchdog. |
 | `dump settings` | Print a readable settings summary. |
 | `lock` | Lock the device controls when Device UI Lock is enabled. |
-| `unlock <PIN>` | Unlock OLED, serial, and browser write controls. |
+| `unlock <PIN>` | Unlock local-display, serial, and browser write controls. |
 | `ui lock <on\|off>` | Enable or disable Device UI Lock. |
 | `ui pin <PIN>` | Set the shared 4-8 character device and browser PIN. |
 | `preset list` | List preset slots. |
@@ -38,6 +38,8 @@ Connect at 115200 baud. Enter `help` for commands or `list` for registered setti
 | `error clear` | Clear the error log. |
 | `f` / `factory reset` | Request factory-reset confirmation. |
 | `factory reset confirm` | Erase settings and restore defaults. The motor must be stopped. |
+
+While the motor is in Stopping, start, standby, speed, pitch-reset, preset-load, and registry-setting changes are rejected until braking completes. `stop` remains safe to repeat and does not restart the braking timer.
 
 ### Closed-loop commands
 
@@ -64,7 +66,7 @@ These commands are present when `CLOSED_LOOP_SPEED_ENABLE` is `1`.
 
 ### Wi-Fi commands
 
-These commands are present when network support is enabled. Passwords are never printed by status or configuration commands.
+These operations are available when network support is enabled. In a non-network build, `wifi` and `wifi help` identify Wi-Fi as unavailable. Passwords are never printed by status or configuration commands.
 
 | Command | Description |
 | :--- | :--- |
@@ -104,7 +106,7 @@ Speed-specific keys apply to the currently selected speed.
 
 | Key | Description | Type |
 | :--- | :--- | :--- |
-| `brightness` | OLED brightness, 0-255 | Integer |
+| `brightness` | Display contrast or controlled backlight, 0-255 | Integer |
 | `ramp` | Soft-start ramp type: 0=Linear, 1=S-curve | Integer |
 | `pitch_step` | Pitch adjustment step | Float |
 | `rev_enc` | Reverse primary encoder | Boolean |
@@ -114,7 +116,7 @@ Speed-specific keys apply to the currently selected speed.
 | `show_flash` | Shows or hides the Flash dashboard | Boolean |
 | `phase_mode` | Active outputs, 1-3 by default or 1-4 with four-channel support | Integer |
 | `motor_topology` | 0=Custom, 1=Twin-phase synchronous, 2=Three-phase sine | Integer |
-| `active_braking` | Confirms a verified regenerative energy path in bridge builds | Boolean |
+| `active_braking` | Confirms a verified regenerative energy path; registered only in bridge builds | Boolean |
 | `phase_slew` | Live phase adjustment limit in degrees/s; 0 is immediate | Float |
 | `gain_slew` | Live gain adjustment limit in percent/s; 0 is immediate | Float |
 | `max_amp` | Global maximum amplitude, 0-100% | Integer |
@@ -134,16 +136,17 @@ Speed-specific keys apply to the currently selected speed.
 | `brake_start_freq` | Ramp braking start frequency | Float |
 | `brake_stop_freq` | Ramp braking stop frequency | Float |
 | `brake_cutoff` | Soft-stop cut-off frequency | Float |
-| `relay_active_high` | Linear relay active polarity | Boolean |
-| `relay_delay` | Linear mute-relay power-on delay | Integer |
+| `relay_active_high` | Linear relay active polarity; registered only when standby or mute relays are compiled | Boolean |
+| `relay_delay` | Linear mute-relay power-on delay; registered only when mute relays are compiled | Integer |
 
 ### Current-speed settings
 
 | Key | Description | Type |
 | :--- | :--- | :--- |
 | `freq` | Base frequency in Hz | Float |
-| `phase1`..`phase4` | Raw phase offsets in degrees | Float |
-| `gain1`..`gain4` | Channel gain, 50-150%; 100% is unity | Integer |
+| `phase1`..`phase3` | Raw phase offsets in degrees | Float |
+| `gain1`..`gain3` | Channel gain, 50-150%; 100% is unity | Integer |
+| `phase4`, `gain4` | Fourth-channel offset and gain; registered only in four-channel linear builds | Float / integer |
 | `soft_start` | Soft-start duration | Float |
 | `kick` | Startup kick multiplier | Integer |
 | `kick_dur` | Startup kick duration | Integer |
@@ -223,7 +226,7 @@ The single-character test controls are useful when exercising the interface over
 ## Related documentation
 
 - [Features](features.md)
-- [OLED user interface](user-interface.md)
+- [User interface](user-interface.md)
 - [Closed-loop control](closed-loop-control.md)
 - [Web interface](web-interface.md)
 - [Settings and presets](settings-and-presets.md)

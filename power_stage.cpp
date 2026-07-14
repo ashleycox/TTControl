@@ -234,10 +234,13 @@ void PowerStage::writeEnable(bool active) {
 #if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE && POWER_STAGE_SHARED_ENABLE
 #if POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN
     if (active) {
-        hal.setPinMode(PIN_POWER_STAGE_ENABLE, INPUT_PULLUP);
+        gpio_pull_up(PIN_POWER_STAGE_ENABLE);
+        gpio_set_dir(PIN_POWER_STAGE_ENABLE, GPIO_IN);
     } else {
-        hal.setPinMode(PIN_POWER_STAGE_ENABLE, OUTPUT);
-        hal.digitalWrite(PIN_POWER_STAGE_ENABLE, LOW);
+        // Set the output latch before taking ownership of the shared line. This
+        // path is also called by the fault ISR, so use the direct GPIO API.
+        gpio_put(PIN_POWER_STAGE_ENABLE, false);
+        gpio_set_dir(PIN_POWER_STAGE_ENABLE, GPIO_OUT);
     }
 #else
     gpio_put(PIN_POWER_STAGE_ENABLE, active == (POWER_STAGE_ENABLE_ACTIVE_HIGH != 0));
@@ -308,6 +311,8 @@ void PowerStage::disableFromInterrupt() {
     _state = POWER_STAGE_FAULT_LATCHED;
     writeEnable(false);
     writePhaseEnables(false);
+    writeSleep(false);
+    writeReset(true);
     _faultReportPending = true;
     _metrics.faultCount++;
     if (_faultOriginState == POWER_STAGE_RUNNING || _faultOriginState == POWER_STAGE_STOPPING) _metrics.runningFaultCount++;

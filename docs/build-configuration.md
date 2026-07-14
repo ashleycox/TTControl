@@ -1,15 +1,19 @@
 # Build and hardware configuration
 
-TT Control targets RP2040 and RP2350 boards using the Earle Philhower Arduino-Pico core. The main supported target is the Pimoroni PicoPlus2.
+TT Control targets RP2040 and RP2350 boards using the Earle Philhower Arduino-Pico core. RP2350 is the primary architecture and the Pimoroni PicoPlus2 is the primary board. Raspberry Pi Pico and Pico W remain supported RP2040 compatibility targets; their support does not replace RP2350-specific capabilities or reduce the RP2350 clock and resource configuration.
 
 ## Resources
 
 - [RP2350 datasheet](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf)
+- [RP2040 datasheet](https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf)
 - [Pimoroni PicoPlus2](https://shop.pimoroni.com/products/pimoroni-pico-plus-2)
 - [Raspberry Pi Pico 2](https://www.raspberrypi.com/products/raspberry-pi-pico-2/)
 - [Earle Philhower Arduino-Pico core](https://github.com/earlephilhower/arduino-pico)
 - [Arduino CLI documentation](https://arduino.github.io/arduino-cli/)
 - [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306)
+- [Adafruit SH110X](https://github.com/adafruit/Adafruit_SH110x)
+- [Adafruit SSD1327](https://github.com/adafruit/Adafruit_SSD1327)
+- [Adafruit ST7735 and ST7789](https://github.com/adafruit/Adafruit-ST7735-Library)
 - [Adafruit GFX](https://github.com/adafruit/Adafruit-GFX-Library)
 - [Adafruit BusIO](https://github.com/adafruit/Adafruit_BusIO)
 - [ArduinoJson](https://arduinojson.org/)
@@ -17,21 +21,30 @@ TT Control targets RP2040 and RP2350 boards using the Earle Philhower Arduino-Pi
 ## Requirements
 
 - Arduino-Pico `rp2040:rp2040` core.
-- Adafruit SSD1306.
 - Adafruit GFX.
 - Adafruit BusIO.
+- Adafruit SSD1306 for the default display.
+- Adafruit SH110X, SSD1327, or ST7735/ST7789 when the corresponding optional display is selected.
 - ArduinoJson.
 - Arduino-Pico `WiFi`, `WebServer`, and `DNSServer` for Wi-Fi builds.
 
-The display is a 128x64 SSD1306 on I2C0 at address `0x3C`.
+The default display is a 128x64 SSD1306 on I2C0 at address `0x3C`. SH1106, SH1107, SSD1327, ST7735, ST7789, native layouts, software and hardware SPI, and wiring profiles with stated button conflicts are documented in [Display architecture and hardware](display.md). Managed SPI reserves the optional speed and standby button pins; invalid feature combinations fail at compile time.
 
 ## Build targets
 
-Pimoroni PicoPlus2 without Wi-Fi:
+Pimoroni PicoPlus2 without Wi-Fi, using the recommended 8MB LittleFS partition:
 
 ```sh
-arduino-cli compile --fqbn rp2040:rp2040:pimoroni_pico_plus_2 .
+arduino-cli compile --fqbn rp2040:rp2040:pimoroni_pico_plus_2:flash=16777216_8388608 .
 ```
+
+The RP2350 RISC-V architecture option is also supported:
+
+```sh
+arduino-cli compile --fqbn rp2040:rp2040:pimoroni_pico_plus_2:flash=16777216_8388608,arch=riscv .
+```
+
+The persisted motor-settings layout uses explicit one-byte stored enum values and four-byte member alignment, so ARM and RISC-V firmware read the same schema-12 files.
 
 The default build uses `OUTPUT_STAGE_3PWM_BRIDGE`. To compile the linear backend without editing `config.h`:
 
@@ -52,11 +65,20 @@ Raspberry Pi Pico 2 W with a 1MB LittleFS partition:
 arduino-cli compile --fqbn rp2040:rp2040:rpipico2w:flash=4194304_1048576 .
 ```
 
+Raspberry Pi Pico or Pico W (RP2040) with a 1MB LittleFS partition:
+
+```sh
+arduino-cli compile --fqbn rp2040:rp2040:rpipico:flash=2097152_1048576 .
+arduino-cli compile --fqbn rp2040:rp2040:rpipicow:flash=2097152_1048576 .
+```
+
+The board flash menu, expressed by the `flash=...` FQBN option above, creates LittleFS. A board selection with `no FS` compiles, but persistent settings, presets, network configuration and the error log cannot operate on that firmware.
+
 Optional non-network paths can be checked together:
 
 ```sh
 arduino-cli compile --fqbn rp2040:rp2040:pimoroni_pico_plus_2 \
-  --build-property 'compiler.cpp.extra_flags=-DCLOSED_LOOP_SPEED_ENABLE=1 -DAMP_MONITOR_ENABLE=1 -DPITCH_CONTROL_ENABLE=1 -DSTANDBY_BUTTON_ENABLE=1 -DSPEED_BUTTON_ENABLE=1 -DSTART_STOP_BUTTON_ENABLE=1 -DENABLE_4_CHANNEL_SUPPORT=1' .
+  --build-property 'compiler.cpp.extra_flags=-DOUTPUT_STAGE_TYPE=0 -DCLOSED_LOOP_SPEED_ENABLE=1 -DAMP_MONITOR_ENABLE=1 -DPITCH_CONTROL_ENABLE=1 -DSTANDBY_BUTTON_ENABLE=1 -DSPEED_BUTTON_ENABLE=1 -DSTART_STOP_BUTTON_ENABLE=1 -DENABLE_4_CHANNEL_SUPPORT=1' .
 ```
 
 Build `ENABLE_DPDT_RELAYS=1` separately because DPDT and four-channel support are incompatible. Network support requires a Wi-Fi board target which defines `PICO_CYW43_SUPPORTED`.
@@ -69,12 +91,12 @@ Build `ENABLE_DPDT_RELAYS=1` separately because DPDT and four-channel support ar
 | 1 | PWM B / IN2 | PWM phase B | |
 | 2 | PWM C / IN3 | PWM phase C | |
 | 3 | Optional bridge reset | PWM phase D | Reset is bridge-only; phase D is linear four-channel only. |
-| 4 | I2C0 SDA | I2C0 SDA | OLED. |
-| 5 | I2C0 SCL | I2C0 SCL | OLED. |
+| 4 | I2C0 SDA | I2C0 SDA | I2C display SDA, or software-SPI SCK. |
+| 5 | I2C0 SCL | I2C0 SCL | I2C display SCL, or software-SPI MOSI. |
 | 6 | Speed sensor A | Speed sensor A | Optional pulse or quadrature input. |
 | 7 | Speed sensor B | Speed sensor B | Optional quadrature input. |
 | 8 | nFAULT | Unused | Active-low by default. |
-| 9 | Start/stop button | Start/stop button | Optional; exposed on Pico 2 W. |
+| 9 | Start/stop button | Start/stop button | Optional; full-control SPI uses it for backlight PWM. |
 | 10 | Main encoder CLK | Main encoder CLK | |
 | 11 | Main encoder DT | Main encoder DT | |
 | 12 | Main encoder switch | Main encoder switch | |
@@ -86,12 +108,13 @@ Build `ENABLE_DPDT_RELAYS=1` separately because DPDT and four-channel support ar
 | 18 | Optional EN2 | Phase B mute or DPDT 2 | |
 | 19 | Optional EN3 | Phase C mute | |
 | 20 | Optional bridge sleep | Phase D mute | Sleep is bridge-only; phase D mute is linear four-channel only. |
-| 21 | Standby button | Standby button | Optional. |
-| 22 | Speed button | Speed button | Optional. |
+| 21 | Standby button | Standby button | Optional; managed SPI uses it for backlight PWM, full-control SPI for reset. |
+| 22 | Speed button | Speed button | Optional; managed/full-control SPI uses it for display CS. |
 | 26 | Amplifier temperature | Amplifier temperature | Optional analogue input. |
 | 27 | Amplifier thermal OK | Amplifier thermal OK | Optional active-high healthy input. |
+| 28 | Display D/C | Display D/C | Used only by an SPI display; otherwise spare. |
 
-Pin assignments describe the default configuration. Check [Output configuration](output-configuration.md) before wiring a power stage. Changing a pin can energise the wrong bridge input or relay.
+Pin assignments describe the default configuration. SPI displays default to the managed profile: CS on GP22, reset following board reset, and backlight PWM on GP21. The minimal profile restores the speed and standby button pins when the chosen module permits tied CS, shared reset, and fixed backlight; see the [display pin-budget analysis](display.md#spi-wiring-and-the-standard-pico-pin-budget). Check [Output configuration](output-configuration.md) before wiring a power stage. Changing a pin can energise the wrong bridge input or relay.
 
 ## Main compile-time options
 
@@ -103,7 +126,9 @@ Pin assignments describe the default configuration. Check [Output configuration]
 | `MIN_OUTPUT_FREQUENCY_HZ` | `10.0f` | Lowest accepted generated frequency. |
 | `MAX_OUTPUT_FREQUENCY_HZ` | `1500.0f` | Highest accepted generated frequency. |
 | `SERIAL_MONITOR_ENABLE` | `1` | Builds the Serial Monitor interface. |
-| `DUPLICATE_DISPLAY_TO_SERIAL` | `0` | Mirrors OLED text to Serial Monitor. |
+| `DUPLICATE_DISPLAY_TO_SERIAL` | `0` | Mirrors logical display text when `SERIAL_MONITOR_ENABLE` is also enabled. |
+| `DISPLAY_DRIVER` | `DISPLAY_DRIVER_SSD1306` | Selects SSD1306, SH1106, SH1107, SSD1327, ST7735, ST7789, or headless output. |
+| `DISPLAY_TRANSPORT` | Driver-dependent | Uses I2C by default for OLEDs and software SPI for TFTs. |
 | `ENABLE_STANDBY` | `1` | Builds standby behaviour and controls. |
 | `ENABLE_MUTE_RELAYS` | Linear `1`; bridge `0` | Builds downstream amplifier mute relays. Bridge builds reject `1`. |
 | `ENABLE_DPDT_RELAYS` | `0` | Uses two DPDT relays instead of four SPST relays. |
@@ -116,7 +141,7 @@ Pin assignments describe the default configuration. Check [Output configuration]
 | `SPEED_BUTTON_ENABLE` | `0` | Builds the discrete speed button. |
 | `START_STOP_BUTTON_ENABLE` | `0` | Builds the discrete start/stop button. |
 | `NETWORK_ENABLE` | Automatic | Enabled by default only on a Wi-Fi-capable board target. |
-| `MAX_PRESET_SLOTS` | `5` | Number of preset slots. |
+| `MAX_PRESET_SLOTS` | `5` | Fixed preset-slot count; other values are rejected at compile time. |
 
 ## Bridge interface options
 
@@ -160,7 +185,6 @@ See [Web interface](web-interface.md) for setup-mode restrictions and credential
 
 | Name | Default | Purpose |
 | :--- | :--- | :--- |
-| `LITTLEFS_FS_SIZE` | 8MB | Recommended LittleFS partition for the 16MB PicoPlus2. |
 | `SETTINGS_SCHEMA_VERSION` | `12` | Current binary motor-settings schema. |
 | `SETTINGS_FILE_FORMAT_VERSION` | `1` | Settings wrapper format. |
 | `AMP_TEMP_WARN_C` | `65.0f` | Factory amplifier warning temperature. |
@@ -172,9 +196,11 @@ See [Web interface](web-interface.md) for setup-mode restrictions and credential
 
 When amplifier monitoring is compiled, GP26 reads a TMP36-style analogue sensor every 500 ms and GP27 reads the thermal chain on the same interval. A low thermal-OK input or an over-temperature reading performs a critical stop when detected and latches the interlock until reboot.
 
+LittleFS capacity is selected through the board FQBN, not `config.h`. The examples above use 8MB on PicoPlus2 and 1MB on Pico/Pico 2 boards.
+
 ## Firmware architecture
 
-Core 0 runs the OLED, input handling, Serial Monitor, network server, settings, relay handling, and motor state machine. Core 1 services waveform buffers. DMA and hardware PWM generate the carrier independently of UI load.
+Core 0 runs the display, input handling, Serial Monitor, network server, settings, relay handling, and motor state machine. Core 1 services waveform buffers. DMA and hardware PWM generate the carrier independently of UI load. Physical display transfer is frame-capped and placed after motor and service work near the end of the Core 0 loop.
 
 Core 0 monitors the Core 1 heartbeat and DMA buffer age. A stalled waveform path records `ERR_WAVEFORM_HEALTH`, performs the critical stop path, and allows the watchdog to reset the controller if Core 1 remains unhealthy.
 
@@ -183,6 +209,7 @@ Critical errors disable waveform output and the compiled hardware interlocks. St
 ## Related documentation
 
 - [Features](features.md)
+- [Display architecture and hardware](display.md)
 - [Output configuration](output-configuration.md)
 - [Settings and presets](settings-and-presets.md)
 - [Web interface](web-interface.md)

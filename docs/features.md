@@ -9,7 +9,7 @@ TT Control combines a multi-phase DDS waveform generator, a motor state machine,
 - **PWM carrier:** Output uses 10-bit duty values. The carrier defaults to 50 kHz and is calculated from the live system clock for RP2040 and RP2350 targets.
 - **Lookup table:** The sine table contains 16,384 signed samples by default. `LUT_MAX_SIZE` is a compile-time, power-of-two setting with a minimum of 1,024 samples.
 - **Interpolation:** Fractional phase-accumulator bits linearly interpolate between adjacent table entries.
-- **Frequency range:** The waveform generator accepts 10-1500 Hz. OLED frequency tuning uses 0.1 Hz steps, and each speed has independent minimum and maximum limits.
+- **Frequency range:** The waveform generator accepts 10-1500 Hz. Local-display frequency tuning uses 0.1 Hz steps, and each speed has independent minimum and maximum limits.
 - **Three speeds:** 33⅓, 45, and 78 RPM have separate frequency and tuning records. The factory frequencies for the primary 12-pole, 7.52:1 belt-drive setup are 25.07 Hz, 33.85 Hz, and 58.66 Hz.
 - **78 RPM control:** 78 RPM can be removed from speed selection without deleting its stored tuning.
 - **Diagnostics:** Serial and web status expose sample rate, DMA health, phase vectors, channel gains, modulation headroom, and per-channel clipping counters where applicable.
@@ -25,7 +25,7 @@ The electrical output stages and PWM semantics are described in [Output configur
   - **Twin-phase synchronous:** Resets A=0°, B=180°, and C=270°.
   - **Three-phase sine:** Resets A=0°, B=120°, and C=240°.
 - **Editable topology:** Selecting a topology does not lock the phase or gain controls after the reset values have been applied.
-- **Per-speed phase trim:** Every active channel has an independent offset from -360° to +360° with 0.1° OLED resolution.
+- **Per-speed phase trim:** Every active channel has an independent offset from -360° to +360° with 0.1° local-display resolution.
 - **Per-speed gain trim:** Every active channel has an independent gain from 50-150%.
 - **Live transitions:** Configurable phase and gain slew rates soften live adjustments. A rate of zero applies the new value immediately.
 - **Output sweep:** A diagnostic sweep can vary symmetrical phase separation, an individual active phase, or an individual active gain while the motor runs. Pressing the encoder locks the current point; leaving without locking restores the full pre-sweep tune.
@@ -64,7 +64,7 @@ The state machine has Standby, Stopped, Starting, Running, and Stopping states. 
 - **Reduced amplitude:** Each speed can reduce its running amplitude to 10-100% after a 0-60 second delay, allowing full starting torque before heat and noise are reduced.
 - **V/f shaping:** A three-point curve provides low-frequency and mid-frequency output levels, an explicit base frequency at which the curve reaches 100%, and a 0-100% blend. Zero blend bypasses V/f scaling and is the default.
 - **Complete V/f application:** The curve follows the absolute commanded frequency during startup, normal running, smooth speed changes, pitch adjustment, closed-loop correction, and braking. Output remains at 100% of the current drive envelope above the base frequency.
-- **Live V/f changes:** OLED, serial, and web changes are re-evaluated while the motor runs. The global maximum amplitude remains the ceiling.
+- **Live V/f changes:** Local-display, serial, and web changes are re-evaluated while the motor runs. The global maximum amplitude remains the ceiling.
 - **Auto Start:** The motor can start automatically after boot or after waking from standby.
 
 ### Speed changes
@@ -80,7 +80,8 @@ The state machine has Standby, Stopped, Starting, Running, and Stopping states. 
 - **Ramp:** Uses reverse progression while frequency moves from the configured start frequency towards the stop frequency and amplitude falls.
 - **SoftStop:** Reduces frequency under drive until the configured cut-off, then removes power.
 - **Duration:** Braking duration is configurable from 0.0-10.0 seconds.
-- **Bench tuning:** OLED and Serial Monitor provide explicit brake-test start and stop actions.
+- **Sequence integrity:** The selected braking mode and its timing/frequency values are snapshotted when stopping begins. Start, speed, standby, preset-load, and settings-edit paths remain blocked until the stop sequence has interlocked the outputs off.
+- **Bench tuning:** The local display and Serial Monitor provide explicit brake-test start and stop actions.
 - **Bridge safeguard:** A bridge build with **Regen Safe** off substitutes the non-regenerative amplitude ramp and then disables the stage.
 
 ### Pitch control
@@ -112,14 +113,14 @@ The state machine has Standby, Stopped, Starting, Running, and Stopping states. 
 - **Reduced-amplitude recovery:** Loss of lock after amplitude reduction can warn or restore full amplitude after a delay.
 - **Signal-loss actions:** Dropout can open the loop, hold the last correction, or stop the motor.
 - **Safety actions:** Correction saturation, implausible RPM, lock timeout, and reverse direction can be ignored, warned, or escalated to a motor stop as appropriate.
-- **Sensor setup:** OLED, Serial Monitor, and web Bench controls can capture one manual platter revolution and apply the suggested counts-per-revolution. Quadrature setup can also suggest direction reversal.
+- **Sensor setup:** Local-display, Serial Monitor, and web Bench controls can capture one manual platter revolution and apply the suggested counts-per-revolution. Quadrature setup can also suggest direction reversal.
 - **Guided tuning:** The tuning sequence covers sensor validation, monitor-only running, Kp, Ki, limits, and final verification. The current safe recommendation can be applied directly.
 - **Base-frequency calibration:** After sufficient stable data, the average correction can be previewed, applied in RAM, or applied and saved to the current speed's base frequency.
 - **Stability metrics:** Runtime figures include valid and locked samples and time, average and peak RPM error, correction saturation time, dropout, direction, plausibility and lock-timeout events, amplitude recovery, and error sign changes.
 - **Sensor health:** Diagnostics include accepted and rejected transitions, debounce rejection, interval minimum, maximum and average, and interval jitter.
 - **Trend capture:** A rolling buffer records target RPM, measured RPM, error, correction, signal validity, and lock state.
 - **Fault detail:** Closed-loop log entries include the target, measured RPM, RPM error, correction, signal state, count, and direction when a sample is available.
-- **Status surfaces:** OLED tools, `cl status`, `cl health`, `cl trend`, the web dashboard, Bench page, diagnostics, presets, and backup data expose the relevant compiled state.
+- **Status surfaces:** Local-display tools, `cl status`, `cl health`, `cl trend`, the web dashboard, Bench page, diagnostics, presets, and backup data expose the relevant compiled state.
 
 Operating and tuning details are in [Closed-loop speed control](closed-loop-control.md).
 
@@ -135,9 +136,10 @@ Filtering is selected independently for each speed and is off by default.
 
 The filters can reduce high-frequency steps in the generated samples, but stronger profiles can soften transients and attenuate the desired waveform. Their usefulness depends on the motor, amplifier and output filter.
 
-## OLED user interface
+## Local display and user interface
 
-- **Display:** A 128x64 SSD1306 provides the dashboard, hierarchical menus, confirmations, text entry, diagnostic tools, and stored error log.
+- **Display layer:** A one-bit canvas provides compact, medium and large dashboards, hierarchical menus, confirmations, text entry, diagnostic tools and the stored error log. SSD1306 is the default; SH1106, SH1107, SSD1327, ST7735, ST7789 and headless builds are selectable. SPI wiring profiles trade optional speed, standby or start/stop button pins for controlled CS, reset and backlight signals.
+- **Rendering:** The canvas uses the configured logical dimensions. A display backend maps the frame to the physical panel, caps the refresh rate, runs late in the Core 0 loop and skips unchanged content.
 - **Context-aware menu:** Filter parameters, active phases, V/f points, braking controls, closed-loop values, network pages, relays, and bridge controls appear only when relevant.
 - **Named modes:** Enumerated settings use readable names rather than unexplained numbers where display width permits.
 - **Edit buffer:** Menu changes remain in RAM until **Save & Exit**. Cancel reloads the saved settings, and filesystem failures are reported.
@@ -166,7 +168,7 @@ The filters can reduce high-frequency steps in the generated samples, but strong
 - **CPU:** Shows Core 0 and Core 1 utilisation.
 - **Memory:** Shows heap and optional PSRAM use.
 - **Flash:** Shows sketch and LittleFS use.
-- CPU, Memory, and Flash pages can be removed from the cycle individually. Standard, Stats, Dim, and Scope remain available.
+- Stats, CPU, Memory, and Flash pages can be removed from the cycle individually. Standard, Dim, and Scope remain available.
 - Auto Dim can select the Dim page after 0-60 minutes of running inactivity.
 - Display sleep offers Off, 10s, 20s, 30s, 1m, 5m, and 10m delays.
 - Standby screensavers include Bounce, Matrix, and Lissajous modes.
@@ -178,9 +180,9 @@ The filters can reduce high-frequency steps in the generated samples, but strong
 - Separate standby, speed, and start/stop buttons are compiled independently.
 - The shared 4-8 character PIN can lock menu entry, normal serial writes, browser writes, starting, speed changes, and pitch changes.
 - Physical stop and standby remain available while locked.
-- The OLED can set, enable, disable, apply, and immediately lock the shared PIN.
+- The local display can set, enable, disable, apply, and immediately lock the shared PIN.
 
-The complete menu tree and backend-specific visibility table are in [OLED user interface](user-interface.md).
+The complete menu tree and backend-specific visibility table are in [User interface](user-interface.md). Supported panels and wiring are in [Display architecture and hardware](display.md).
 
 ## Serial Monitor
 
@@ -209,7 +211,7 @@ Wi-Fi-capable Arduino-Pico targets can build a local browser control room and JS
 - **Initial access point:** Fresh network settings start `TTControl-Setup` so configuration is reachable before station credentials exist.
 - **Setup-only safety:** An open setup access point exposes only network setup pages and APIs. Motor control, general settings, presets, logs, and diagnostics remain blocked.
 - **Guided setup:** Browser and Serial Monitor workflows cover station SSID and password, hidden networks, DHCP or static IPv4, hostname, fallback access point, access-point name and password, channel, and standby mode.
-- **OLED network menu:** The same settings are grouped into overview, Station, IP/Power, Setup AP, and Web Access pages.
+- **Local network menu:** The same settings are grouped into overview, Station, IP/Power, Setup AP, and Web Access pages.
 - **Credential editing:** Printable special characters are accepted. Blank browser password fields retain the saved value; removal is a separate action.
 - **Credential privacy:** Station passwords, setup access-point passwords, and PINs are write-only and never returned by status, diagnostics, or backup export.
 - **Standby modes:** Network standby keeps Wi-Fi available. Eco standby disconnects Wi-Fi until a physical wake.
@@ -245,7 +247,7 @@ Wi-Fi-capable Arduino-Pico targets can build a local browser control room and JS
 ### Access control and data
 
 - **Read-only guest mode:** Status remains available while changes require PIN unlock.
-- **Device UI Lock:** The same PIN protects browser and serial writes and OLED menu entry.
+- **Device UI Lock:** The same PIN protects browser and serial writes and local menu entry.
 - **Sessions:** Successful unlock creates a random, inactivity-limited session. Repeated failures receive progressively longer delays.
 - **Browser write checks:** Mutating requests require same-origin JSON, correct types, bounded bodies, and write-access approval.
 - **Security headers:** Framing, referrer, content-type, script, and style restrictions are sent with responses.
@@ -263,8 +265,8 @@ Network setup and access-control details are in [Web interface](web-interface.md
 - **Integrity header:** Settings and preset files contain a file magic, file-format version, settings-schema version, payload size, and CRC32.
 - **Schema migration:** Known older layouts are migrated only when version, size, and CRC match the expected structure. Unsupported or damaged payloads are rejected.
 - **Known-good rollback:** Explicit saves retain the previous bootable configuration and mark the new file pending. The new settings are confirmed only after Core 1 begins servicing waveform buffers on the next boot.
-- **Five presets:** `MAX_PRESET_SLOTS` controls the default five motor-tuning slots.
-- **Preset actions:** OLED, Serial Monitor, and web workflows can load, save, rename, clear, import, export, preview, and compare presets as applicable.
+- **Five presets:** The stored directory and all interfaces use exactly five motor-tuning slots; other `MAX_PRESET_SLOTS` values are rejected at compile time.
+- **Preset actions:** Local-display, Serial Monitor, and web workflows can load, save, rename, clear, import, export, preview, and compare presets as applicable.
 - **Preset names:** Names contain up to 16 characters.
 - **Preset contents:** Per-speed frequency, limits, phase, gain, filtering, amplitude, startup and closed-loop tuning are stored with global topology, phase count, V/f, ramping, braking and output tuning.
 - **Closed-loop preset import:** Current preset JSON stores three per-speed tuning records. Older single-value closed-loop tuning keys are accepted and copied into all three speeds.
@@ -273,7 +275,7 @@ Network setup and access-control details are in [Web interface](web-interface.md
 - **Factory reset:** Reset requires confirmation, refuses to run while the motor is moving, forces output off, formats LittleFS, and restores defaults.
 - **Safe Mode:** Holding the primary encoder at power-on bypasses saved settings and starts conservative factory values in RAM with zero initial amplitude and Wi-Fi off.
 - **Safe Mode persistence:** Settings, presets, runtime, boot confirmation, network configuration, and error logs remain read-only for the complete Safe Mode session.
-- **Recovery:** Serial diagnostics remain available in Safe Mode. The OLED exit action reboots and attempts a normal flash load.
+- **Recovery:** Serial diagnostics remain available in Safe Mode when `SERIAL_MONITOR_ENABLE` is `1`. The local-display exit action, when a display is compiled, reboots and attempts a normal flash load.
 - **Flash wear:** Live tuning stays in RAM until saved, and speed-selection writes are deferred. LittleFS wear levelling does not replace the need to avoid repeated saves.
 
 Storage scope and recovery behaviour are in [Settings and presets](settings-and-presets.md).
@@ -302,7 +304,7 @@ Storage scope and recovery behaviour are in [Settings and presets](settings-and-
 - **Warning threshold:** The warning defaults to 65°C, records `ERR_AMP_THERMAL`, and re-arms after temperature falls 5°C below the threshold.
 - **Shutdown threshold:** The shutdown defaults to 75°C. A shutdown-temperature reading or unhealthy thermal input performs an emergency stop and latches the critical interlock until reboot.
 - **Validation:** Warning and shutdown values are limited to 30-120°C with at least 1°C between them.
-- **Status:** OLED errors, Serial Monitor, web status, telemetry, diagnostics, and Bench expose temperature and thermal state when compiled.
+- **Status:** Local-display errors, Serial Monitor, web status, telemetry, diagnostics, and Bench expose temperature and thermal state when compiled.
 
 Pins and limits are listed in [Build and hardware configuration](build-configuration.md).
 
@@ -315,15 +317,15 @@ Pins and limits are listed in [Build and hardware configuration](build-configura
 - **Atomic waveform settings:** Core 0 publishes pending frequency, amplitude, filter, phase and gain state between buffers so a buffer is generated from one coherent tune.
 - **Independent filters:** Per-channel filter history remains on Core 1 with waveform generation.
 - **Non-blocking control:** Motor transitions, relay sequencing, bridge wake delays, input handling, and network service use periodic state rather than long blocking delays.
-- **Resource monitoring:** Core load, heap, optional PSRAM, sketch flash, and LittleFS use feed OLED and web diagnostics.
+- **Resource monitoring:** Core load, heap, optional PSRAM, sketch flash, and LittleFS use feed local-display and web diagnostics.
 - **Waveform health:** Core 0 checks the Core 1 heartbeat and DMA buffer-fill age. A stalled path records `ERR_WAVEFORM_HEALTH`, enters critical stop, and allows watchdog recovery if Core 1 remains unhealthy.
 
 ## Error handling and recovery
 
-- **Initialisation checks:** Display, storage, power-stage, sensor, network, and optional subsystem failures are reported through the available surfaces.
+- **Initialisation checks:** Display and storage failures are reported through the available surfaces. Power-stage faults, feedback signal faults, network state, and compiled monitor faults are reported by their runtime checks.
 - **Range validation:** Loaded, imported, serial, menu, and web settings pass through the relevant range and relationship checks.
-- **OLED errors:** Error display can be enabled or disabled, its duration is configurable, and the encoder clears the current message.
-- **Persistent log:** Stored entries can be viewed and cleared from OLED, Serial Monitor, and web controls.
+- **On-screen errors:** Error display can be enabled or disabled, its duration is configurable, and the encoder clears the current message.
+- **Persistent log:** Stored entries can be viewed and cleared from the local display, Serial Monitor, and web controls.
 - **Critical shutdown:** Critical faults disable waveform output and the compiled hardware interlocks. Start and relay-test paths remain blocked until reboot.
 - **Bridge faults:** The hardware disable path is asserted in the GPIO interrupt, followed by normal Core 0 cleanup and a stored fault snapshot.
 - **Thermal faults:** Amplifier thermal warnings and shutdowns use `ERR_AMP_THERMAL` with the configured criticality.
@@ -338,7 +340,8 @@ Pins and limits are listed in [Build and hardware configuration](build-configura
 
 - [Build and hardware configuration](build-configuration.md)
 - [Output configuration](output-configuration.md)
-- [OLED user interface](user-interface.md)
+- [Display architecture and hardware](display.md)
+- [User interface](user-interface.md)
 - [Serial interface](serial-interface.md)
 - [Web interface](web-interface.md)
 - [Closed-loop control](closed-loop-control.md)

@@ -12,7 +12,7 @@
 #include <Arduino.h>
 
 /*
- * Snapshot consumed by the OLED dashboards, serial status, and web API. Values
+ * Snapshot consumed by the local dashboards, serial status, and web API. Values
  * are refreshed on a one-second window so callers can read without doing heap or
  * filesystem work themselves.
  */

@@ -42,6 +42,7 @@ enum NetworkStandbyMode : uint8_t {
 };
 
 // Binary LittleFS network config. This is separate from GlobalSettings so Wi-Fi credentials and web access settings can be managed/reset independently.
+#pragma pack(push, 4)
 struct NetworkConfig {
     uint32_t magic;
     uint16_t version;
@@ -66,6 +67,9 @@ struct NetworkConfig {
     uint8_t standbyMode;
     bool deviceLockEnabled;
 };
+#pragma pack(pop)
+
+static_assert(sizeof(NetworkConfig) == 272, "Update the network schema and migration when NetworkConfig changes.");
 
 /*
  * Manages Wi-Fi station/AP state, captive setup DNS, web PIN/lock state, and

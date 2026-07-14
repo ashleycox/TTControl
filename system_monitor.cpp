@@ -70,7 +70,7 @@ SystemMetricsSnapshot SystemMonitor::snapshot() const {
 }
 
 void SystemMonitor::refreshMemoryAndFlash() {
-    // Arduino-Pico reports -1/0 for unavailable heaps on some boards. Clamp those to zero so JSON and OLED code never display wrapped uint32_t values.
+    // Arduino-Pico reports -1/0 for unavailable heaps on some boards. Clamp those to zero so JSON and display code never show wrapped uint32_t values.
     int heapTotal = rp2040.getTotalHeap();
     int heapUsed = rp2040.getUsedHeap();
     int heapFree = rp2040.getFreeHeap();

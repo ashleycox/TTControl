@@ -38,7 +38,8 @@ bool MenuItem::isVisible() const {
 }
 
 // --- MenuPage Container ---
-MenuPage::MenuPage(const char* title) : _title(copyMenuString(title)), _selection(0), _offset(0) {}
+MenuPage::MenuPage(const char* title)
+    : _title(copyMenuString(title)), _selection(0), _offset(0), _visibleRows(5) {}
 
 MenuPage::~MenuPage() {
     clear();
@@ -59,6 +60,12 @@ void MenuPage::clear() {
     _offset = 0;
 }
 
+void MenuPage::setVisibleRows(uint8_t rows) {
+    if (rows < 1) rows = 1;
+    _visibleRows = rows;
+    clampSelection();
+}
+
 MenuItem* MenuPage::getItem(size_t index) const {
     return getVisibleItem(index);
 }
@@ -72,8 +79,8 @@ void MenuPage::next() {
     _selection++;
     if (_selection >= count) _selection = 0;
     
-    // Scroll logic: keep selection within the visible window used by ui.cpp.
-    if (_selection >= _offset + 5) _offset = _selection - 4;
+    // Scroll logic follows the row count selected by the active display layout.
+    if (_selection >= _offset + _visibleRows) _offset = _selection - _visibleRows + 1;
     if (_selection < _offset) _offset = _selection;
 }
 
@@ -87,7 +94,7 @@ void MenuPage::prev() {
     if (_selection < 0) _selection = count - 1;
     
     // Scroll logic
-    if (_selection >= _offset + 5) _offset = _selection - 4;
+    if (_selection >= _offset + _visibleRows) _offset = _selection - _visibleRows + 1;
     if (_selection < _offset) _offset = _selection;
 }
 
@@ -138,8 +145,8 @@ void MenuPage::clampSelection() {
     if (_selection >= count) _selection = count - 1;
     if (_offset < 0) _offset = 0;
     if (_offset > _selection) _offset = _selection;
-    if (_selection >= _offset + 5) _offset = _selection - 4;
-    int maxOffset = count > 5 ? count - 5 : 0;
+    if (_selection >= _offset + _visibleRows) _offset = _selection - _visibleRows + 1;
+    int maxOffset = count > _visibleRows ? count - _visibleRows : 0;
     if (_offset > maxOffset) _offset = maxOffset;
 }
 
@@ -274,7 +281,7 @@ void MenuFloat::onInput(int delta) {
 }
 
 void MenuFloat::getValueString(char* buffer, size_t size) const {
-    // Two decimals fit the OLED and are adequate for current motor settings.
+    // Two decimals fit the logical display and are adequate for current motor settings.
     snprintf(buffer, size, "%.2f", _editing ? _temp : *_target);
 }
 
@@ -318,7 +325,7 @@ static const char* menuTextCharset(bool uppercase) {
 }
 
 static void appendMenuTextDisplayChar(char c, char* buffer, size_t size, size_t& out) {
-    // Translate internal edit tokens into printable OLED/serial text.
+    // Translate internal edit tokens into printable display/serial text.
     if (!buffer || out >= size) return;
 
     if (c == MENU_TEXT_SHIFT_TOKEN) {

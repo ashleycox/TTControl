@@ -37,10 +37,12 @@ void ErrorHandler::logEvent(ErrorCode code, const char* message) {
         if (_sessionId == 0) _sessionId = micros() ^ (uint32_t)(uintptr_t)this;
     }
     // logEvent is for informational boot/runtime entries. It does not trigger UI alerts or motor actions.
-    Serial.print("ERROR ");
-    Serial.print(code);
-    Serial.print(": ");
-    Serial.println(message);
+    if (SERIAL_MONITOR_ENABLE) {
+        Serial.print("ERROR ");
+        Serial.print(code);
+        Serial.print(": ");
+        Serial.println(message);
+    }
 
     logToFile(code, message);
 }
@@ -98,9 +100,11 @@ void ErrorHandler::logToFile(ErrorCode code, const char* message) {
     }
 }
 
-void ErrorHandler::clearLogs() {
-    if (safeModeActive) return;
-    LittleFS.remove("/error.log");
+bool ErrorHandler::clearLogs() {
+    if (safeModeActive) return false;
+    bool currentRemoved = !LittleFS.exists("/error.log") || LittleFS.remove("/error.log");
+    bool backupRemoved = !LittleFS.exists("/error.bak") || LittleFS.remove("/error.bak");
+    return currentRemoved && backupRemoved;
 }
 
 void ErrorHandler::dumpLog(Stream& out) {

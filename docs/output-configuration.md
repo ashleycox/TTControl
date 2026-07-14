@@ -1,6 +1,6 @@
 # Output configuration
 
-TT Control can drive either a controller-free triple-half-bridge power stage or a filtered linear-amplifier interface. Both use the same DDS waveform engine, motor state machine, per-speed tuning, presets, OLED menus, Serial Monitor commands, and web settings. The compile-time output selection changes the electrical meaning and safety handling of the output pins.
+TT Control can drive either a controller-free triple-half-bridge power stage or a filtered linear-amplifier interface. Both use the same DDS waveform engine, motor state machine, per-speed tuning, presets, local-display menus, Serial Monitor commands, and web settings. The compile-time output selection changes the electrical meaning and safety handling of the output pins.
 
 The default build targets a DRV8313/SimpleFOC-style board with three PWM inputs, one shared enable input, and an active-low fault output. The board must not contain another microcontroller driving the same inputs.
 
@@ -46,7 +46,7 @@ The default bridge configuration expects the following signals:
 
 This matches controller-free DRV8313 boards and SimpleFOC-style boards that expose `IN1`, `IN2`, `IN3`, `EN`, and `nFAULT`. If a board also exposes `nSLEEP` or `nRESET`, those signals must be held in their documented operating state by the board or external wiring. They must not be left floating.
 
-The enable line must have a hardware pull resistor that keeps the bridge disabled while the Pico is unpowered or held in reset. Firmware establishes the inactive level at the beginning of `setup()`, but software cannot define a GPIO level before the RP2350 starts.
+The enable line must have a hardware pull resistor that keeps the bridge disabled while the Pico is unpowered or held in reset. Firmware establishes the inactive level at the beginning of `setup()`, but software cannot define a GPIO level before the microcontroller starts.
 
 Do not connect TT Control in parallel with another MCU. If a board contains an onboard controller, electrically isolate that controller from every PWM and enable signal before connecting the Pico.
 
@@ -134,11 +134,11 @@ The carrier target is configured independently of motor frequency:
 #define PWM_CARRIER_FREQUENCY_HZ 50000.0f
 ```
 
-The firmware derives the RP2350 PWM divider from the actual system clock, so a 150 MHz RP2350 build remains at the requested carrier instead of inheriting a divider calculated for 125 MHz. The supported compile-time range is 20-100 kHz. Motor frequency remains controlled by the DDS phase accumulator.
+The firmware derives the PWM divider from the actual system clock. RP2350 and RP2040 builds therefore remain at the requested carrier for every supported board clock selection. The supported compile-time range is 20-100 kHz. Motor frequency remains controlled by the DDS phase accumulator.
 
 ## 5. Motor topology and tuning
 
-Motor topology is a persisted setting available through the OLED, Serial Monitor, presets, and web interface:
+Motor topology is a persisted setting available through the local display, Serial Monitor, presets, and web interface:
 
 | Value | Topology | Nominal phase starting point |
 | :--- | :--- | :--- |
@@ -189,7 +189,7 @@ Uploading firmware or changing output configuration can energise motor wiring. D
 
 - [Features](features.md)
 - [Build and hardware configuration](build-configuration.md)
-- [OLED user interface](user-interface.md)
+- [User interface](user-interface.md)
 - [Settings and presets](settings-and-presets.md)
 
 [Back to the project README](../readme.md)

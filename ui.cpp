@@ -17,6 +17,46 @@
 #include "error_handler.h"
 #include "speed_feedback.h"
 #include <Fonts/FreeSans12pt7b.h>
+#include <Fonts/FreeSansBold18pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
+#include <string.h>
+
+static int uiWidth() { return DISPLAY_LOGICAL_WIDTH; }
+static int uiHeight() { return DISPLAY_LOGICAL_HEIGHT; }
+static bool uiCompact() { return uiHeight() <= 72; }
+static bool uiLarge() { return uiWidth() >= 200 && uiHeight() >= 160; }
+static uint8_t uiTextScale() { return uiLarge() ? 2 : 1; }
+static int uiHeaderHeight() { return uiCompact() ? 16 : (uiLarge() ? 30 : 20); }
+
+static int centeredClassicX(const char* text, uint8_t scale) {
+    if (!text) return 0;
+    int width = (int)strlen(text) * 6 * scale;
+    return (uiWidth() - width) / 2;
+}
+
+static void drawTitleBand(const char* title, bool warning = false) {
+    const int height = uiHeaderHeight();
+    const uint8_t scale = uiTextScale();
+    display.fillRect(0, 0, uiWidth(), height, DISPLAY_WHITE);
+    display.setFont(NULL);
+    display.setTextSize(scale);
+    display.setTextColor(DISPLAY_BLACK, DISPLAY_WHITE);
+    int y = (height - 8 * scale) / 2;
+    display.setCursor(centeredClassicX(title, scale), y);
+    display.print(title);
+    if (warning && uiWidth() >= 128) {
+        display.fillTriangle(3, height / 2 + 5, 9, height / 2 - 5, 15, height / 2 + 5, DISPLAY_BLACK);
+    }
+    display.setTextColor(DISPLAY_WHITE);
+}
+
+static void drawCenteredClassic(const char* text, int y, uint8_t scale = 1) {
+    display.setFont(NULL);
+    display.setTextSize(scale);
+    display.setTextColor(DISPLAY_WHITE);
+    display.setCursor(centeredClassicX(text, scale), y);
+    display.print(text);
+}
 
 // The dashboard uses four-character state labels so the top row still has space for frequency and the lock icon on a 128px display.
 static const char* dashboardStateLabel() {
@@ -36,6 +76,7 @@ static const char* dashboardStateLabel() {
 // Diagnostic dashboards can be hidden individually to keep press-and-rotate dashboard cycling short for users who only want the core views.
 static bool dashboardModeEnabled(int mode) {
     switch (mode) {
+        case 1: return settings.get().showRuntime;
         case 4: return settings.get().showCpuDashboard;
         case 5: return settings.get().showMemoryDashboard;
         case 6: return settings.get().showFlashDashboard;
@@ -57,17 +98,60 @@ static int nextDashboardMode(int current, int direction) {
 
 // Shared percentage bar for CPU, memory, flash, and filesystem gauges.
 static void drawMetricBar(int x, int y, int w, int h, uint32_t used, uint32_t total) {
-    display.drawRect(x, y, w, h, SSD1306_WHITE);
+    display.drawRect(x, y, w, h, DISPLAY_WHITE);
     if (total == 0) return;
     uint32_t fill = (used * (uint32_t)(w - 2)) / total;
     if (fill > (uint32_t)(w - 2)) fill = w - 2;
-    display.fillRect(x + 1, y + 1, (int)fill, h - 2, SSD1306_WHITE);
+    display.fillRect(x + 1, y + 1, (int)fill, h - 2, DISPLAY_WHITE);
 }
 
-// Compact byte formatting for the small OLED diagnostic pages.
+// Compact byte formatting for the small logical diagnostic pages.
 static void printKilobytes(uint32_t bytes) {
     display.print(bytes / 1024UL);
     display.print("K");
+}
+
+// Wrap short modal text without heap allocation. The classic GFX font is six pixels wide at text size 1.
+static void drawWrappedText(const char* text, int x, int y, int width, int maxLines, int lineHeight,
+                            uint8_t textScale = 1) {
+    if (!text || width < 6 * textScale || maxLines < 1) return;
+
+    display.setFont(NULL);
+    display.setTextSize(textScale);
+    const int maxChars = width / (6 * textScale);
+    const char* cursor = text;
+    for (int lineIndex = 0; lineIndex < maxLines && *cursor; lineIndex++) {
+        while (*cursor == ' ') cursor++;
+        size_t remaining = strlen(cursor);
+        size_t take = remaining < (size_t)maxChars ? remaining : (size_t)maxChars;
+
+        if (take < remaining) {
+            size_t wordBreak = take;
+            while (wordBreak > 0 && cursor[wordBreak] != ' ') wordBreak--;
+            if (wordBreak > 0) take = wordBreak;
+        }
+
+        char line[48];
+        if (take >= sizeof(line)) take = sizeof(line) - 1;
+        memcpy(line, cursor, take);
+        line[take] = 0;
+
+        const char* next = cursor + take;
+        while (*next == ' ') next++;
+        bool truncated = lineIndex == maxLines - 1 && *next;
+        if (truncated && take >= 3) {
+            line[take - 3] = '.';
+            line[take - 2] = '.';
+            line[take - 1] = '.';
+        }
+
+        int16_t boundsX, boundsY;
+        uint16_t boundsWidth, boundsHeight;
+        display.getTextBounds(line, 0, 0, &boundsX, &boundsY, &boundsWidth, &boundsHeight);
+        display.setCursor(x + (width - (int)boundsWidth) / 2, y + lineIndex * lineHeight);
+        display.print(line);
+        cursor = next;
+    }
 }
 
 UserInterface::UserInterface() {
@@ -94,14 +178,14 @@ UserInterface::UserInterface() {
     // Transition fields are kept initialized even though current navigation snaps pages into place after starting the animation.
     _transitionProgress = 0.0;
     _transitionDirection = 0;
-    _nextPage = nullptr;
     _smoothScrollY = 0.0;
 
-    _lastBrightness = 0;
     _lissajousPhase = 0.0;
 
     // Randomize column starts so the matrix screensaver is not a flat line on first entry.
-    for(int i=0; i<16; i++) _matrixDrops[i] = random(0, 64);
+    for (size_t i = 0; i < sizeof(_matrixDrops) / sizeof(_matrixDrops[0]); i++) {
+        _matrixDrops[i] = random(0, uiHeight());
+    }
 
     _lastInputTime = 0;
 }
@@ -112,30 +196,35 @@ void UserInterface::begin() {
     // Build once at boot. Menu pages/items are static and reused throughout the session to avoid heap churn while the controller is running.
     buildMenuSystem();
 
-    // The splash is allowed to block because waveform generation has not started yet and setup() is still in progress.
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);
-
-    const char* msg = WELCOME_MESSAGE;
-    int16_t x1, y1;
-    uint16_t w, h;
-    display.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-
-    // Scroll the welcome text from right to left across the OLED.
-    for (int x = 128; x >= -((int)w); x -= 4) {
+    // The splash is allowed to block before waveform startup, but still honours the panel frame cap. Headless and failed displays skip it.
+    if (displayManager.isAvailable()) {
         display.clearDisplay();
-        display.setCursor(x, 25);
-        display.print(msg);
-        display.display();
-    }
+        uint8_t splashScale = uiLarge() ? 3 : 2;
+        display.setTextSize(splashScale);
+        display.setTextColor(DISPLAY_WHITE);
 
-    display.clearDisplay();
-    display.setCursor(30, 45);
-    display.setTextSize(1);
-    display.println(FIRMWARE_VERSION);
-    display.display();
-    delay(1000);
+        const char* msg = WELCOME_MESSAGE;
+        int16_t x1, y1;
+        uint16_t w, h;
+        display.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
+
+        // Scroll from right to left. Logical positions advance at 50 Hz while the manager samples only frames allowed by the physical backend.
+        for (int x = DISPLAY_LOGICAL_WIDTH; x >= -((int)w); x -= 4) {
+            display.clearDisplay();
+            display.setCursor(x, (uiHeight() - 8 * splashScale) / 2);
+            display.print(msg);
+            displayManager.present();
+            delay(20);
+        }
+
+        display.clearDisplay();
+        display.setTextSize(uiTextScale());
+        display.getTextBounds(FIRMWARE_VERSION, 0, 0, &x1, &y1, &w, &h);
+        display.setCursor((DISPLAY_LOGICAL_WIDTH - (int)w) / 2, uiHeight() - (10 * uiTextScale()));
+        display.println(FIRMWARE_VERSION);
+        displayManager.present(true);
+        delay(1000);
+    }
 
     // Optional dedicated buttons bypass the encoder event stream and are sampled by InputManager on every UI update.
     #ifdef SPEED_BUTTON_ENABLE
@@ -154,7 +243,7 @@ void UserInterface::begin() {
 }
 
 void UserInterface::update() {
-    // Poll first, then route events. The rest of update() is display policy and rendering, so hardware actions happen before the current frame is drawn.
+    // Poll first, then route events. Physical display transfer is deferred to render() near the end of the Core 0 loop.
     _input.update();
     handleInput();
 
@@ -179,7 +268,8 @@ void UserInterface::update() {
         }
     }
 
-    // Display sleep saves OLED life when stopped/idle. Running display policy is handled by auto-dim so status remains visible while a record plays.
+    // Display sleep applies to every backend; OLEDs save panel life and TFTs can disable a wired backlight.
+    bool sleepExpired = false;
     int sleepDelayVal = settings.get().displaySleepDelay;
     if (sleepDelayVal > 0) {
         uint32_t sleepMs = 0;
@@ -192,23 +282,27 @@ void UserInterface::update() {
             case 6: sleepMs = 600000; break;
         }
 
-        if (!motor.isRunning() && (now - _lastInputTime > sleepMs)) {
-             display.ssd1306_command(SSD1306_DISPLAYOFF);
-        }
+        sleepExpired = !motor.isRunning() && (now - _lastInputTime > sleepMs);
     }
 
-    // Standby either animates a screensaver or turns the panel off, depending on the user setting. Leaving standby clears the screensaver flag.
+    // Standby either animates a screensaver or requests panel sleep. Critical and modal screens override that request below.
     if (motor.isStandby()) {
         if (settings.get().screensaverEnabled) {
             _screensaverActive = true;
-            display.ssd1306_command(SSD1306_DISPLAYON);
         } else {
             _screensaverActive = false;
-            display.ssd1306_command(SSD1306_DISPLAYOFF);
+            sleepExpired = true;
         }
     } else {
         _screensaverActive = false;
     }
+
+    bool attentionScreen = errorHandler.hasCriticalError() || _showingError || _showingConfirm ||
+                           _showingMessage || _showingGoodbye || motor.isSweepingMode() || _inMenu;
+    bool displayNeeded = attentionScreen || motor.isRunning() || _screensaverActive || !sleepExpired;
+    displayManager.setPower(displayNeeded);
+    displayManager.setBrightness(settings.get().displayBrightness);
+    displayManager.setDimmed(_statusMode == 2 && !attentionScreen);
 
     // Advance any pending menu transition.
     if (_transitionDirection != 0) {
@@ -216,14 +310,13 @@ void UserInterface::update() {
         if (_transitionProgress >= 1.0) {
             _transitionProgress = 0.0;
             _transitionDirection = 0;
-            if (_nextPage) {
-                _currentPage = _nextPage;
-                _nextPage = nullptr;
-            }
         }
     }
 
-    // Draw exactly one frame from the highest-priority active view.
+}
+
+void UserInterface::render() {
+    if (!displayManager.frameDue()) return;
     draw();
 }
 
@@ -252,13 +345,29 @@ void UserInterface::handleInput() {
     // Any physical or injected input wakes the panel and resets idle timers.
     if (evt != EVT_NONE || delta != 0 || _input.isButtonDown()) {
         _lastInputTime = millis();
-        display.ssd1306_command(SSD1306_DISPLAYON);
+        displayManager.setPower(true);
 
         // The first input from dim mode is consumed to avoid an accidental speed change or menu action while the user is only waking the display.
         if (_statusMode == 2) {
             _statusMode = 0; // Restore to Standard
             return;
         }
+    }
+
+    // A stop sequence owns the active waveform until its snapshotted braking
+    // parameters complete. If a remote command starts braking while the local
+    // menu is open, freeze edits instead of allowing live setting pointers to
+    // alter the drive envelope mid-sequence.
+    if (_inMenu && motor.getState() == STATE_STOPPING) {
+#if PITCH_CONTROL_ENABLE
+        int ignoredPitchDelta = _input.getPitchDelta();
+#endif
+        bool attemptedInput = evt != EVT_NONE || delta != 0 || _input.isButtonDown();
+#if PITCH_CONTROL_ENABLE
+        attemptedInput = attemptedInput || ignoredPitchDelta != 0;
+#endif
+        if (attemptedInput) showMessage("Braking in progress", 1000);
+        return;
     }
 
     // Locked mode still allows menu unlock entry, stop, and standby. Other actions show a short "UI Locked" message without changing settings.
@@ -282,7 +391,7 @@ void UserInterface::handleInput() {
             motor.toggleStandby();
             _showingGoodbye = true;
             _goodbyeStartTime = millis();
-            display.ssd1306_command(SSD1306_DISPLAYON);
+            displayManager.setPower(true);
             return;
         }
 
@@ -448,7 +557,7 @@ void UserInterface::handleInput() {
                 motor.toggleStandby();
                 _showingGoodbye = true;
                 _goodbyeStartTime = millis();
-                display.ssd1306_command(SSD1306_DISPLAYON);
+                displayManager.setPower(true);
             }
         }
 
@@ -471,17 +580,11 @@ void UserInterface::handleInput() {
 }
 
 void UserInterface::draw() {
-    // Contrast is sent only when changed. Dim mode and screensaver own their own brightness behavior, so the normal setting is skipped there.
-    if (_statusMode != 2 && !_screensaverActive) {
-        uint8_t target = settings.get().displayBrightness;
-        if (target != _lastBrightness) {
-            display.ssd1306_command(SSD1306_SETCONTRAST);
-            display.ssd1306_command(target);
-            _lastBrightness = target;
-        }
-    }
-
     display.clearDisplay();
+    display.setFont(NULL);
+    display.setTextSize(1);
+    display.setTextColor(DISPLAY_WHITE);
+    display.setTextWrap(false);
 
     // Draw priority is safety/status first, then modal dialogs, then the active menu/dashboard surface.
     if (errorHandler.hasCriticalError()) {
@@ -504,7 +607,7 @@ void UserInterface::draw() {
         drawDashboard();
     }
 
-    display.display();
+    displayManager.present();
 
     #if DUPLICATE_DISPLAY_TO_SERIAL && SERIAL_MONITOR_ENABLE
     dumpDisplayToSerial();
@@ -512,14 +615,18 @@ void UserInterface::draw() {
 }
 
 void UserInterface::dumpDisplayToSerial() {
-    // ASCII mirror is throttled because a full 128x64 dump can otherwise dominate the 115200 baud serial link.
+    // Bound the mirror to 120x32 cells so large displays cannot monopolize the serial command interface.
     static uint32_t lastDump = 0;
     if (millis() - lastDump < 1000) return;
     lastDump = millis();
 
     Serial.println("\n--- Display Mirror ---");
-    for (int y = 0; y < 64; y += 2) { // Skip every other line for aspect ratio/speed
-        for (int x = 0; x < 128; x++) {
+    int stepX = (uiWidth() + 119) / 120;
+    int stepY = (uiHeight() + 31) / 32;
+    if (stepX < 1) stepX = 1;
+    if (stepY < 1) stepY = 1;
+    for (int y = 0; y < uiHeight(); y += stepY) {
+        for (int x = 0; x < uiWidth(); x += stepX) {
             if (display.getPixel(x, y)) Serial.print("#");
             else Serial.print(" ");
         }
@@ -531,8 +638,9 @@ void UserInterface::dumpDisplayToSerial() {
 void UserInterface::drawGoodbye() {
     // The goodbye screen is rendered after standby has been requested but before the display is allowed to go dark.
     display.clearDisplay();
-    display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);
+    uint8_t scale = uiLarge() ? 3 : 2;
+    display.setTextSize(scale);
+    display.setTextColor(DISPLAY_WHITE);
 
     const char* msg = "Goodbye...";
     int16_t x1, y1;
@@ -541,115 +649,141 @@ void UserInterface::drawGoodbye() {
 
     // Position is time-based so the animation speed is independent of loop rate.
     uint32_t elapsed = millis() - _goodbyeStartTime;
-    int x = 128 - (elapsed / 10);
+    int x = uiWidth() - (elapsed / 10);
 
-    display.setCursor(x, 25);
+    display.setCursor(x, (uiHeight() - 8 * scale) / 2);
     display.print(msg);
 
     if (x < -((int)w)) {
         _showingGoodbye = false;
         // Screensaver-enabled standby is handled by the next update cycle.
         if (!settings.get().screensaverEnabled) {
-             display.ssd1306_command(SSD1306_DISPLAYOFF);
+             displayManager.setPower(false);
         }
     }
 }
 
 void UserInterface::drawMenu() {
-    // Transition offsets are currently zeroed by navigateTo()/back(), but the math is retained so future dual-page rendering has stable state.
     int xOffset = 0;
-
     if (_transitionDirection != 0) {
         float t = _transitionProgress;
-
-        if (_transitionDirection == 1) { // Forward (Slide Left)
-            xOffset = (int)(128.0 * (1.0 - t));
-        } else if (_transitionDirection == -1) { // Back (Slide Right)
-            xOffset = (int)(-128.0 * (1.0 - t));
-        }
+        if (_transitionDirection == 1) xOffset = (int)(uiWidth() * (1.0f - t));
+        else if (_transitionDirection == -1) xOffset = (int)(-uiWidth() * (1.0f - t));
     }
 
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
+    const uint8_t scale = uiTextScale();
+    const int headerHeight = uiCompact() ? 12 : uiHeaderHeight();
+    const int rowHeight = uiLarge() ? 20 : (uiCompact() ? 10 : 12);
+    const int listTop = headerHeight + 2;
+    int visible = (uiHeight() - listTop) / rowHeight;
+    if (visible < 1) visible = 1;
+    _currentPage->setVisibleRows(visible);
 
-    // Header line leaves five 10px menu rows below it.
-    display.setCursor(0 + xOffset, 0);
+    display.setFont(NULL);
+    display.setTextSize(scale);
+    display.setTextColor(DISPLAY_WHITE);
+
+    if (!uiCompact()) display.fillRect(xOffset, 0, uiWidth(), headerHeight, DISPLAY_WHITE);
+    display.setTextColor(uiCompact() ? DISPLAY_WHITE : DISPLAY_BLACK,
+                         uiCompact() ? DISPLAY_BLACK : DISPLAY_WHITE);
+    display.setCursor(3 + xOffset, (headerHeight - 8 * scale) / 2);
     display.print(_currentPage->getTitle());
-    display.drawLine(0 + xOffset, 10, 128 + xOffset, 10, SSD1306_WHITE);
+    display.setTextColor(DISPLAY_WHITE);
+    if (uiCompact()) display.drawLine(xOffset, headerHeight - 1, uiWidth() + xOffset, headerHeight - 1, DISPLAY_WHITE);
 
-    // Smooth scroll state is updated even though MenuPage owns the logical window; this keeps the animation hook ready without changing layout.
     int selection = _currentPage->getSelection();
-    int targetY = selection * 10; // 10px per item
-
+    int targetY = selection * rowHeight;
     _smoothScrollY += (targetY - _smoothScrollY) * 0.3;
 
     int total = _currentPage->getItemCount();
     int offset = _currentPage->getOffset();
-    int visible = 5;
-
     for (int i = 0; i < visible; i++) {
         int idx = offset + i;
         if (idx >= total) break;
 
         MenuItem* item = _currentPage->getItem(idx);
-        int y = 15 + (i * 10);
+        int rowY = listTop + i * rowHeight;
+        int textY = rowY + (rowHeight - 8 * scale) / 2;
+        int contentRight = uiWidth() - (total > visible ? 5 : 2);
 
-        // The selected row is inverted to stay visible in a dense OLED list.
         if (idx == selection) {
-            display.fillRect(0 + xOffset, y - 1, 128, 11, SSD1306_WHITE);
-            display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+            display.fillRoundRect(1 + xOffset, rowY, contentRight - 1, rowHeight - 1,
+                                  uiLarge() ? 3 : 1, DISPLAY_WHITE);
+            display.setTextColor(DISPLAY_BLACK, DISPLAY_WHITE);
         } else {
-            display.setTextColor(SSD1306_WHITE);
+            display.setTextColor(DISPLAY_WHITE);
         }
 
-        display.setCursor(2 + xOffset, y);
-        display.print(item->getLabel());
-
-        // Values start at x=80 by convention; labels in menu_data.cpp are kept short so both columns fit.
         char valBuf[18];
         item->getValueString(valBuf, sizeof(valBuf));
+        int valueX = contentRight;
         if (valBuf[0] != 0) {
-            display.setCursor(80 + xOffset, y);
+            int16_t valueX1, valueY1;
+            uint16_t valueWidth, valueHeight;
+            display.getTextBounds(valBuf, 0, 0, &valueX1, &valueY1, &valueWidth, &valueHeight);
+            int valueRight = contentRight - (item->isDirty() ? 8 * scale : 2);
+            valueX = valueRight - (int)valueWidth;
+            display.setCursor(valueX + xOffset, textY);
             display.print(valBuf);
         }
 
-        // Dirty marks values that differ from the active settings or shadow.
+        const char* label = item->getLabel();
+        int labelLimit = valBuf[0] ? valueX - 4 : contentRight - 2;
+        int maxLabelChars = (labelLimit - 4) / (6 * scale);
+        if (maxLabelChars < 1) maxLabelChars = 1;
+        char labelBuf[40];
+        size_t labelLength = strlen(label);
+        size_t copyLength = labelLength < (size_t)maxLabelChars ? labelLength : (size_t)maxLabelChars;
+        if (copyLength >= sizeof(labelBuf)) copyLength = sizeof(labelBuf) - 1;
+        memcpy(labelBuf, label, copyLength);
+        labelBuf[copyLength] = 0;
+        if (labelLength > copyLength && copyLength >= 2) {
+            labelBuf[copyLength - 2] = '.';
+            labelBuf[copyLength - 1] = '.';
+        }
+        display.setCursor(4 + xOffset, textY);
+        display.print(labelBuf);
+
         if (item->isDirty()) {
-            display.setCursor(120 + xOffset, y);
+            display.setCursor(contentRight - 6 * scale + xOffset, textY);
             display.print(F("*"));
         }
     }
 
-    // Small right-edge scrollbar shows position in long pages.
     if (total > visible) {
-        int sbHeight = (visible * 50) / total;
-        if (sbHeight < 2) sbHeight = 2;
-        int sbY = 15 + (offset * 50) / total;
-        display.fillRect(126 + xOffset, sbY, 2, sbHeight, SSD1306_WHITE);
+        int trackY = listTop;
+        int trackHeight = uiHeight() - trackY - 1;
+        int thumbHeight = (visible * trackHeight) / total;
+        if (thumbHeight < 3) thumbHeight = 3;
+        int travel = trackHeight - thumbHeight;
+        int maxOffset = total - visible;
+        int thumbY = trackY + (maxOffset > 0 ? offset * travel / maxOffset : 0);
+        display.drawFastVLine(uiWidth() - 2 + xOffset, trackY, trackHeight, DISPLAY_WHITE);
+        display.fillRect(uiWidth() - 3 + xOffset, thumbY, 3, thumbHeight, DISPLAY_WHITE);
     }
 }
 
 void UserInterface::drawDashboard() {
     extern bool safeModeActive;
 
-    // Dashboard modes can be hidden while selected through settings; advance to the next enabled page instead of leaving the OLED blank.
+    // Dashboard modes can be hidden while selected through settings; advance to the next enabled page instead of leaving the display blank.
     if (!dashboardModeEnabled(_statusMode)) {
         _statusMode = nextDashboardMode(_statusMode, 1);
     }
 
     // Mode 2: minimal dim view for low-distraction playback.
     if (_statusMode == 2) {
-        display.dim(true); // Low contrast
-
         display.setFont(NULL);
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
-        display.setCursor(4, 4);
+        display.setTextSize(uiTextScale());
+        display.setTextColor(DISPLAY_WHITE);
+        display.setCursor(uiLarge() ? 8 : 4, uiLarge() ? 8 : 4);
         display.print(dashboardStateLabel());
 
-        // Large speed text stays legible from across the room.
-        display.setFont(&FreeSans12pt7b);
-        display.setTextColor(SSD1306_WHITE);
+        // Dim mode deliberately removes every secondary element while scaling the speed natively for the panel.
+        if (uiLarge()) display.setFont(&FreeSansBold24pt7b);
+        else if (!uiCompact()) display.setFont(&FreeSansBold18pt7b);
+        else display.setFont(&FreeSans12pt7b);
+        display.setTextColor(DISPLAY_WHITE);
         display.setTextSize(1);
 
         SpeedMode s = motor.getSpeed();
@@ -661,32 +795,31 @@ void UserInterface::drawDashboard() {
         int16_t x1, y1;
         uint16_t w, h;
         display.getTextBounds(speedStr, 0, 0, &x1, &y1, &w, &h);
-        display.setCursor((128 - w) / 2, 40);
+        int baseline = uiCompact() ? 40 : (uiLarge() ? 145 : 78);
+        display.setCursor((uiWidth() - w) / 2, baseline);
         display.print(speedStr);
         display.setFont(NULL);
+        if (!uiCompact()) drawCenteredClassic("RPM", baseline + (uiLarge() ? 15 : 10), uiTextScale());
         return;
     }
 
-    display.dim(false); // Normal contrast
-
     // Top row is shared by every non-dim dashboard mode.
     if (safeModeActive) {
-        // Safe Mode bypasses loaded settings, so it replaces normal status icons with a full-width warning banner.
-        display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
-        display.setTextColor(SSD1306_BLACK);
-        display.setCursor(35, 4);
-        display.print("SAFE MODE");
-        display.setTextColor(SSD1306_WHITE); // reset
+        drawTitleBand("SAFE MODE", true);
     } else {
-        if (motor.isRunning()) {
-            display.drawBitmap(0, 0, icon_play_bits, 16, 16, SSD1306_WHITE);
-        } else {
-            display.drawBitmap(0, 0, icon_stop_bits, 16, 16, SSD1306_WHITE);
-        }
+        const int headerHeight = uiHeaderHeight();
+        const uint8_t scale = uiTextScale();
+        bool inverseHeader = !uiCompact();
+        if (inverseHeader) display.fillRect(0, 0, uiWidth(), headerHeight, DISPLAY_WHITE);
+        uint16_t headerColor = inverseHeader ? DISPLAY_BLACK : DISPLAY_WHITE;
+        display.drawBitmap(0, (headerHeight - 16) / 2,
+                           motor.isRunning() ? icon_play_bits : icon_stop_bits,
+                           16, 16, headerColor);
 
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
-        display.setCursor(18, 4);
+        display.setFont(NULL);
+        display.setTextSize(scale);
+        display.setTextColor(headerColor, inverseHeader ? DISPLAY_WHITE : DISPLAY_BLACK);
+        display.setCursor(18, (headerHeight - 8 * scale) / 2);
         display.print(dashboardStateLabel());
 
         char freqBuf[12];
@@ -694,70 +827,114 @@ void UserInterface::drawDashboard() {
         int16_t fx1, fy1;
         uint16_t fw, fh;
         display.getTextBounds(freqBuf, 0, 0, &fx1, &fy1, &fw, &fh);
-        int freqX = 110 - (int)fw;
-        if (freqX < 48) freqX = 48;
-        display.setCursor(freqX, 4);
+        int frequencyRight = uiWidth() - 3;
+#if CLOSED_LOOP_SPEED_ENABLE
+        SpeedFeedbackStatus headerFeedback = speedFeedback.getStatus();
+        if (headerFeedback.configured && headerFeedback.locked) frequencyRight -= 18;
+#endif
+        int freqX = frequencyRight - (int)fw;
+        int minFrequencyX = 18 + 5 * 6 * scale;
+        if (freqX < minFrequencyX) freqX = minFrequencyX;
+        display.setCursor(freqX, (headerHeight - 8 * scale) / 2);
         display.print(freqBuf);
 
 #if CLOSED_LOOP_SPEED_ENABLE
-        SpeedFeedbackStatus feedback = speedFeedback.getStatus();
-        if (feedback.configured && feedback.locked) {
-            display.drawBitmap(112, 0, icon_lock_bits, 16, 16, SSD1306_WHITE);
+        if (headerFeedback.configured && headerFeedback.locked) {
+            display.drawBitmap(uiWidth() - 17, (headerHeight - 16) / 2,
+                               icon_lock_bits, 16, 16, headerColor);
         }
 #endif
+        display.setTextColor(DISPLAY_WHITE);
     }
 
     // Mode 1: runtime counters.
     if (_statusMode == 1) {
         display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
+        display.setTextColor(DISPLAY_WHITE);
 
-        display.setCursor(0, 20);
-        display.print("Session: ");
         uint32_t sessionSec = settings.getSessionRuntime();
-        int min = sessionSec / 60;
-        int sec = sessionSec % 60;
-        display.print(min); display.print("m "); display.print(sec); display.print("s");
-
-        display.setCursor(0, 35);
-        display.print("Total: ");
         uint32_t totalSec = settings.getTotalRuntime();
-        int hours = totalSec / 3600;
-        int tMin = (totalSec % 3600) / 60;
-        display.print(hours); display.print("h "); display.print(tMin); display.print("m");
+        char session[24];
+        char total[24];
+        snprintf(session, sizeof(session), "%lum %lus",
+                 (unsigned long)(sessionSec / 60), (unsigned long)(sessionSec % 60));
+        snprintf(total, sizeof(total), "%luh %lum",
+                 (unsigned long)(totalSec / 3600), (unsigned long)((totalSec % 3600) / 60));
+
+        if (uiCompact()) {
+            display.setCursor(0, 20);
+            display.print("SESSION ");
+            display.print(session);
+            display.setCursor(0, 38);
+            display.print("TOTAL   ");
+            display.print(total);
+        } else {
+            const uint8_t scale = uiTextScale();
+            const int top = uiHeaderHeight() + 6;
+            const int gap = uiLarge() ? 8 : 4;
+            const int cardHeight = (uiHeight() - top - gap - 5) / 2;
+            const int radius = uiLarge() ? 6 : 3;
+            display.drawRoundRect(4, top, uiWidth() - 8, cardHeight, radius, DISPLAY_WHITE);
+            display.drawRoundRect(4, top + cardHeight + gap, uiWidth() - 8, cardHeight, radius, DISPLAY_WHITE);
+            display.setTextSize(scale);
+            display.setCursor(10, top + 6);
+            display.print("SESSION");
+            drawCenteredClassic(session, top + cardHeight / 2, scale);
+            display.setCursor(10, top + cardHeight + gap + 6);
+            display.print("TOTAL");
+            drawCenteredClassic(total, top + cardHeight + gap + cardHeight / 2, scale);
+        }
 
         return;
     }
 
     // Mode 3: XY scope from the latest generated waveform samples.
     if (_statusMode == 3) {
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
-        display.setCursor(0, 20);
-        display.print("SCOPE");
+        display.setFont(NULL);
+        display.setTextSize(uiTextScale());
+        display.setTextColor(DISPLAY_WHITE);
+        int plotX;
+        int plotY;
+        int plotSize;
+        if (uiCompact()) {
+            display.setCursor(0, 20);
+            display.print("SCOPE");
+            display.setCursor(0, 40);
+            display.print(motor.getCurrentFrequency(), 1);
+            display.print("Hz");
+            plotX = 64;
+            plotY = 2;
+            plotSize = 60;
+        } else {
+            int footerHeight = uiLarge() ? 28 : 18;
+            int availableHeight = uiHeight() - uiHeaderHeight() - footerHeight - 8;
+            plotSize = uiWidth() - 16;
+            if (plotSize > availableHeight) plotSize = availableHeight;
+            plotX = (uiWidth() - plotSize) / 2;
+            plotY = uiHeaderHeight() + 4;
+            char frequency[20];
+            snprintf(frequency, sizeof(frequency), "XY OUTPUT  %.1f Hz", motor.getCurrentFrequency());
+            drawCenteredClassic(frequency, uiHeight() - footerHeight + 4, uiTextScale());
+        }
 
-        display.setCursor(0, 40);
-        display.print(motor.getCurrentFrequency(), 1);
-        display.print("Hz");
-
-        // 60x60 plot leaves a text column on the left.
-        display.drawRect(64, 2, 60, 60, SSD1306_WHITE);
+        display.drawRect(plotX, plotY, plotSize, plotSize, DISPLAY_WHITE);
+        display.drawFastHLine(plotX + 1, plotY + plotSize / 2, plotSize - 2, DISPLAY_WHITE);
+        display.drawFastVLine(plotX + plotSize / 2, plotY + 1, plotSize - 2, DISPLAY_WHITE);
 
         if (motor.isRunning()) {
-            // X axis is phase A, Y axis is phase B. This visualizes generated output, not measured motor feedback.
             int16_t sampleA = waveform.getSample(0);
             int16_t sampleB = waveform.getSample(1);
-
-            // Generated diagnostic samples are roughly +/-511 at full amplitude.
-            int px = 64 + 30 + (sampleA / 18);
-            int py = 2 + 30 - (sampleB / 18); // Invert Y so positive is up
-
-            if (px < 65) px = 65; if (px > 123) px = 123;
-            if (py < 3) py = 3; if (py > 61) py = 61;
-
-            display.fillRect(px-1, py-1, 3, 3, SSD1306_WHITE);
+            int radius = (plotSize - 6) / 2;
+            int px = plotX + plotSize / 2 + (int32_t)sampleA * radius / 511;
+            int py = plotY + plotSize / 2 - (int32_t)sampleB * radius / 511;
+            if (px < plotX + 2) px = plotX + 2;
+            if (px > plotX + plotSize - 3) px = plotX + plotSize - 3;
+            if (py < plotY + 2) py = plotY + 2;
+            if (py > plotY + plotSize - 3) py = plotY + plotSize - 3;
+            display.fillCircle(px, py, uiLarge() ? 3 : 2, DISPLAY_WHITE);
         } else {
-            display.fillRect(64+29, 2+29, 3, 3, SSD1306_WHITE);
+            display.fillCircle(plotX + plotSize / 2, plotY + plotSize / 2,
+                               uiLarge() ? 3 : 2, DISPLAY_WHITE);
         }
 
         return;
@@ -767,22 +944,44 @@ void UserInterface::drawDashboard() {
     if (_statusMode == 4) {
         SystemMetricsSnapshot metrics = systemMonitor.snapshot();
 
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
-        display.setCursor(0, 20);
-        display.print("CPU Load");
-
-        display.setCursor(0, 34);
-        display.print("Core0 ");
-        display.print(metrics.core0LoadPercent, 0);
-        display.print("%");
-        drawMetricBar(62, 32, 58, 7, (uint32_t)metrics.core0LoadPercent, 100);
-
-        display.setCursor(0, 50);
-        display.print("Wave  ");
-        display.print(metrics.core1LoadPercent, 0);
-        display.print("%");
-        drawMetricBar(62, 48, 58, 7, (uint32_t)metrics.core1LoadPercent, 100);
+        display.setFont(NULL);
+        display.setTextSize(uiTextScale());
+        display.setTextColor(DISPLAY_WHITE);
+        if (uiCompact()) {
+            display.setCursor(0, 20);
+            display.print("CPU LOAD");
+            display.setCursor(0, 34);
+            display.print("CORE0 ");
+            display.print(metrics.core0LoadPercent, 0);
+            display.print("%");
+            drawMetricBar(62, 32, 58, 7, (uint32_t)metrics.core0LoadPercent, 100);
+            display.setCursor(0, 50);
+            display.print("WAVE  ");
+            display.print(metrics.core1LoadPercent, 0);
+            display.print("%");
+            drawMetricBar(62, 48, 58, 7, (uint32_t)metrics.core1LoadPercent, 100);
+        } else {
+            const uint8_t scale = uiTextScale();
+            const int top = uiHeaderHeight() + 8;
+            const int rowHeight = (uiHeight() - top - 4) / 2;
+            const int barHeight = uiLarge() ? 14 : 8;
+            char percent[12];
+            display.setCursor(6, top);
+            display.print("CORE 0 / UI");
+            snprintf(percent, sizeof(percent), "%.0f%%", metrics.core0LoadPercent);
+            display.setCursor(uiWidth() - (int)strlen(percent) * 6 * scale - 6, top);
+            display.print(percent);
+            drawMetricBar(6, top + 10 * scale, uiWidth() - 12, barHeight,
+                          (uint32_t)metrics.core0LoadPercent, 100);
+            int secondTop = top + rowHeight;
+            display.setCursor(6, secondTop);
+            display.print("CORE 1 / WAVE");
+            snprintf(percent, sizeof(percent), "%.0f%%", metrics.core1LoadPercent);
+            display.setCursor(uiWidth() - (int)strlen(percent) * 6 * scale - 6, secondTop);
+            display.print(percent);
+            drawMetricBar(6, secondTop + 10 * scale, uiWidth() - 12, barHeight,
+                          (uint32_t)metrics.core1LoadPercent, 100);
+        }
         return;
     }
 
@@ -790,27 +989,57 @@ void UserInterface::drawDashboard() {
     if (_statusMode == 5) {
         SystemMetricsSnapshot metrics = systemMonitor.snapshot();
 
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
-        display.setCursor(0, 20);
-        display.print("Memory");
-
-        display.setCursor(0, 34);
-        display.print("Heap U:");
-        printKilobytes(metrics.heapUsedBytes);
-        display.print(" F:");
-        printKilobytes(metrics.heapFreeBytes);
-        drawMetricBar(0, 43, 120, 6, metrics.heapUsedBytes, metrics.heapTotalBytes);
-
-        display.setCursor(0, 54);
-        if (metrics.psramTotalBytes > 0) {
-            display.print("PSRAM U:");
-            printKilobytes(metrics.psramUsedBytes);
+        display.setFont(NULL);
+        display.setTextSize(uiTextScale());
+        display.setTextColor(DISPLAY_WHITE);
+        if (uiCompact()) {
+            display.setCursor(0, 20);
+            display.print("MEMORY");
+            display.setCursor(0, 34);
+            display.print("Heap U:");
+            printKilobytes(metrics.heapUsedBytes);
             display.print(" F:");
-            printKilobytes(metrics.psramFreeBytes);
+            printKilobytes(metrics.heapFreeBytes);
+            drawMetricBar(0, 43, 120, 6, metrics.heapUsedBytes, metrics.heapTotalBytes);
+            display.setCursor(0, 54);
+            if (metrics.psramTotalBytes > 0) {
+                display.print("PSRAM U:");
+                printKilobytes(metrics.psramUsedBytes);
+                display.print(" F:");
+                printKilobytes(metrics.psramFreeBytes);
+            } else {
+                display.print("Total ");
+                printKilobytes(metrics.heapTotalBytes);
+            }
         } else {
-            display.print("Total ");
-            printKilobytes(metrics.heapTotalBytes);
+            const uint8_t scale = uiTextScale();
+            const int top = uiHeaderHeight() + 8;
+            const int rowHeight = (uiHeight() - top - 4) / 2;
+            const int barHeight = uiLarge() ? 14 : 8;
+            char value[32];
+            display.setCursor(6, top);
+            display.print("HEAP");
+            snprintf(value, sizeof(value), "USED %luK  FREE %luK",
+                     (unsigned long)(metrics.heapUsedBytes / 1024UL),
+                     (unsigned long)(metrics.heapFreeBytes / 1024UL));
+            drawCenteredClassic(value, top + 10 * scale, scale);
+            drawMetricBar(6, top + 20 * scale, uiWidth() - 12, barHeight,
+                          metrics.heapUsedBytes, metrics.heapTotalBytes);
+            int secondTop = top + rowHeight;
+            display.setCursor(6, secondTop);
+            display.print(metrics.psramTotalBytes > 0 ? "PSRAM" : "HEAP TOTAL");
+            if (metrics.psramTotalBytes > 0) {
+                snprintf(value, sizeof(value), "USED %luK  FREE %luK",
+                         (unsigned long)(metrics.psramUsedBytes / 1024UL),
+                         (unsigned long)(metrics.psramFreeBytes / 1024UL));
+                drawCenteredClassic(value, secondTop + 10 * scale, scale);
+                drawMetricBar(6, secondTop + 20 * scale, uiWidth() - 12, barHeight,
+                              metrics.psramUsedBytes, metrics.psramTotalBytes);
+            } else {
+                snprintf(value, sizeof(value), "%luK INTERNAL RAM",
+                         (unsigned long)(metrics.heapTotalBytes / 1024UL));
+                drawCenteredClassic(value, secondTop + 12 * scale, scale);
+            }
         }
         return;
     }
@@ -819,39 +1048,69 @@ void UserInterface::drawDashboard() {
     if (_statusMode == 6) {
         SystemMetricsSnapshot metrics = systemMonitor.snapshot();
 
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
-        display.setCursor(0, 20);
-        display.print("Flash");
-
-        display.setCursor(0, 34);
-        display.print("Sketch ");
-        printKilobytes(metrics.sketchUsedBytes);
-        display.print("/");
-        printKilobytes(metrics.sketchCapacityBytes);
-        drawMetricBar(0, 43, 120, 6, metrics.sketchUsedBytes, metrics.sketchCapacityBytes);
-
-        display.setCursor(0, 54);
-        display.print("FS ");
-        if (metrics.filesystemMounted) {
-            printKilobytes(metrics.filesystemUsedBytes);
+        display.setFont(NULL);
+        display.setTextSize(uiTextScale());
+        display.setTextColor(DISPLAY_WHITE);
+        if (uiCompact()) {
+            display.setCursor(0, 20);
+            display.print("FLASH");
+            display.setCursor(0, 34);
+            display.print("Sketch ");
+            printKilobytes(metrics.sketchUsedBytes);
             display.print("/");
-            printKilobytes(metrics.filesystemTotalBytes);
+            printKilobytes(metrics.sketchCapacityBytes);
+            drawMetricBar(0, 43, 120, 6, metrics.sketchUsedBytes, metrics.sketchCapacityBytes);
+            display.setCursor(0, 54);
+            display.print("FS ");
+            if (metrics.filesystemMounted) {
+                printKilobytes(metrics.filesystemUsedBytes);
+                display.print("/");
+                printKilobytes(metrics.filesystemTotalBytes);
+            } else {
+                display.print("not mounted");
+            }
         } else {
-            display.print("not mounted");
+            const uint8_t scale = uiTextScale();
+            const int top = uiHeaderHeight() + 8;
+            const int rowHeight = (uiHeight() - top - 4) / 2;
+            const int barHeight = uiLarge() ? 14 : 8;
+            char value[32];
+            display.setCursor(6, top);
+            display.print("FIRMWARE");
+            snprintf(value, sizeof(value), "%luK OF %luK",
+                     (unsigned long)(metrics.sketchUsedBytes / 1024UL),
+                     (unsigned long)(metrics.sketchCapacityBytes / 1024UL));
+            drawCenteredClassic(value, top + 10 * scale, scale);
+            drawMetricBar(6, top + 20 * scale, uiWidth() - 12, barHeight,
+                          metrics.sketchUsedBytes, metrics.sketchCapacityBytes);
+            int secondTop = top + rowHeight;
+            display.setCursor(6, secondTop);
+            display.print("LITTLEFS");
+            if (metrics.filesystemMounted) {
+                snprintf(value, sizeof(value), "%luK OF %luK",
+                         (unsigned long)(metrics.filesystemUsedBytes / 1024UL),
+                         (unsigned long)(metrics.filesystemTotalBytes / 1024UL));
+                drawCenteredClassic(value, secondTop + 10 * scale, scale);
+                drawMetricBar(6, secondTop + 20 * scale, uiWidth() - 12, barHeight,
+                              metrics.filesystemUsedBytes, metrics.filesystemTotalBytes);
+            } else {
+                drawCenteredClassic("NOT MOUNTED", secondTop + 12 * scale, scale);
+            }
         }
         return;
     }
 
     // Mode 0: main speed view with pitch/ramp deviation.
-    display.setFont(&FreeSans12pt7b);
-    display.setTextColor(SSD1306_WHITE);
+    if (uiLarge()) display.setFont(&FreeSansBold24pt7b);
+    else if (!uiCompact()) display.setFont(&FreeSansBold18pt7b);
+    else display.setFont(&FreeSans12pt7b);
+    display.setTextColor(DISPLAY_WHITE);
     display.setTextSize(1);
 
     SpeedMode s = motor.getSpeed();
     const char* speedStr;
-    char measuredSpeed[12];
 #if CLOSED_LOOP_SPEED_ENABLE
+    char measuredSpeed[12];
     SpeedFeedbackStatus feedback = speedFeedback.getStatus();
     if (feedback.configured && feedback.signalValid) {
         snprintf(measuredSpeed, sizeof(measuredSpeed), "%.2f", feedback.filteredRpm);
@@ -865,11 +1124,15 @@ void UserInterface::drawDashboard() {
     int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(speedStr, 0, 0, &x1, &y1, &w, &h);
-    display.setCursor((128 - w) / 2, 40);
+    int speedBaseline = uiCompact() ? 40 : (uiLarge() ? 124 : 72);
+    display.setCursor((uiWidth() - w) / 2, speedBaseline);
     display.print(speedStr);
 
     // Reset the Adafruit font before drawing small text and primitives.
     display.setFont(NULL);
+    if (!uiCompact()) {
+        drawCenteredClassic("RPM", speedBaseline + (uiLarge() ? 12 : 8), uiTextScale());
+    }
 
     // During starts, stops, and programmed speed changes, the upper bar shows motion progress through the motor state machine.
     float motionProgress = motor.getMotionProgress();
@@ -877,21 +1140,27 @@ void UserInterface::drawDashboard() {
                         motor.getState() == STATE_STOPPING ||
                         motor.isSpeedRamping();
     if (showProgress) {
-        int barX = 18;
-        int barY = 45;
-        int barW = 92;
+        int barX = uiLarge() ? 24 : 18;
+        int barY = uiCompact() ? 45 : speedBaseline + (uiLarge() ? 32 : 20);
+        int barW = uiWidth() - 2 * barX;
+        int barH = uiLarge() ? 8 : 5;
         int fillW = (int)(motionProgress * (barW - 2));
         if (fillW < 0) fillW = 0;
         if (fillW > barW - 2) fillW = barW - 2;
-        display.drawRect(barX, barY, barW, 5, SSD1306_WHITE);
-        display.fillRect(barX + 1, barY + 1, fillW, 3, SSD1306_WHITE);
+        display.drawRoundRect(barX, barY, barW, barH, barH / 2, DISPLAY_WHITE);
+        display.fillRect(barX + 1, barY + 1, fillW, barH - 2, DISPLAY_WHITE);
     }
 
     // Bottom scale visualizes actual frequency deviation from the nominal speed.
-    display.drawLine(10, 55, 118, 55, SSD1306_WHITE); // Main line
-    display.drawLine(64, 52, 64, 58, SSD1306_WHITE); // Center tick
-    display.drawLine(10, 52, 10, 58, SSD1306_WHITE); // Left tick
-    display.drawLine(118, 52, 118, 58, SSD1306_WHITE); // Right tick
+    int meterLeft = uiLarge() ? 20 : 10;
+    int meterRight = uiWidth() - meterLeft;
+    int meterCenter = uiWidth() / 2;
+    int meterY = uiCompact() ? 55 : (uiLarge() ? uiHeight() - 32 : uiHeight() - 20);
+    int tickHeight = uiLarge() ? 9 : 6;
+    display.drawLine(meterLeft, meterY, meterRight, meterY, DISPLAY_WHITE);
+    display.drawLine(meterCenter, meterY - tickHeight / 2, meterCenter, meterY + tickHeight / 2, DISPLAY_WHITE);
+    display.drawLine(meterLeft, meterY - tickHeight / 2, meterLeft, meterY + tickHeight / 2, DISPLAY_WHITE);
+    display.drawLine(meterRight, meterY - tickHeight / 2, meterRight, meterY + tickHeight / 2, DISPLAY_WHITE);
 
     float nominal = settings.getCurrentSpeedSettings().frequency;
     float current = motor.getCurrentFrequency();
@@ -904,31 +1173,31 @@ void UserInterface::drawDashboard() {
     // The visual range is fixed at +/-8% so ramps and pitch changes remain comparable across speeds.
     float range = 8.0;
 
-    int px = 64 + (int)((deviationPercent / range) * 54.0);
-    if (px < 10) px = 10;
-    if (px > 118) px = 118;
+    int meterRadius = (meterRight - meterLeft) / 2;
+    int px = meterCenter + (int)((deviationPercent / range) * meterRadius);
+    if (px < meterLeft) px = meterLeft;
+    if (px > meterRight) px = meterRight;
 
-    display.fillTriangle(px, 50, px-3, 46, px+3, 46, SSD1306_WHITE);
+    int pointerHeight = uiLarge() ? 8 : 5;
+    int pointerHalfWidth = uiLarge() ? 5 : 3;
+    display.fillTriangle(px, meterY - 2, px - pointerHalfWidth, meterY - pointerHeight,
+                         px + pointerHalfWidth, meterY - pointerHeight, DISPLAY_WHITE);
 
-    display.setTextSize(1);
-    display.setCursor(50, 64-8);
+    char deviationText[20];
 
     #if PITCH_CONTROL_ENABLE
         // With pitch control compiled in, show the requested pitch offset.
         float pitchSetting = motor.getPitchPercent();
-        if (pitchSetting > 0) display.print("+");
-        display.print(pitchSetting, 1);
-        display.print("%");
+        snprintf(deviationText, sizeof(deviationText), "%+.1f%%", pitchSetting);
     #else
         // Without pitch control, show ramp deviation only when it is visible.
         if (abs(deviationPercent) > 0.1) {
-             if (deviationPercent > 0) display.print("+");
-             display.print(deviationPercent, 1);
-             display.print("%");
+             snprintf(deviationText, sizeof(deviationText), "%+.1f%%", deviationPercent);
         } else {
-             display.print("LOCKED");
+             snprintf(deviationText, sizeof(deviationText), "LOCKED");
         }
     #endif
+    drawCenteredClassic(deviationText, meterY + (uiLarge() ? 8 : 2), uiLarge() ? 2 : 1);
 }
 
 void UserInterface::drawScreensaver() {
@@ -942,6 +1211,10 @@ void UserInterface::drawScreensaver() {
         drawLissajous();
     }
     else {
+        uint8_t saverScale = uiLarge() ? 2 : 1;
+        display.setFont(NULL);
+        display.setTextSize(saverScale);
+        display.setTextColor(DISPLAY_WHITE);
         // Move text at a fixed cadence so display frame rate does not affect animation speed.
         static uint32_t lastMove = 0;
         if (millis() - lastMove > 50) {
@@ -949,23 +1222,32 @@ void UserInterface::drawScreensaver() {
             _saverX += _saverDX;
             _saverY += _saverDY;
 
-            if (_saverX <= 0 || _saverX >= (128 - 60)) _saverDX = -_saverDX; // approximate text width
-            if (_saverY <= 0 || _saverY >= (64 - 8)) _saverDY = -_saverDY;
+            int16_t textX, textY;
+            uint16_t textWidth, textHeight;
+            display.getTextBounds(STANDBY_MESSAGE, 0, 0, &textX, &textY, &textWidth, &textHeight);
+            int maxX = DISPLAY_LOGICAL_WIDTH - (int)textWidth;
+            int maxY = DISPLAY_LOGICAL_HEIGHT - (int)textHeight;
+            if (maxX < 0) maxX = 0;
+            if (maxY < 0) maxY = 0;
+            if (_saverX <= 0 || _saverX >= maxX) _saverDX = -_saverDX;
+            if (_saverY <= 0 || _saverY >= maxY) _saverDY = -_saverDY;
+            if (_saverX < 0) _saverX = 0;
+            if (_saverX > maxX) _saverX = maxX;
+            if (_saverY < 0) _saverY = 0;
+            if (_saverY > maxY) _saverY = maxY;
         }
 
         display.setCursor(_saverX, _saverY);
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
         display.print(STANDBY_MESSAGE);
     }
 }
 
 void UserInterface::drawMatrixRain() {
-    // 16 columns matches the 128px width at the default 8px text cell.
     display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
+    display.setTextColor(DISPLAY_WHITE);
 
-    for (int i = 0; i < 16; i++) {
+    const int columns = sizeof(_matrixDrops) / sizeof(_matrixDrops[0]);
+    for (int i = 0; i < columns; i++) {
         // Lead character uses printable ASCII to avoid font lookup surprises.
         char c = (char)random(33, 126);
         display.setCursor(i * 8, _matrixDrops[i]);
@@ -982,8 +1264,8 @@ void UserInterface::drawMatrixRain() {
             _matrixDrops[i] += 4;
         }
 
-        // Reset once below the visible OLED area.
-        if (_matrixDrops[i] > 64) {
+        // Reset once below the visible logical display area.
+        if (_matrixDrops[i] > uiHeight()) {
             _matrixDrops[i] = 0;
         }
     }
@@ -993,125 +1275,140 @@ void UserInterface::drawLissajous() {
     // Parametric curves use phase advance rather than saved points, keeping the screensaver allocation-free.
     _lissajousPhase += 0.05;
 
-    int cx = 64;
-    int cy = 32;
-    int amp = 30;
+    int cx = uiWidth() / 2;
+    int cy = uiHeight() / 2;
+    int amp = (uiWidth() < uiHeight() ? uiWidth() : uiHeight()) / 2 - 3;
 
     // Full-size curve.
     for (float t = 0; t < 2 * PI; t += 0.1) {
         int x = cx + amp * sin(3.0 * t + _lissajousPhase);
         int y = cy + amp * sin(2.0 * t);
-        display.drawPixel(x, y, SSD1306_WHITE);
+        display.drawPixel(x, y, DISPLAY_WHITE);
     }
 
     // Smaller counter-phase curve adds motion while staying within bounds.
     for (float t = 0; t < 2 * PI; t += 0.1) {
         int x = cx + (amp/2) * sin(2.0 * t - _lissajousPhase);
         int y = cy + (amp/2) * cos(3.0 * t);
-        display.drawPixel(x, y, SSD1306_WHITE);
+        display.drawPixel(x, y, DISPLAY_WHITE);
     }
 }
 
 void UserInterface::drawConfirm() {
-    // Modal rectangle is small enough to preserve context around it.
-    display.fillRect(10, 10, 108, 44, SSD1306_BLACK); // Background
-    display.drawRect(10, 10, 108, 44, SSD1306_WHITE); // Border
+    const uint8_t scale = uiTextScale();
+    const int boxWidth = uiCompact() ? 108 : (uiLarge() ? 216 : uiWidth() - 12);
+    const int boxHeight = uiCompact() ? 44 : (uiLarge() ? 150 : 88);
+    const int boxX = (uiWidth() - boxWidth) / 2;
+    const int boxY = (uiHeight() - boxHeight) / 2;
+    display.fillRoundRect(boxX, boxY, boxWidth, boxHeight, uiLarge() ? 8 : 4, DISPLAY_BLACK);
+    display.drawRoundRect(boxX, boxY, boxWidth, boxHeight, uiLarge() ? 8 : 4, DISPLAY_WHITE);
+    display.setFont(NULL);
+    display.setTextSize(scale);
+    display.setTextColor(DISPLAY_WHITE);
+    if (!uiCompact()) drawCenteredClassic("CONFIRM", boxY + 7, scale);
+    int messageY = uiCompact() ? boxY + 8 : boxY + (uiLarge() ? 34 : 24);
+    drawWrappedText(_confirmMsg, boxX + 6, messageY, boxWidth - 12,
+                    uiCompact() ? 2 : 3, 9 * scale, scale);
 
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-
-    // Confirm messages are expected to be short; showConfirm() copies/truncates.
-    int16_t x1, y1;
-    uint16_t w, h;
-    display.getTextBounds(_confirmMsg, 0, 0, &x1, &y1, &w, &h);
-    display.setCursor(10 + (108 - w) / 2, 25);
-    display.print(_confirmMsg);
-
-    // Encoder rotation toggles the bracketed answer in handleInput().
-    display.setCursor(20, 40);
-    if (_confirmResult) {
-        display.print("[YES]  NO ");
+    if (uiCompact()) {
+        display.setCursor(boxX + 10, boxY + boxHeight - 14);
+        display.print(_confirmResult ? "[YES]  NO " : " YES  [NO]");
     } else {
-        display.print(" YES  [NO]");
+        int gap = uiLarge() ? 12 : 6;
+        int buttonWidth = (boxWidth - 18 - gap) / 2;
+        int buttonHeight = 12 * scale;
+        int buttonY = boxY + boxHeight - buttonHeight - 8;
+        const char* labels[2] = {"YES", "NO"};
+        for (int i = 0; i < 2; i++) {
+            bool selected = i == (_confirmResult ? 0 : 1);
+            int buttonX = boxX + 9 + i * (buttonWidth + gap);
+            if (selected) display.fillRoundRect(buttonX, buttonY, buttonWidth, buttonHeight, 3, DISPLAY_WHITE);
+            else display.drawRoundRect(buttonX, buttonY, buttonWidth, buttonHeight, 3, DISPLAY_WHITE);
+            display.setTextColor(selected ? DISPLAY_BLACK : DISPLAY_WHITE,
+                                 selected ? DISPLAY_WHITE : DISPLAY_BLACK);
+            int textX = buttonX + (buttonWidth - (int)strlen(labels[i]) * 6 * scale) / 2;
+            display.setCursor(textX, buttonY + (buttonHeight - 8 * scale) / 2);
+            display.print(labels[i]);
+        }
+        display.setTextColor(DISPLAY_WHITE);
     }
 }
 
 void UserInterface::drawSweepScreen() {
     display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
+    display.setFont(NULL);
+    display.setTextSize(uiTextScale());
+    display.setTextColor(DISPLAY_WHITE);
 
-    // Dedicated diagnostic screen makes it clear that normal menu navigation is temporarily trapped until the sweep is locked.
-    display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
-    display.setTextColor(SSD1306_BLACK);
-    display.setCursor(5, 4);
-    display.print("SWEEPING RESONANCE");
-    display.setTextColor(SSD1306_WHITE);
-
-    display.setCursor(0, 25);
+    drawTitleBand(uiCompact() ? "RESONANCE SWEEP" : "SWEEPING RESONANCE");
+    const uint8_t scale = uiTextScale();
+    int top = uiHeaderHeight() + (uiLarge() ? 24 : 9);
+    display.setTextSize(scale);
+    display.setCursor(uiLarge() ? 12 : 2, top);
     display.print(motor.getOutputSweepParameterName());
     display.print(": "); display.print(motor.getOutputSweepValue(), 1);
     if (motor.getOutputSweepParameter() <= MotorController::SWEEP_PHASE_D) display.print((char)247);
 
-    display.setCursor(0, 40);
-    display.print("Listen / measure");
-
-    display.setCursor(0, 56);
-    display.print("PRESS=LOCK HOLD=BACK");
+    drawCenteredClassic("LISTEN / MEASURE", top + 16 * scale, scale);
+    drawCenteredClassic(uiCompact() ? "PRESS=LOCK HOLD=BACK" : "PRESS TO LOCK  /  HOLD TO CANCEL",
+                        uiHeight() - 10 * scale, scale);
 }
 
 void UserInterface::drawMessage() {
-    // Timed message overlays the current screen and clears itself on expiry.
-    display.fillRect(10, 15, 108, 34, SSD1306_BLACK);
-    display.drawRect(10, 15, 108, 34, SSD1306_WHITE);
-
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(15, 25);
-    display.println(_messageText);
+    const uint8_t scale = uiTextScale();
+    const int boxWidth = uiCompact() ? 108 : (uiLarge() ? 210 : uiWidth() - 12);
+    const int boxHeight = uiCompact() ? 34 : (uiLarge() ? 94 : 66);
+    const int boxX = (uiWidth() - boxWidth) / 2;
+    const int boxY = (uiHeight() - boxHeight) / 2;
+    display.fillRoundRect(boxX, boxY, boxWidth, boxHeight, uiLarge() ? 8 : 4, DISPLAY_BLACK);
+    display.drawRoundRect(boxX, boxY, boxWidth, boxHeight, uiLarge() ? 8 : 4, DISPLAY_WHITE);
+    display.setFont(NULL);
+    display.setTextSize(scale);
+    display.setTextColor(DISPLAY_WHITE);
+    if (!uiCompact()) drawCenteredClassic("NOTICE", boxY + 7, scale);
+    drawWrappedText(_messageText, boxX + 6,
+                    uiCompact() ? boxY + 9 : boxY + (uiLarge() ? 30 : 24),
+                    boxWidth - 12, uiCompact() ? 2 : 3, 10 * scale, scale);
 
     if (millis() - _messageStartTime > _messageDuration) _showingMessage = false;
 }
 
 void UserInterface::drawError() {
-    // Error modal is intentionally larger and higher contrast than a message.
-    display.fillRect(5, 5, 118, 54, SSD1306_BLACK);
-    display.drawRect(5, 5, 118, 54, SSD1306_WHITE);
-
-    display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(30, 10);
-    display.println(F("ERROR"));
-
-    display.setTextSize(1);
-    display.setCursor(10, 35);
-    display.println(_errorMsg);
+    const uint8_t scale = uiTextScale();
+    const int boxWidth = uiWidth() - (uiLarge() ? 24 : 10);
+    const int boxHeight = uiCompact() ? 54 : (uiLarge() ? 140 : 96);
+    const int boxX = (uiWidth() - boxWidth) / 2;
+    const int boxY = (uiHeight() - boxHeight) / 2;
+    display.fillRoundRect(boxX, boxY, boxWidth, boxHeight, uiLarge() ? 8 : 4, DISPLAY_BLACK);
+    display.drawRoundRect(boxX, boxY, boxWidth, boxHeight, uiLarge() ? 8 : 4, DISPLAY_WHITE);
+    display.setFont(NULL);
+    display.setTextSize(uiCompact() ? 2 : scale);
+    display.setTextColor(DISPLAY_WHITE);
+    drawCenteredClassic("ERROR", boxY + (uiCompact() ? 5 : 9), uiCompact() ? 2 : scale);
+    display.setTextSize(scale);
+    drawWrappedText(_errorMsg, boxX + 6, boxY + (uiCompact() ? 29 : (uiLarge() ? 38 : 28)),
+                    boxWidth - 12, uiCompact() ? 2 : 4, 10 * scale, scale);
 
     if (millis() - _errorStartTime > _errorDuration) _showingError = false;
 }
 
 void UserInterface::drawCriticalInterlock() {
-    display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
-    display.setTextColor(SSD1306_BLACK);
-    display.setTextSize(1);
-    display.setCursor(20, 4);
-    display.print("OUTPUT LOCKED");
-
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 21);
-    display.print("Fault ");
+    drawTitleBand("OUTPUT LOCKED", true);
+    const uint8_t scale = uiTextScale();
+    display.setFont(NULL);
+    display.setTextSize(scale);
+    display.setTextColor(DISPLAY_WHITE);
+    int top = uiHeaderHeight() + (uiCompact() ? 5 : 10);
+    display.setCursor(uiLarge() ? 12 : 2, top);
+    display.print("FAULT ");
     display.print((int)errorHandler.getCriticalCode());
 
     const char* message = errorHandler.getCriticalMessage();
-    char line[22];
-    snprintf(line, sizeof(line), "%.21s", message ? message : "Critical fault");
-    display.setCursor(0, 33);
-    display.print(line);
-
-    display.setCursor(0, 47);
-    display.print("Correct fault, then");
-    display.setCursor(0, 57);
-    display.print("reboot controller");
+    drawWrappedText(message ? message : "Critical fault", uiLarge() ? 12 : 2,
+                    top + 12 * scale, uiWidth() - (uiLarge() ? 24 : 4),
+                    uiCompact() ? 1 : 4, 10 * scale, scale);
+    drawCenteredClassic(uiCompact() ? "CORRECT FAULT + REBOOT" : "CORRECT THE FAULT, THEN REBOOT",
+                        uiHeight() - 10 * scale, scale);
 }
 
 void UserInterface::navigateTo(MenuPage* page) {
@@ -1120,14 +1417,10 @@ void UserInterface::navigateTo(MenuPage* page) {
     // Save the current page so Back can return without rebuilding menu objects.
     if (_currentPage) _menuStack.push_back(_currentPage);
 
-    // Start transition state for future animation support.
-    _nextPage = page;
+    // Switch to the destination and slide it into view.
+    _currentPage = page;
     _transitionDirection = 1; // Forward
     _transitionProgress = 0.0;
-
-    // Current renderer draws one page, so switch immediately.
-    _currentPage = page;
-    _transitionDirection = 0;
 }
 
 void UserInterface::back() {
@@ -1136,7 +1429,6 @@ void UserInterface::back() {
         _currentPage = _menuStack.back();
         _menuStack.pop_back();
 
-        // Keep transition fields coherent even though drawMenu snaps pages.
         _transitionDirection = -1; // Back
         _transitionProgress = 0.0;
     } else {
@@ -1152,6 +1444,10 @@ void UserInterface::exitMenu() {
 }
 
 void UserInterface::enterMenu() {
+    if (motor.getState() == STATE_STOPPING) {
+        showMessage("Braking in progress", 1200);
+        return;
+    }
     // initMenuState() refreshes shadow settings and dynamic labels before the first menu page is displayed.
     initMenuState();
     _menuStack.clear();

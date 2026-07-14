@@ -26,7 +26,7 @@ const float FIR_COEFFS_AGGRESSIVE[8] = {0.1, 0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 0.1};
 WaveformGenerator::WaveformGenerator() {
     _enabled = false;
     _swapPending = false;
-    _stateLock = false;
+    critical_section_init(&_stateLock);
     _waveformInstance = this;
     
     // Initialize States
@@ -75,6 +75,8 @@ WaveformGenerator::WaveformGenerator() {
     _dmaIrqCount = 0;
     _dmaRearmCount = 0;
     _dmaDesyncCount = 0;
+    _slice1RearmPending[0] = false;
+    _slice1RearmPending[1] = false;
     _dmaStarted = false;
 }
 
@@ -115,8 +117,9 @@ void WaveformGenerator::setupPWM() {
     
     /*
      * Derive the carrier divider from the live system clock. The DDS phase
-     * increment uses the resulting sample rate, keeping both 125 MHz RP2040 and
-     * 150 MHz RP2350 builds on the configured carrier and motor frequency.
+     * increment uses the resulting sample rate, keeping RP2040 and RP2350
+     * builds on the configured carrier and motor frequency at any supported
+     * system-clock selection.
      */
     float clockDivider = (float)clock_get_hz(clk_sys) /
         (PWM_CARRIER_FREQUENCY_HZ * ((float)PWM_WRAP_VALUE + 1.0f));
@@ -231,8 +234,10 @@ void __not_in_flash_func(WaveformGenerator::dmaInterruptHandler)() {
             bool pairedBusy = dma_channel_is_busy(_waveformInstance->_dmaChan2);
             if (pairedBusy) {
                 _waveformInstance->_dmaDesyncCount++;
+                _waveformInstance->_slice1RearmPending[0] = true;
             } else {
                 _waveformInstance->rearmDmaChannel(_waveformInstance->_dmaChan2, _waveformInstance->_dmaBufferSlice1[0]);
+                _waveformInstance->_slice1RearmPending[0] = false;
             }
             _waveformInstance->rearmDmaChannel(_waveformInstance->_dmaChan0, _waveformInstance->_dmaBufferSlice0[0]);
             
@@ -250,8 +255,10 @@ void __not_in_flash_func(WaveformGenerator::dmaInterruptHandler)() {
             bool pairedBusy = dma_channel_is_busy(_waveformInstance->_dmaChan3);
             if (pairedBusy) {
                 _waveformInstance->_dmaDesyncCount++;
+                _waveformInstance->_slice1RearmPending[1] = true;
             } else {
                 _waveformInstance->rearmDmaChannel(_waveformInstance->_dmaChan3, _waveformInstance->_dmaBufferSlice1[1]);
+                _waveformInstance->_slice1RearmPending[1] = false;
             }
             _waveformInstance->rearmDmaChannel(_waveformInstance->_dmaChan1, _waveformInstance->_dmaBufferSlice0[1]);
             
@@ -272,6 +279,19 @@ void __not_in_flash_func(WaveformGenerator::update)() {
     bool chan1Busy = dma_channel_is_busy(_dmaChan1);
     bool chan2Busy = dma_channel_is_busy(_dmaChan2);
     bool chan3Busy = dma_channel_is_busy(_dmaChan3);
+
+    // The two PWM slices complete on the same wrap, but DMA arbitration can let
+    // slice 0 raise its IRQ a few bus cycles before slice 1 becomes idle. Finish
+    // any deferred slice-1 re-arm here rather than leaving the ping-pong chain
+    // permanently exhausted after that harmless completion skew.
+    if (_slice1RearmPending[0] && !chan2Busy) {
+        rearmDmaChannel(_dmaChan2, _dmaBufferSlice1[0]);
+        _slice1RearmPending[0] = false;
+    }
+    if (_slice1RearmPending[1] && !chan3Busy) {
+        rearmDmaChannel(_dmaChan3, _dmaBufferSlice1[1]);
+        _slice1RearmPending[1] = false;
+    }
     
     static int lastFilledBuffer = -1;
     static bool desyncRecorded = false;
@@ -389,13 +409,11 @@ void WaveformGenerator::generateLUT() {
 }
 
 void WaveformGenerator::lockState() {
-    while (__atomic_test_and_set(&_stateLock, __ATOMIC_ACQUIRE)) {
-        tight_loop_contents();
-    }
+    critical_section_enter_blocking(&_stateLock);
 }
 
 void WaveformGenerator::unlockState() {
-    __atomic_clear(&_stateLock, __ATOMIC_RELEASE);
+    critical_section_exit(&_stateLock);
 }
 
 void WaveformGenerator::configure(const SpeedSettings& s) {

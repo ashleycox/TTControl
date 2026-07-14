@@ -33,7 +33,7 @@ enum ErrorCode {
 /**
  * @brief Centralized Error Handling and Logging.
  * 
- * Logs events/errors to Serial and LittleFS, raises OLED alerts for report(),
+ * Logs events/errors to Serial and LittleFS, raises local-display alerts for report(),
  * and latches critical state. Critical reports force MotorController through the
  * same emergency-stop path used by user commands.
  */
@@ -50,7 +50,7 @@ public:
     void logEvent(ErrorCode code, const char* message);
     
     // Clear all persistent logs
-    void clearLogs();
+    bool clearLogs();
     
     // Stream entire log to output (e.g. Serial)
     void dumpLog(Stream& out);

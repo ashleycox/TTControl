@@ -68,7 +68,7 @@ MenuPage* pageSweep = nullptr;
 static const char* const phaseModeLabels[] = {"-", "1P", "2P", "3P", "4P"};
 static const char* const motorTopologyLabels[] = {"Custom", "Twin Sync", "3-Phase"};
 static const char* const sweepParameterLabels[] = {"Sym Phase", "Phase A", "Phase B", "Phase C", "Phase D", "Gain A", "Gain B", "Gain C", "Gain D"};
-// OLED menu labels are deliberately short enough for a 128x64 display.
+// Menu labels are deliberately short enough for the compact 128x64 layout.
 static const char* const filterLabels[] = {"None", "IIR", "FIR"};
 static const char* const firLabels[] = {"Gentle", "Medium", "Agg"};
 static const char* const softStartCurveLabels[] = {"Linear", "Log", "Exp"};
@@ -189,6 +189,10 @@ void commitMenuShadowSettings() {
 }
 
 void saveMenuChangesAndExit() {
+    if (motor.getState() == STATE_STOPPING) {
+        ui.showError("Braking in Progress", 1500);
+        return;
+    }
     // Normalize and protected-save because these changes can affect hardware startup on the next boot.
     commitMenuShadowSettings();
     motor.endRelayTest();
@@ -202,6 +206,10 @@ void saveMenuChangesAndExit() {
 }
 
 void cancelMenuChangesAndExit() {
+    if (motor.getState() == STATE_STOPPING) {
+        ui.showError("Braking in Progress", 1500);
+        return;
+    }
     // Reload persisted settings to discard shadow edits and any live global menu edits made during this menu session.
     settings.load();
     motor.endRelayTest();
@@ -232,6 +240,13 @@ void actionFactoryReset() {
         settings.load();
         motor.endRelayTest();
         motor.applySettings();
+#if NETWORK_ENABLE
+        if (!networkManager.resetDefaults()) {
+            ui.showError("Network Reset Failed", 2000);
+            return;
+        }
+        networkManager.restart();
+#endif
         ui.exitMenu();
     });
 }
@@ -304,10 +319,13 @@ static void actionEnterSecurity() {
 // --- Error Log Actions ---
 
 void actionClearLog() {
-    errorHandler.clearLogs();
-    // Return to the parent so re-entering the log page rebuilds it empty.
-    ui.back();
-    ui.showError("Log Cleared", 2000);
+    if (errorHandler.clearLogs()) {
+        // Return to the parent so re-entering the log page rebuilds it empty.
+        ui.back();
+        ui.showMessage("Log Cleared", 2000);
+    } else {
+        ui.showError(safeModeActive ? "Safe Mode Read Only" : "Clear Failed", 2000);
+    }
 }
 
 void actionEnterErrorLog() {
@@ -351,6 +369,10 @@ void buildPresetSlotMenu(int slot) {
 
     // Loading a preset replaces active settings and protected-saves it as boot settings so the selected preset survives restart.
     pageSlot->addItem(new MenuAction("Load", [](){
+        if (motor.getState() == STATE_STOPPING) {
+            ui.showError("Braking in Progress", 1500);
+            return;
+        }
         if (settings.loadPreset(currentSlot)) {
             motor.applySettings();
             if (settings.save(false, true)) {
@@ -652,6 +674,10 @@ void actionEnterNetwork() {
 
 #if CLOSED_LOOP_SPEED_ENABLE
 void actionApplyClosedLoopSettings() {
+    if (motor.getState() == STATE_STOPPING) {
+        ui.showError("Braking in Progress", 1500);
+        return;
+    }
     // Apply validates tuning and reconfigures the feedback sensor/controller.
     settings.normalize();
     motor.applySettings();
@@ -693,14 +719,17 @@ void actionClosedLoopSetupStatus() {
 void actionClosedLoopSetupApply() {
     // Setup apply uses the captured one-revolution count as counts/rev.
     SpeedFeedbackSetupStatus setup = speedFeedback.getSetupStatus();
-    if (!setup.active || setup.suggestedCountsPerRev == 0) {
+    const bool setupActive = setup.active;
+    const uint16_t suggestedCountsPerRev = setup.suggestedCountsPerRev;
+    const bool suggestedReverseDirection = setup.suggestedReverseDirection;
+    if (!setupActive || suggestedCountsPerRev == 0) {
         ui.showMessage("No Setup Data", 1500);
         return;
     }
 
-    settings.get().closedLoopCountsPerRev = setup.suggestedCountsPerRev;
+    settings.get().closedLoopCountsPerRev = suggestedCountsPerRev;
     if (settings.get().closedLoopSensorMode == CLOSED_LOOP_SENSOR_QUADRATURE) {
-        settings.get().closedLoopReverseDirection = setup.suggestedReverseDirection;
+        settings.get().closedLoopReverseDirection = suggestedReverseDirection;
     }
     speedFeedback.cancelSetupCapture();
     actionApplyClosedLoopSettings();
@@ -781,7 +810,8 @@ void actionEnterClosedLoop() {
     rebuildMenuPage(pageClosedLoopSetup, "CL Setup");
     rebuildMenuPage(pageClosedLoopTune, "CL Tune");
 
-    uint8_t speedIndex = menuShadowSpeedIndex >= 0 && menuShadowSpeedIndex <= 2 ? (uint8_t)menuShadowSpeedIndex : SPEED_33;
+    uint8_t speedIndex = menuShadowSpeedIndex >= 0 && menuShadowSpeedIndex <= 2 ?
+        (uint8_t)menuShadowSpeedIndex : (uint8_t)SPEED_33;
     ClosedLoopSpeedTuning& tuning = settings.get().closedLoopTuning[speedIndex];
     pageClosedLoop->addItem(new MenuDynamicInfo(String("Target: ") + (speedIndex == SPEED_33 ? "33" : speedIndex == SPEED_45 ? "45" : "78")));
     pageClosedLoop->addItem(new MenuBool("Enable", &settings.get().closedLoopEnabled));
@@ -1035,7 +1065,7 @@ void buildMenuSystem() {
     pageSpeedTuning->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
     /* Output configuration separates electrical layout, per-speed tuning,
-     * transition behaviour, and live diagnostics into short OLED pages. */
+     * transition behaviour, and live diagnostics into short local-display pages. */
     pagePhase = new MenuPage("Output");
     pageOutputLayout = new MenuPage("Motor Layout");
     pageOutputPhase = new MenuPage("Phase Trim");
@@ -1236,9 +1266,13 @@ void buildMenuSystem() {
     pageSystem->addItem(new MenuAction("Error Log", actionEnterErrorLog));
     pageSystem->addItem(new MenuAction("Reset Runtime", [](){
         ui.showConfirm("Reset Runtime?", [](){
-            settings.resetTotalRuntime();
-            ui.showMessage("Runtime Reset", 2000);
-            ui.back();
+            if (settings.resetTotalRuntime()) {
+                settings.resetSessionRuntime();
+                ui.showMessage("Runtime Reset", 2000);
+                ui.back();
+            } else {
+                ui.showError(safeModeActive ? "Safe Mode Read Only" : "Reset Failed", 2000);
+            }
         });
     }));
     pageSystem->addItem(new MenuByte("Boot Speed", &settings.get().bootSpeed, 0, 3, bootSpeedLabels, 4));

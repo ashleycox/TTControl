@@ -20,6 +20,7 @@ extern "C" {
     #include "hardware/dma.h"
     #include "hardware/pwm.h"
     #include "hardware/irq.h"
+    #include "pico/critical_section.h"
 }
 
 /**
@@ -105,7 +106,7 @@ private:
     // Flags shared between Core 0 control calls and Core 1 buffer generation.
     volatile bool _enabled;
     volatile bool _swapPending; // Flag to tell ISR to swap
-    volatile bool _stateLock;
+    critical_section_t _stateLock;
     
     // Internal sample history maintained only by Core 1. The master accumulator is channel 0; other channels derive phase by adding offsets.
     uint32_t _phaseAcc[4];
@@ -148,6 +149,7 @@ private:
     volatile uint32_t _dmaIrqCount;
     volatile uint32_t _dmaRearmCount;
     volatile uint32_t _dmaDesyncCount;
+    volatile bool _slice1RearmPending[2];
     bool _dmaStarted;
     
     void generateLUT();

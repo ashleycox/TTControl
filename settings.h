@@ -52,7 +52,6 @@ public:
     bool loadPreset(uint8_t slot);
     bool resetPreset(uint8_t slot);
     bool renamePreset(uint8_t slot, const char* name);
-    void duplicatePreset(uint8_t src, uint8_t dest);
     const char* getPresetName(uint8_t slot);
     
     // --- Serialization ---

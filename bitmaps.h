@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 
-// Icons are 16x16, one bit per pixel, and stored in flash with PROGMEM so the OLED UI does not consume scarce RAM for static artwork.
+// Icons are 16x16, one bit per pixel, and stored in flash with PROGMEM so the local UI does not consume scarce RAM for static artwork.
 
 // Play Icon (Triangle)
 const unsigned char icon_play_bits[] PROGMEM = {

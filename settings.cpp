@@ -17,7 +17,12 @@ namespace {
  * Settings and presets are stored as a small checked header plus the binary
  * GlobalSettings payload. The header lets future schemas migrate without
  * accepting random flash contents as valid settings.
+ *
+ * The four-byte packing matches the explicit current-schema storage contract
+ * in types.h and keeps legacy migration records identical on RP2350 ARM and
+ * RISC-V builds.
  */
+#pragma pack(push, 4)
 struct SettingsFileHeader {
     uint32_t magic;
     uint16_t formatVersion;
@@ -26,6 +31,7 @@ struct SettingsFileHeader {
     uint32_t payloadSize;
     uint32_t crc32;
 };
+static_assert(sizeof(SettingsFileHeader) == 20, "SettingsFileHeader storage layout changed.");
 
 static const char* SETTINGS_KNOWN_GOOD_FILE = "/settings_good.bin";
 static const char* SETTINGS_BOOT_MARKER_FILE = "/settings_boot.bin";
@@ -51,6 +57,7 @@ struct SettingsBootMarker {
     uint16_t reserved;
     uint32_t crc32;
 };
+static_assert(sizeof(SettingsBootMarker) == 12, "SettingsBootMarker storage layout changed.");
 
 // Legacy layouts preserve exact field order and padding for schema migration. Do not edit these structs unless you are correcting an older schema definition.
 struct SpeedSettingsV9 {
@@ -113,7 +120,7 @@ struct GlobalSettingsV5 {
     float vfMidFreq;
     uint8_t vfMidBoost;
     uint8_t bootSpeed;
-    SpeedMode currentSpeed;
+    uint8_t currentSpeed;
     float ampTempWarnC;
     float ampTempShutdownC;
     bool showCpuDashboard;
@@ -165,7 +172,7 @@ struct GlobalSettingsV6 {
     float vfMidFreq;
     uint8_t vfMidBoost;
     uint8_t bootSpeed;
-    SpeedMode currentSpeed;
+    uint8_t currentSpeed;
     float ampTempWarnC;
     float ampTempShutdownC;
     bool showCpuDashboard;
@@ -240,7 +247,7 @@ struct GlobalSettingsV7 {
     float vfMidFreq;
     uint8_t vfMidBoost;
     uint8_t bootSpeed;
-    SpeedMode currentSpeed;
+    uint8_t currentSpeed;
     float ampTempWarnC;
     float ampTempShutdownC;
     bool showCpuDashboard;
@@ -317,6 +324,7 @@ struct GlobalSettingsV11 {
 };
 
 static_assert(sizeof(GlobalSettingsV11) == 616, "GlobalSettingsV11 must match schema 11 storage size.");
+#pragma pack(pop)
 
 void copySpeedFromV9(const SpeedSettingsV9& source, SpeedSettings& target) {
     target.frequency = source.frequency;
@@ -826,15 +834,16 @@ bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, 
 
     // Fast path for current schema: read the payload, verify CRC, then copy.
     if (header.schemaVersion == SETTINGS_SCHEMA_VERSION &&
-        header.payloadSize == sizeof(GlobalSettings)) {
+        header.payloadSize == GLOBAL_SETTINGS_STORAGE_SIZE) {
         GlobalSettings candidate;
-        if (f.read((uint8_t*)&candidate, sizeof(candidate)) != sizeof(candidate)) {
+        memset(&candidate, 0, sizeof(candidate));
+        if (f.read((uint8_t*)&candidate, GLOBAL_SETTINGS_STORAGE_SIZE) != GLOBAL_SETTINGS_STORAGE_SIZE) {
             f.close();
             return false;
         }
         f.close();
 
-        uint32_t crc = settingsCrc32((const uint8_t*)&candidate, sizeof(candidate));
+        uint32_t crc = settingsCrc32((const uint8_t*)&candidate, GLOBAL_SETTINGS_STORAGE_SIZE);
         if (crc != header.crc32) return false;
 
         target = candidate;
@@ -980,11 +989,11 @@ bool writeSettingsBlob(const char* path, uint32_t magic, const GlobalSettings& s
     header.formatVersion = SETTINGS_FILE_FORMAT_VERSION;
     header.headerSize = sizeof(SettingsFileHeader);
     header.schemaVersion = SETTINGS_SCHEMA_VERSION;
-    header.payloadSize = sizeof(GlobalSettings);
-    header.crc32 = settingsCrc32((const uint8_t*)&source, sizeof(source));
+    header.payloadSize = GLOBAL_SETTINGS_STORAGE_SIZE;
+    header.crc32 = settingsCrc32((const uint8_t*)&source, GLOBAL_SETTINGS_STORAGE_SIZE);
 
     bool ok = f.write((const uint8_t*)&header, sizeof(header)) == sizeof(header);
-    ok = ok && f.write((const uint8_t*)&source, sizeof(source)) == sizeof(source);
+    ok = ok && f.write((const uint8_t*)&source, GLOBAL_SETTINGS_STORAGE_SIZE) == GLOBAL_SETTINGS_STORAGE_SIZE;
     f.close();
 
     if (!ok) {
@@ -1088,15 +1097,6 @@ bool Settings::renamePreset(uint8_t slot, const char* name) {
     return false;
 }
 
-void Settings::duplicatePreset(uint8_t src, uint8_t dest) {
-    if (safeModeActive) return;
-    if (src >= MAX_PRESET_SLOTS || dest >= MAX_PRESET_SLOTS) return;
-    GlobalSettings temp;
-    if (loadFromSlot(src, temp)) {
-        saveToSlot(dest, temp);
-    }
-}
-
 void Settings::resetSessionRuntime() {
     _sessionRuntime = 0;
     _lastRuntimeUpdate = millis();
@@ -1122,9 +1122,9 @@ void Settings::begin() {
     // Check Hardware Safe Mode Flag before any formatting or writes.
     extern bool safeModeActive;
     if (safeModeActive) {
-        Serial.println("HARDWARE SAFE MODE ENGAGED. Bypassing Flash Load.");
+        if (SERIAL_MONITOR_ENABLE) Serial.println("HARDWARE SAFE MODE ENGAGED. Bypassing Flash Load.");
         if (!LittleFS.begin()) {
-            Serial.println("LittleFS unavailable in Safe Mode. Leaving flash untouched.");
+            if (SERIAL_MONITOR_ENABLE) Serial.println("LittleFS unavailable in Safe Mode. Leaving flash untouched.");
         }
 
         setDefaults(); // Load baseline safe settings to RAM only.
@@ -1144,7 +1144,7 @@ void Settings::begin() {
     // Mount LittleFS only after Safe Mode has had a chance to bypass normal flash load. Do not format on a single mount failure; a transient flash issue
     // should not erase settings, presets, logs, and network configuration.
     if (!LittleFS.begin()) {
-        Serial.println("LittleFS Mount Failed. Using RAM defaults and preserving flash.");
+        if (SERIAL_MONITOR_ENABLE) Serial.println("LittleFS Mount Failed. Using RAM defaults and preserving flash.");
         setDefaults();
         _lastRuntimeUpdate = millis();
         return;
@@ -1192,17 +1192,17 @@ void Settings::load() {
     bool migrated = false;
     if (loadSettingsBlob(_filename, SETTINGS_FILE_MAGIC, loaded, &migrated)) {
         _data = loaded;
-        Serial.println("Settings loaded.");
+        if (SERIAL_MONITOR_ENABLE) Serial.println("Settings loaded.");
         validate();
         if (migrated) {
             // Save migrated data back in the current schema so future boots take the fast path.
-            Serial.println("Settings migrated.");
+            if (SERIAL_MONITOR_ENABLE) Serial.println("Settings migrated.");
             save(false);
         }
         return;
     }
 
-    Serial.println("Settings not found or invalid. Using defaults.");
+    if (SERIAL_MONITOR_ENABLE) Serial.println("Settings not found or invalid. Using defaults.");
     resetDefaults();
 }
 
@@ -1251,7 +1251,7 @@ void Settings::markBootSuccessful() {
     if (writeSettingsBlob(SETTINGS_KNOWN_GOOD_FILE, SETTINGS_FILE_MAGIC, _data)) {
         writeBootMarkerState(SETTINGS_BOOT_NONE);
         _bootCandidateActive = false;
-        Serial.println("Settings boot confirmed.");
+        if (SERIAL_MONITOR_ENABLE) Serial.println("Settings boot confirmed.");
     }
 }
 
@@ -1283,7 +1283,7 @@ SpeedSettings& Settings::getCurrentSpeedSettings() {
 }
 
 ClosedLoopSpeedTuning& Settings::getCurrentClosedLoopTuning() {
-    return getClosedLoopTuning(_data.currentSpeed);
+    return getClosedLoopTuning((SpeedMode)_data.currentSpeed);
 }
 
 ClosedLoopSpeedTuning& Settings::getClosedLoopTuning(SpeedMode speed) {
@@ -1299,7 +1299,7 @@ void Settings::normalize() {
 void Settings::validate() {
     // Current storage is strict: any schema mismatch that was not handled by a migration path resets to defaults rather than guessing field layout.
     if (_data.schemaVersion != SETTINGS_SCHEMA_VERSION) {
-        Serial.println("Schema mismatch. Resetting defaults.");
+        if (SERIAL_MONITOR_ENABLE) Serial.println("Schema mismatch. Resetting defaults.");
         resetDefaults();
     }
 
@@ -1355,6 +1355,10 @@ void Settings::validate() {
     if (_data.brakeDuration > 10.0) _data.brakeDuration = 10.0;
     if (_data.brakePulseGap < 0.1) _data.brakePulseGap = 0.1;
     if (_data.brakePulseGap > 2.0) _data.brakePulseGap = 2.0;
+    if (_data.brakeStartFreq < 10.0f) _data.brakeStartFreq = 10.0f;
+    if (_data.brakeStartFreq > 200.0f) _data.brakeStartFreq = 200.0f;
+    if (_data.brakeStopFreq < 0.0f) _data.brakeStopFreq = 0.0f;
+    if (_data.brakeStopFreq > 50.0f) _data.brakeStopFreq = 50.0f;
     if (_data.softStopCutoff < 0.0) _data.softStopCutoff = 0.0;
     if (_data.softStopCutoff > 50.0) _data.softStopCutoff = 50.0;
     if (_data.powerOnRelayDelay > 10) _data.powerOnRelayDelay = 10;
@@ -1574,6 +1578,9 @@ void Settings::validate() {
 }
 
 void Settings::setDefaults() {
+    // Clear every field and padding byte before assigning semantic defaults so
+    // factory reset and Safe Mode cannot retain bytes from a previous payload.
+    memset(&_data, 0, sizeof(_data));
     _data.schemaVersion = SETTINGS_SCHEMA_VERSION;
     // Initialize preset names in the live settings directory.
     for(int i=0; i<5; i++) {
@@ -1761,10 +1768,9 @@ bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
     if (slot >= MAX_PRESET_SLOTS) return false;
 
     GlobalSettings target;
-    // Load existing settings from slot. If fail, fall back to current active data.
-    if (!loadFromSlot(slot, target)) {
-        target = _data;
-    }
+    // Export describes the requested stored preset; an empty or invalid slot
+    // must not silently export the unrelated live configuration.
+    if (!loadFromSlot(slot, target)) return false;
 
     // ArduinoJson 7 allocates JsonDocument dynamically. The short keys keep the preset export compact enough for serial and web workflows.
     JsonDocument doc;
@@ -1886,8 +1892,10 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
     DeserializationError error = deserializeJson(doc, jsonStr);
 
     if (error) {
-        Serial.print("JSON Error: ");
-        Serial.println(error.c_str());
+        if (SERIAL_MONITOR_ENABLE) {
+            Serial.print("JSON Error: ");
+            Serial.println(error.c_str());
+        }
         return false;
     }
 

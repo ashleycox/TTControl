@@ -423,7 +423,7 @@ async function loadPresets(){presetsData=await api("/api/presets");fillPresetCom
 async function presetAction(slot,action){let body={slot,action};if(action==="preview"){await previewPreset(slot);return}if(action==="previewImport"){await previewPreset(slot,$(`presetText${slot}`).value,"Import validation report");return}if(action==="load"){const r=await previewPreset(slot);if(!r||r.report.errors||!confirm("Load this preset into the live settings?"))return}if(action==="rename")body.name=$(`presetName${slot}`).value;if(action==="import"){const r=await previewPreset(slot,$(`presetText${slot}`).value,"Import validation report");if(!r||r.report.errors){setLive("Fix preset import errors before importing");return}if(!confirm(`Import this JSON into the preset slot?\n\n${r.report.warnings} warning${r.report.warnings===1?"":"s"} will be accepted.`))return;body.json=$(`presetText${slot}`).value}if(action==="clear"&&!confirm("Clear this preset?"))return;const res=await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(action==="export")$(`presetText${slot}`).value=res.json||"";await loadPresets();await loadSettings();setLive("Preset action complete")}
 function fillPresetCompare(){["compareA","compareB"].forEach(id=>{const el=$(id);if(!el||el.children.length)return;for(let i=0;i<5;i++){const o=document.createElement("option");o.value=i;o.textContent=`Slot ${i+1}`;el.appendChild(o)}});if($("compareB"))$("compareB").value="1"}
 async function comparePresetSlots(){const a=Number($("compareA").value),b=Number($("compareB").value),box=$("presetCompare");try{const ja=JSON.parse((await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot:a,action:"export"})})).json),jb=JSON.parse((await api("/api/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot:b,action:"export"})})).json),d=diffs(ja,jb);box.classList.remove("hide");box.textContent=d.length?d.map(x=>`${presetPathLabel(x.path)}: ${displayValue(x.path,x.from)} -> ${displayValue(x.path,x.to)}`).join("\n"):"Preset slots match."}catch(e){box.classList.remove("hide");box.textContent=e.message}}
-async function loadDiagnostics(){const d=await api("/api/diagnostics");diagnosticsData=d;const sys=d.system||{},cpu=sys.cpu||{},mem=sys.memory||{},flash=sys.flash||{},wave=sys.waveform||{},body=$("diagnosticsBody");body.innerHTML=`<h2>Diagnostics</h2><div class="tool-grid"><div><h3>Build</h3><p>Firmware: ${esc(d.firmware)}</p><p>Build: ${esc(d.buildDate)}</p><p>Safe mode: ${d.safeMode?"yes":"no"}</p></div><div><h3>System</h3><p>CPU: core 0 ${Number(cpu.core0Percent||0).toFixed(0)}%, waveform ${Number(cpu.waveformPercent||0).toFixed(0)}%</p><p>Waveform: fill age ${Number(wave.bufferFillAgeMs||0)} ms, DMA ${wave.dmaRunning?"running":"idle"}</p><p>Heap: ${bytesText(mem.heapUsedBytes)} used, ${bytesText(mem.heapFreeBytes)} free</p><p>Sketch: ${bytesText(flash.sketchUsedBytes)} / ${bytesText(flash.sketchCapacityBytes)}</p><p>Filesystem: ${flash.filesystemMounted?`${bytesText(flash.filesystemUsedBytes)} / ${bytesText(flash.filesystemTotalBytes)}`:"not mounted"}</p></div><div><h3>Network</h3><p>${esc(d.network.status)} ${esc(d.network.ip||"")}</p><p>RSSI: ${d.network.rssi} dBm</p><p>Clients: ${d.network.clients}</p><p>Standby: ${esc(d.network.standbyModeText||optionLabel("standbyMode",d.network.standbyMode??0))}${d.network.ecoStandbySuspended?" (Wi-Fi suspended)":""}</p><p>Read-only mode: ${d.network.readOnlyMode?"on":"off"}</p><p>Device lock: ${d.network.deviceLockEnabled?"on":"off"}</p></div><div><h3>Amplifier</h3><p>${d.amp.enabled?`${Number(d.amp.temperatureC).toFixed(1)} C, thermal ${d.amp.thermalOk?"OK":"TRIPPED"}, warn ${Number(d.amp.warnC).toFixed(0)} C, shutdown ${Number(d.amp.shutdownC).toFixed(0)} C`:"not enabled"}</p></div></div><h3>Feature flags</h3><div class="log">${Object.keys(d.flags).map(k=>`${k}: ${d.flags[k]}`).join("\n")}</div><h3>Pins</h3><div class="log">${Object.keys(d.pins).map(k=>`${k}: GP${d.pins[k]}`).join("\n")}</div><h3>Files</h3><div class="log">settings: ${d.files.settings}\nknown-good: ${d.files.knownGood}\nboot marker: ${d.files.bootMarker}\nnetwork: ${d.files.network}\nerrors: ${d.files.errors}\npresets: ${d.files.presets.map(p=>`slot ${p.slot+1}=${p.stored}`).join(", ")}</div>`;renderEventFeed();renderBench()}
+async function loadDiagnostics(){const d=await api("/api/diagnostics");diagnosticsData=d;const sys=d.system||{},cpu=sys.cpu||{},mem=sys.memory||{},flash=sys.flash||{},wave=sys.waveform||{},disp=d.display||{},body=$("diagnosticsBody");body.innerHTML=`<h2>Diagnostics</h2><div class="tool-grid"><div><h3>Build</h3><p>Firmware: ${esc(d.firmware)}</p><p>Build: ${esc(d.buildDate)}</p><p>Safe mode: ${d.safeMode?"yes":"no"}</p><p>Display: ${esc(disp.driver||"unknown")} via ${esc(disp.transport||"unknown")} / ${esc(disp.wiringProfile||"unknown")}, ${Number(disp.width||0)}x${Number(disp.height||0)}, ${disp.available?(disp.powered?"on":"sleeping"):disp.driver==="Headless"?"headless":"unavailable"}</p><p>Display capabilities: panel ${disp.physicalPanel?"yes":"no"}, power ${disp.powerControl?"yes":"no"}, brightness ${disp.brightnessControl?"yes":"no"}, colour ${disp.colourPanel?"yes":"no"}</p></div><div><h3>System</h3><p>CPU: core 0 ${Number(cpu.core0Percent||0).toFixed(0)}%, waveform ${Number(cpu.waveformPercent||0).toFixed(0)}%</p><p>Waveform: fill age ${Number(wave.bufferFillAgeMs||0)} ms, DMA ${wave.dmaRunning?"running":"idle"}</p><p>Heap: ${bytesText(mem.heapUsedBytes)} used, ${bytesText(mem.heapFreeBytes)} free</p><p>Sketch: ${bytesText(flash.sketchUsedBytes)} / ${bytesText(flash.sketchCapacityBytes)}</p><p>Filesystem: ${flash.filesystemMounted?`${bytesText(flash.filesystemUsedBytes)} / ${bytesText(flash.filesystemTotalBytes)}`:"not mounted"}</p></div><div><h3>Network</h3><p>${esc(d.network.status)} ${esc(d.network.ip||"")}</p><p>RSSI: ${d.network.rssi} dBm</p><p>Clients: ${d.network.clients}</p><p>Standby: ${esc(d.network.standbyModeText||optionLabel("standbyMode",d.network.standbyMode??0))}${d.network.ecoStandbySuspended?" (Wi-Fi suspended)":""}</p><p>Read-only mode: ${d.network.readOnlyMode?"on":"off"}</p><p>Device lock: ${d.network.deviceLockEnabled?"on":"off"}</p></div><div><h3>Amplifier</h3><p>${d.amp.enabled?`${Number(d.amp.temperatureC).toFixed(1)} C, thermal ${d.amp.thermalOk?"OK":"TRIPPED"}, warn ${Number(d.amp.warnC).toFixed(0)} C, shutdown ${Number(d.amp.shutdownC).toFixed(0)} C`:"not enabled"}</p></div></div><h3>Feature flags</h3><div class="log">${Object.keys(d.flags).map(k=>`${k}: ${d.flags[k]}`).join("\n")}</div><h3>Pins</h3><div class="log">${Object.keys(d.pins).map(k=>`${k}: GP${d.pins[k]}`).join("\n")}</div><h3>Files</h3><div class="log">settings: ${d.files.settings}\nknown-good: ${d.files.knownGood}\nboot marker: ${d.files.bootMarker}\nnetwork: ${d.files.network}\nerrors: ${d.files.errors}\npresets: ${d.files.presets.map(p=>`slot ${p.slot+1}=${p.stored}`).join(", ")}</div>`;renderEventFeed();renderBench()}
 function relayStageOptions(){const count=Math.max(0,Number(statusData?.motor?.relayStageCount||0));let out="";for(let i=0;i<count;i++)out+=`<option value="${i}">Stage ${i}</option>`;return out}
 function benchReportText(){
 const m=statusData?.motor||{},n=statusData?.network||{},a=statusData?.amp||{},d=diagnosticsData,clObj=m.closedLoop||{},cl=closedLoopStatusText(clObj),met=clObj.metrics||{},tune=clObj.tuning||{},health=clObj.health||{},trend=clObj.trend||[],lastTrend=trend[trend.length-1]||{},lockPct=met.validSamples?Math.round((met.lockedSamples||0)*100/met.validSamples):0;
@@ -929,6 +929,7 @@ static void setByte(JsonObject obj, const char* key, uint8_t& target, int minVal
     target = (uint8_t)clampIntValue(value.as<int>(), minValue, maxValue);
 }
 
+#if CLOSED_LOOP_SPEED_ENABLE
 static void setUInt16(JsonObject obj, const char* key, uint16_t& target, int minValue, int maxValue) {
     JsonVariant value = obj[key];
     if (value.isNull()) return;
@@ -938,6 +939,7 @@ static void setUInt16(JsonObject obj, const char* key, uint16_t& target, int min
     }
     target = (uint16_t)clampIntValue(value.as<int>(), minValue, maxValue);
 }
+#endif
 
 static void setFloat(JsonObject obj, const char* key, float& target, float minValue, float maxValue) {
     JsonVariant value = obj[key];
@@ -1380,17 +1382,17 @@ static void streamGlobalGroups(Print& out) {
 
     beginFieldGroup(out, firstGroup, "Display");
     firstField = true;
-    streamNumberField(out, firstField, "displayBrightness", "Display brightness", 0, 255, 1, "OLED brightness level.");
+    streamNumberField(out, firstField, "displayBrightness", "Display brightness", 0, 255, 1, "OLED contrast or controlled TFT backlight level.");
     streamSelectField(out, firstField, "displaySleepDelay", "Display sleep delay", "displaySleepDelay", "Delay before the display sleeps.");
     streamCheckboxField(out, firstField, "screensaverEnabled", "Screensaver enabled", "Show a screensaver after the sleep delay.");
     streamSelectField(out, firstField, "screensaverMode", "Screensaver mode", "screensaverMode", "Animation shown after the display sleep delay.");
     streamNumberField(out, firstField, "autoDimDelay", "Auto dim delay", 0, 60, 1, "Minutes before dimming. Zero disables it.", "min");
-    streamCheckboxField(out, firstField, "showRuntime", "Show runtime", "Include runtime on the display.");
-    streamCheckboxField(out, firstField, "showCpuDashboard", "Show CPU dashboard", "Expose the CPU load dashboard mode on the OLED and browser dashboard.");
-    streamCheckboxField(out, firstField, "showMemoryDashboard", "Show memory dashboard", "Expose the memory usage dashboard mode on the OLED and browser dashboard.");
-    streamCheckboxField(out, firstField, "showFlashDashboard", "Show flash dashboard", "Expose the flash and filesystem dashboard mode on the OLED and browser dashboard.");
-    streamCheckboxField(out, firstField, "errorDisplayEnabled", "Error display enabled", "Show errors on the OLED.");
-    streamNumberField(out, firstField, "errorDisplayDuration", "Error display duration", 1, 60, 1, "How long OLED error messages stay visible.", "sec");
+    streamCheckboxField(out, firstField, "showRuntime", "Show runtime", "Include the runtime page in local dashboard cycling.");
+    streamCheckboxField(out, firstField, "showCpuDashboard", "Show CPU dashboard", "Expose the CPU load mode on the local and browser dashboards.");
+    streamCheckboxField(out, firstField, "showMemoryDashboard", "Show memory dashboard", "Expose the memory usage mode on the local and browser dashboards.");
+    streamCheckboxField(out, firstField, "showFlashDashboard", "Show flash dashboard", "Expose the flash and filesystem mode on the local and browser dashboards.");
+    streamCheckboxField(out, firstField, "errorDisplayEnabled", "Error display enabled", "Show errors on the local display.");
+    streamNumberField(out, firstField, "errorDisplayDuration", "Error display duration", 1, 60, 1, "How long local error messages stay visible.", "sec");
     endFieldGroup(out);
 
     beginFieldGroup(out, firstGroup, "System");
@@ -1469,7 +1471,7 @@ static void streamNetworkFields(Print& out) {
     streamPasswordField(out, firstField, "apPassword", "Setup AP password", "Blank keeps the saved password. Use the saved-credential control to remove it and make the setup network open.", NETWORK_PASSWORD_MAX, 8);
     streamNumberField(out, firstField, "apChannel", "Setup AP channel", 1, 13, 1, "Wi-Fi channel used by the setup AP.");
     streamCheckboxField(out, firstField, "readOnlyMode", "Read-only guest mode", "When enabled, dashboard/status stay visible but controls and settings require the web PIN.");
-    streamCheckboxField(out, firstField, "deviceLockEnabled", "Device UI lock", "Require the shared PIN before entering the OLED settings menu and before browser or serial writes.");
+    streamCheckboxField(out, firstField, "deviceLockEnabled", "Device UI lock", "Require the shared PIN before entering the local settings menu and before browser or serial writes.");
     streamPasswordField(out, firstField, "webPin", "Shared PIN", "Leave blank to keep the saved PIN. Use 4 to 8 characters.", NETWORK_WEB_PIN_MAX, 4);
     streamSelectField(out, firstField, "webHomePage", "Web home page", "homePage", "Default page shown when the local browser interface opens.");
 }
@@ -1766,7 +1768,8 @@ void WebInterface::clearAuthToken() {
 }
 
 void WebInterface::issueAuthToken() {
-    // Arduino-Pico sources hwrand32() from the RP2350 hardware entropy path, avoiding predictable millis-based session tokens.
+    // Arduino-Pico uses the RP2350 true RNG or its RP2040 hardware-derived
+    // random source, avoiding predictable millis-based session tokens.
     uint32_t a = rp2040.hwrand32();
     uint32_t b = rp2040.hwrand32();
     snprintf(_authToken, sizeof(_authToken), "%08lx%08lx", (unsigned long)a, (unsigned long)b);
@@ -2622,6 +2625,10 @@ void WebInterface::handleSettingsGet() {
 void WebInterface::handleSettingsPost() {
     if (rejectOpenSetupAccess()) return;
     if (requireWriteAccess()) return;
+    if (motor.getState() == STATE_STOPPING) {
+        sendError(409, "Settings changes are blocked until braking completes");
+        return;
+    }
 
     JsonDocument doc;
     if (!parseBody(doc)) return;
@@ -2876,6 +2883,10 @@ void WebInterface::handleControl() {
 
     // Control actions execute immediately and return only an ok/error envelope.
     if (strcmp(action, "start") == 0) {
+        if (motor.getState() == STATE_STOPPING) {
+            sendError(409, "Start blocked until braking completes");
+            return;
+        }
         if (errorHandler.hasCriticalError()) {
             sendError(423, "Start blocked by critical fault; correct the fault and reboot");
             return;
@@ -2893,6 +2904,10 @@ void WebInterface::handleControl() {
         if (motor.isRelayTestMode()) motor.endRelayTest();
         motor.stop();
     } else if (strcmp(action, "toggleStartStop") == 0) {
+        if (motor.getState() == STATE_STOPPING) {
+            sendError(409, "Start/stop change blocked until braking completes");
+            return;
+        }
         if (!motor.isRunning() && errorHandler.hasCriticalError()) {
             sendError(423, "Start blocked by critical fault; correct the fault and reboot");
             return;
@@ -2900,6 +2915,10 @@ void WebInterface::handleControl() {
         if (motor.isStandby()) motor.toggleStandby();
         else motor.toggleStartStop();
     } else if (strcmp(action, "toggleStandby") == 0) {
+        if (motor.getState() == STATE_STOPPING) {
+            sendError(409, "Standby blocked until braking completes");
+            return;
+        }
         if (motor.isStandby() && errorHandler.hasCriticalError()) {
             sendError(423, "Wake blocked by critical fault; correct the fault and reboot");
             return;
@@ -2908,6 +2927,10 @@ void WebInterface::handleControl() {
     } else if (strcmp(action, "cycleSpeed") == 0) {
         motor.cycleSpeed();
     } else if (strcmp(action, "setSpeed") == 0) {
+        if (motor.getState() == STATE_STOPPING) {
+            sendError(409, "Speed change blocked until braking completes");
+            return;
+        }
         if (!doc["speed"].is<int>()) {
             sendError(400, "speed must be an integer");
             return;
@@ -2921,6 +2944,10 @@ void WebInterface::handleControl() {
     } else if (strcmp(action, "resetPitch") == 0) {
         motor.resetPitch();
     } else if (strcmp(action, "setPitch") == 0) {
+        if (motor.getState() == STATE_STOPPING) {
+            sendError(409, "Pitch change blocked until braking completes");
+            return;
+        }
         if (!doc["pitch"].is<float>()) {
             sendError(400, "pitch must be a number");
             return;
@@ -3290,12 +3317,51 @@ void WebInterface::handleDiagnosticsGet() {
     flags["POWER_STAGE_SLEEP_ENABLE"] = POWER_STAGE_SLEEP_ENABLE;
     flags["POWER_STAGE_RESET_ENABLE"] = POWER_STAGE_RESET_ENABLE;
     flags["POWER_STAGE_SHARED_ENABLE_FAULT"] = POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN;
+    flags["DISPLAY_DRIVER"] = DISPLAY_DRIVER;
+    flags["DISPLAY_TRANSPORT"] = DISPLAY_TRANSPORT;
+    flags["DISPLAY_WIRING_PROFILE"] = DISPLAY_WIRING_PROFILE;
+    flags["DISPLAY_MAX_FPS"] = DISPLAY_MAX_FPS;
+
+    JsonObject displayInfo = doc["display"].to<JsonObject>();
+    displayInfo["driver"] = displayManager.driverName();
+    displayInfo["transport"] = displayManager.transportName();
+    displayInfo["wiringProfile"] = displayManager.wiringProfileName();
+    displayInfo["width"] = displayManager.physicalWidth();
+    displayInfo["height"] = displayManager.physicalHeight();
+    displayInfo["available"] = displayManager.isAvailable();
+    displayInfo["powered"] = displayManager.isPowered();
+    DisplayCapabilities displayCapabilities = displayManager.capabilities();
+    displayInfo["physicalPanel"] = displayCapabilities.physicalPanel;
+    displayInfo["powerControl"] = displayCapabilities.powerControl;
+    displayInfo["brightnessControl"] = displayCapabilities.brightnessControl;
+    displayInfo["colourPanel"] = displayCapabilities.colourPanel;
 
     JsonObject pins = doc["pins"].to<JsonObject>();
     pins["PWM A"] = PIN_PWM_PHASE_A;
     pins["PWM B"] = PIN_PWM_PHASE_B;
     pins["PWM C"] = PIN_PWM_PHASE_C;
+#if ENABLE_4_CHANNEL_SUPPORT
     pins["PWM D"] = PIN_PWM_PHASE_D;
+#endif
+#if DISPLAY_DRIVER != DISPLAY_DRIVER_NONE
+#if DISPLAY_TRANSPORT == DISPLAY_TRANSPORT_I2C
+    pins["Display SDA"] = PIN_I2C0_SDA;
+    pins["Display SCL"] = PIN_I2C0_SCL;
+#else
+    pins["Display SCK"] = PIN_DISPLAY_SPI_SCK;
+    pins["Display MOSI"] = PIN_DISPLAY_SPI_MOSI;
+    pins["Display D/C"] = PIN_DISPLAY_DC;
+#if PIN_DISPLAY_CS >= 0
+    pins["Display CS"] = PIN_DISPLAY_CS;
+#endif
+#endif
+#if PIN_DISPLAY_RESET >= 0
+    pins["Display reset"] = PIN_DISPLAY_RESET;
+#endif
+#if PIN_DISPLAY_BACKLIGHT >= 0
+    pins["Display backlight"] = PIN_DISPLAY_BACKLIGHT;
+#endif
+#endif
 #if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
 #if POWER_STAGE_SHARED_ENABLE
     pins["Driver enable"] = PIN_POWER_STAGE_ENABLE;
@@ -3323,13 +3389,26 @@ void WebInterface::handleDiagnosticsGet() {
     pins["Speed sensor A"] = PIN_SPEED_SENSOR_A;
     pins["Speed sensor B"] = PIN_SPEED_SENSOR_B;
 #endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM
     pins["Relay standby"] = PIN_RELAY_STANDBY;
+#if ENABLE_MUTE_RELAYS
+#if ENABLE_DPDT_RELAYS
+    pins["DPDT relay 1"] = PIN_RELAY_DPDT_1;
+    pins["DPDT relay 2"] = PIN_RELAY_DPDT_2;
+#else
     pins["Mute A"] = PIN_MUTE_PHASE_A;
     pins["Mute B"] = PIN_MUTE_PHASE_B;
     pins["Mute C"] = PIN_MUTE_PHASE_C;
+#if ENABLE_4_CHANNEL_SUPPORT
     pins["Mute D"] = PIN_MUTE_PHASE_D;
+#endif
+#endif
+#endif
+#endif
+#if AMP_MONITOR_ENABLE
     pins["Amp temp"] = PIN_AMP_TEMP;
     pins["Amp thermal OK"] = PIN_AMP_THERM_OK;
+#endif
 
     JsonObject system = doc["system"].to<JsonObject>();
     populateSystemMetrics(system);
@@ -3447,6 +3526,10 @@ void WebInterface::handlePresetPost() {
     JsonDocument out;
     out["ok"] = true;
     if (strcmp(action, "load") == 0) {
+        if (motor.getState() == STATE_STOPPING) {
+            sendError(409, "Preset load is blocked until braking completes");
+            return;
+        }
         if (!settings.loadPreset(slot)) {
             sendError(404, "Preset slot is empty");
             return;
@@ -3515,7 +3598,10 @@ void WebInterface::handleErrorsPost() {
     if (rejectCrossOriginWrite()) return;
     if (requireWriteAccess()) return;
 
-    errorHandler.clearLogs();
+    if (!errorHandler.clearLogs()) {
+        sendError(500, "Error log clear failed");
+        return;
+    }
     JsonDocument doc;
     doc["ok"] = true;
     sendJson(200, doc);

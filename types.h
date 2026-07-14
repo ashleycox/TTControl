@@ -130,8 +130,11 @@ enum ClosedLoopPitchTargetMode {
 /*
  * --- Data Structures ---
  * The settings structs below are written directly to LittleFS. Field order,
- * types, and padding are part of the storage contract.
+ * types, and padding are part of the storage contract. Arduino-Pico supports
+ * both ARM and RISC-V on RP2350; cap member alignment at four bytes so both
+ * architectures produce the existing ARM-compatible binary layout.
  */
+#pragma pack(push, 4)
 
 // Settings specific to a single speed (33, 45, or 78 RPM). GlobalSettings owns three copies so each speed can have its own frequency, phase, and startup tune.
 struct SpeedSettings {
@@ -261,7 +264,7 @@ struct GlobalSettings {
      * Stored separately from bootSpeed so "Last Used" can be honored on the next
      * boot without changing the user's boot mode preference.
      */
-    SpeedMode currentSpeed;
+    uint8_t currentSpeed; // SpeedMode stored explicitly as one byte on ARM and RISC-V
 
     // Amplifier Monitor
     float ampTempWarnC;
@@ -329,9 +332,12 @@ struct GlobalSettings {
     float vfBaseFreq;
 };
 
+#pragma pack(pop)
+
 // These assertions catch accidental storage-layout changes during compilation.
 static_assert(sizeof(SpeedSettings) == SPEED_SETTINGS_STORAGE_SIZE, "Update SPEED_SETTINGS_STORAGE_SIZE when SpeedSettings changes.");
 static_assert(sizeof(ClosedLoopSpeedTuning) == CLOSED_LOOP_TUNING_STORAGE_SIZE, "Update CLOSED_LOOP_TUNING_STORAGE_SIZE when ClosedLoopSpeedTuning changes.");
-static_assert(sizeof(GlobalSettings) == GLOBAL_SETTINGS_STORAGE_SIZE, "Update GLOBAL_SETTINGS_STORAGE_SIZE and storage handling when GlobalSettings changes.");
+static_assert(sizeof(GlobalSettings) == GLOBAL_SETTINGS_STORAGE_SIZE,
+    "Update GLOBAL_SETTINGS_STORAGE_SIZE and storage handling when GlobalSettings changes.");
 
 #endif // TYPES_H

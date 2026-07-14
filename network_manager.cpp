@@ -27,6 +27,7 @@ struct NetworkConfigFileHeader {
     uint32_t payloadSize;
     uint32_t crc32;
 };
+static_assert(sizeof(NetworkConfigFileHeader) == 20, "NetworkConfigFileHeader storage layout changed.");
 
 uint32_t networkCrc32(const uint8_t* data, size_t length) {
     uint32_t crc = 0xFFFFFFFFUL;

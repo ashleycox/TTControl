@@ -79,6 +79,7 @@ public:
     void prev(); // Move selection up
     int getSelection() const { return _selection; }
     int getOffset() const { return _offset; } // Scroll offset
+    void setVisibleRows(uint8_t rows);
 
     // --- Interaction ---
     void select(MenuPage*& currentPage); // Activate selected item
@@ -90,6 +91,7 @@ private:
     std::vector<MenuItem*> _items;
     int _selection;
     int _offset;
+    uint8_t _visibleRows;
 
     size_t getVisibleItemCount() const;
     MenuItem* getVisibleItem(size_t index) const;
