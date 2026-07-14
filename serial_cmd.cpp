@@ -15,6 +15,7 @@
 #include "system_monitor.h"
 #include "speed_feedback.h"
 #include "waveform.h"
+#include "power_stage.h"
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
@@ -61,7 +62,19 @@ static const SerialSettingRule SERIAL_SETTING_RULES[] = {
     {"show_memory", SERIAL_SETTING_BOOL, 0, 1},
     {"show_flash", SERIAL_SETTING_BOOL, 0, 1},
     {"phase_mode", SERIAL_SETTING_INT, 1, MAX_PHASE_MODE},
+    {"motor_topology", SERIAL_SETTING_INT, MOTOR_TOPOLOGY_CUSTOM, MOTOR_TOPOLOGY_THREE_PHASE},
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    {"active_braking", SERIAL_SETTING_BOOL, 0, 1},
+#endif
+    {"phase_slew", SERIAL_SETTING_FLOAT, 0, 3600},
+    {"gain_slew", SERIAL_SETTING_FLOAT, 0, 1000},
     {"max_amp", SERIAL_SETTING_INT, 0, 100},
+    {"vf_blend", SERIAL_SETTING_INT, 0, 100},
+    {"vf_low_freq", SERIAL_SETTING_FLOAT, 0.0f, 50.0f},
+    {"vf_low_level", SERIAL_SETTING_INT, 0, 100},
+    {"vf_mid_freq", SERIAL_SETTING_FLOAT, 0.0f, 100.0f},
+    {"vf_mid_level", SERIAL_SETTING_INT, 0, 100},
+    {"vf_base_freq", SERIAL_SETTING_FLOAT, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ},
 #if CLOSED_LOOP_SPEED_ENABLE
     {"cl_enable", SERIAL_SETTING_BOOL, 0, 1},
     {"cl_control", SERIAL_SETTING_INT, CLOSED_LOOP_CONTROL_MONITOR, CLOSED_LOOP_CONTROL_CORRECT},
@@ -118,14 +131,22 @@ static const SerialSettingRule SERIAL_SETTING_RULES[] = {
     {"brake_start_freq", SERIAL_SETTING_FLOAT, 10.0f, 200.0f},
     {"brake_stop_freq", SERIAL_SETTING_FLOAT, 0.0f, 50.0f},
     {"brake_cutoff", SERIAL_SETTING_FLOAT, 0.0f, 50.0f},
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && (ENABLE_STANDBY || ENABLE_MUTE_RELAYS)
     {"relay_active_high", SERIAL_SETTING_BOOL, 0, 1},
+#endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && ENABLE_MUTE_RELAYS
     {"relay_delay", SERIAL_SETTING_INT, 0, 10},
+#endif
     {"freq", SERIAL_SETTING_FLOAT, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ},
     {"phase1", SERIAL_SETTING_FLOAT, -360.0f, 360.0f},
     {"phase2", SERIAL_SETTING_FLOAT, -360.0f, 360.0f},
     {"phase3", SERIAL_SETTING_FLOAT, -360.0f, 360.0f},
+    {"gain1", SERIAL_SETTING_INT, 50, 150},
+    {"gain2", SERIAL_SETTING_INT, 50, 150},
+    {"gain3", SERIAL_SETTING_INT, 50, 150},
 #if ENABLE_4_CHANNEL_SUPPORT
     {"phase4", SERIAL_SETTING_FLOAT, -360.0f, 360.0f},
+    {"gain4", SERIAL_SETTING_INT, 50, 150},
 #endif
     {"soft_start", SERIAL_SETTING_FLOAT, 0.0f, 10.0f},
     {"kick", SERIAL_SETTING_INT, 1, 4},
@@ -1228,9 +1249,88 @@ void initCLI() {
         }
     });
 
+    registry.push_back({ "motor_topology",
+        []() { return String(settings.get().motorTopology); },
+        [](String v) {
+            settings.get().motorTopology = (uint8_t)clampInt(v.toInt(), MOTOR_TOPOLOGY_CUSTOM, MOTOR_TOPOLOGY_THREE_PHASE);
+            motor.applySettings();
+        }
+    });
+
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    registry.push_back({ "active_braking",
+        []() { return String(settings.get().activeBrakingAllowed); },
+        [](String v) {
+            bool parsed = false;
+            if (parseBoolValue(v, parsed)) settings.get().activeBrakingAllowed = parsed;
+        }
+    });
+#endif
+
+    registry.push_back({ "phase_slew",
+        []() { return String(settings.get().phaseSlewDegreesPerSecond); },
+        [](String v) {
+            settings.get().phaseSlewDegreesPerSecond = clampFloat(v.toFloat(), 0.0f, 3600.0f);
+            motor.applySettings();
+        }
+    });
+
+    registry.push_back({ "gain_slew",
+        []() { return String(settings.get().gainSlewPercentPerSecond); },
+        [](String v) {
+            settings.get().gainSlewPercentPerSecond = clampFloat(v.toFloat(), 0.0f, 1000.0f);
+            motor.applySettings();
+        }
+    });
+
     registry.push_back({ "max_amp",
         []() { return String(settings.get().maxAmplitude); },
         [](String v) { settings.get().maxAmplitude = (uint8_t)clampInt(v.toInt(), 0, 100); }
+    });
+
+    registry.push_back({ "vf_blend",
+        []() { return String(settings.get().vfBlend); },
+        [](String v) { settings.get().vfBlend = (uint8_t)clampInt(v.toInt(), 0, 100); }
+    });
+
+    registry.push_back({ "vf_low_freq",
+        []() { return String(settings.get().vfLowFreq); },
+        [](String v) {
+            settings.get().vfLowFreq = clampFloat(v.toFloat(), 0.0f, 50.0f);
+            settings.normalize();
+        }
+    });
+
+    registry.push_back({ "vf_low_level",
+        []() { return String(settings.get().vfLowLevel); },
+        [](String v) {
+            settings.get().vfLowLevel = (uint8_t)clampInt(v.toInt(), 0, 100);
+            settings.normalize();
+        }
+    });
+
+    registry.push_back({ "vf_mid_freq",
+        []() { return String(settings.get().vfMidFreq); },
+        [](String v) {
+            settings.get().vfMidFreq = clampFloat(v.toFloat(), 0.0f, 100.0f);
+            settings.normalize();
+        }
+    });
+
+    registry.push_back({ "vf_mid_level",
+        []() { return String(settings.get().vfMidLevel); },
+        [](String v) {
+            settings.get().vfMidLevel = (uint8_t)clampInt(v.toInt(), 0, 100);
+            settings.normalize();
+        }
+    });
+
+    registry.push_back({ "vf_base_freq",
+        []() { return String(settings.get().vfBaseFreq); },
+        [](String v) {
+            settings.get().vfBaseFreq = clampFloat(v.toFloat(), MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ);
+            settings.normalize();
+        }
     });
 
 #if CLOSED_LOOP_SPEED_ENABLE
@@ -1591,15 +1691,19 @@ void initCLI() {
         [](String v) { settings.get().softStopCutoff = clampFloat(v.toFloat(), 0.0, 50.0); }
     });
 
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && (ENABLE_STANDBY || ENABLE_MUTE_RELAYS)
     registry.push_back({ "relay_active_high",
         []() { return String(settings.get().relayActiveHigh); },
         [](String v) { settings.get().relayActiveHigh = (v == "1" || v == "true"); }
     });
+#endif
 
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && ENABLE_MUTE_RELAYS
     registry.push_back({ "relay_delay",
         []() { return String(settings.get().powerOnRelayDelay); },
         [](String v) { settings.get().powerOnRelayDelay = (uint8_t)clampInt(v.toInt(), 0, 10); }
     });
+#endif
     
     /*
      * --- Current Speed Settings ---
@@ -1640,12 +1744,43 @@ void initCLI() {
             motor.applySettings();
         }
     });
+
+    registry.push_back({ "gain1",
+        []() { return String(settings.getCurrentSpeedSettings().channelAmplitude[0]); },
+        [](String v) {
+            settings.getCurrentSpeedSettings().channelAmplitude[0] = (uint8_t)clampInt(v.toInt(), 50, 150);
+            motor.applySettings();
+        }
+    });
+
+    registry.push_back({ "gain2",
+        []() { return String(settings.getCurrentSpeedSettings().channelAmplitude[1]); },
+        [](String v) {
+            settings.getCurrentSpeedSettings().channelAmplitude[1] = (uint8_t)clampInt(v.toInt(), 50, 150);
+            motor.applySettings();
+        }
+    });
+
+    registry.push_back({ "gain3",
+        []() { return String(settings.getCurrentSpeedSettings().channelAmplitude[2]); },
+        [](String v) {
+            settings.getCurrentSpeedSettings().channelAmplitude[2] = (uint8_t)clampInt(v.toInt(), 50, 150);
+            motor.applySettings();
+        }
+    });
     
 #if ENABLE_4_CHANNEL_SUPPORT
     registry.push_back({ "phase4",
         []() { return String(settings.getCurrentSpeedSettings().phaseOffset[3]); },
         [](String v) {
             settings.getCurrentSpeedSettings().phaseOffset[3] = clampFloat(v.toFloat(), -360.0, 360.0);
+            motor.applySettings();
+        }
+    });
+    registry.push_back({ "gain4",
+        []() { return String(settings.getCurrentSpeedSettings().channelAmplitude[3]); },
+        [](String v) {
+            settings.getCurrentSpeedSettings().channelAmplitude[3] = (uint8_t)clampInt(v.toInt(), 50, 150);
             motor.applySettings();
         }
     });
@@ -2029,6 +2164,60 @@ void printStatus() {
 
     Serial.print("Brake: ");
     Serial.println(brakeModeName(settings.get().brakeMode));
+
+    Serial.print("Output: ");
+    Serial.print(powerStage.backendName());
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    Serial.print(", driver ");
+    Serial.print(powerStage.isEnabled() ? "ENABLED" : powerStage.isEnablePending() ? "PENDING" : "DISABLED");
+    Serial.print(", fault ");
+    Serial.println(powerStage.hasFault() ? "ASSERTED" : "clear");
+    Serial.print("Power stage state: ");
+    Serial.println(powerStage.stateName());
+    PowerStageMetrics stageMetrics = powerStage.metrics();
+    Serial.print("Power stage starts: ");
+    Serial.print(stageMetrics.successfulEnables);
+    Serial.print("/");
+    Serial.print(stageMetrics.enableAttempts);
+    Serial.print(", faults ");
+    Serial.print(stageMetrics.faultCount);
+    Serial.print(" (wake ");
+    Serial.print(stageMetrics.wakeFaultCount);
+    Serial.print(", running ");
+    Serial.print(stageMetrics.runningFaultCount);
+    Serial.println(")");
+#else
+    Serial.print(", DMA ");
+    Serial.print(waveform.isDmaRunning() ? "running" : "stopped");
+    Serial.print(", sample rate ");
+    Serial.print(waveform.getSampleRateHz(), 0);
+    Serial.println(" Hz");
+#endif
+    for (uint8_t channel = 0; channel < settings.get().phaseMode; channel++) {
+        Serial.print("Channel "); Serial.print((char)('A' + channel));
+        Serial.print(": phase "); Serial.print(waveform.getAppliedPhaseDegrees(channel), 1);
+        Serial.print(" deg, gain "); Serial.print(waveform.getAppliedChannelGainPercent(channel), 1);
+        Serial.print("%, headroom "); Serial.print(waveform.getModulationHeadroomPercent(channel), 1);
+        Serial.print("%, clips "); Serial.println(waveform.getClippingCount(channel));
+    }
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    PowerStageFaultSnapshot fault = powerStage.faultSnapshot();
+    if (fault.valid) {
+        Serial.print("Last driver fault: "); Serial.print(fault.timestampMs);
+        Serial.print(" ms, stage "); Serial.print(fault.originState);
+        Serial.print(", motor "); Serial.print(fault.motorState);
+        Serial.print(", speed "); Serial.print(fault.speed);
+        Serial.print(", "); Serial.print(fault.frequencyHz, 2);
+        Serial.print(" Hz, buffer "); Serial.println(fault.bufferFillCount);
+    }
+#endif
+
+    Serial.print("Motor topology: ");
+    Serial.println(settings.get().motorTopology);
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    Serial.print("Regenerative braking: ");
+    Serial.println(settings.get().activeBrakingAllowed ? "bus energy path verified" : "inhibited");
+#endif
 
     Serial.print("UI Lock: ");
     Serial.print(networkManager.isDeviceLockEnabled() ? "ON" : "OFF");
@@ -2498,10 +2687,23 @@ static void printSafetyDiagnostic() {
 
     printDiagCheck("settings schema matches firmware", g.schemaVersion == SETTINGS_SCHEMA_VERSION, ok);
     printDiagCheck("phase mode is within compiled support", g.phaseMode >= PHASE_1 && g.phaseMode <= MAX_PHASE_MODE, ok);
+    printDiagCheck("motor topology is valid", g.motorTopology <= MOTOR_TOPOLOGY_THREE_PHASE, ok);
+    printDiagCheck("power-stage fault input is clear", !powerStage.hasFault(), ok);
     printDiagCheck("maximum amplitude is within 0-100%", g.maxAmplitude <= 100, ok);
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && ENABLE_MUTE_RELAYS
     printDiagCheck("relay power-on delay is within 0-10 seconds", g.powerOnRelayDelay <= 10, ok);
+#endif
     printDiagCheck("brake mode is valid", g.brakeMode <= BRAKE_SOFT_STOP, ok);
     printDiagCheck("brake duration is within 0-10 seconds", g.brakeDuration >= 0.0 && g.brakeDuration <= 10.0, ok);
+    for (uint8_t speed = 0; speed < 3; speed++) {
+        for (uint8_t channel = 0; channel < 4; channel++) {
+            bool gainOk = g.speeds[speed].channelAmplitude[channel] >= 50 &&
+                g.speeds[speed].channelAmplitude[channel] <= 150;
+            char label[64];
+            snprintf(label, sizeof(label), "speed %u channel %u gain is within 50-150%%", speed, channel + 1);
+            printDiagCheck(label, gainOk, ok);
+        }
+    }
     printDiagCheck("amplifier thermal thresholds are ordered",
         g.ampTempWarnC >= AMP_TEMP_MIN_C &&
         g.ampTempShutdownC <= AMP_TEMP_MAX_C &&
@@ -2584,8 +2786,14 @@ static void printSafetyDiagnostic() {
         Serial.println("no-op; motor is already running or starting");
     } else {
         Serial.print("would enter STARTING");
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+        if (motor.isStandby()) Serial.print(" after leaving logical standby");
+#else
         if (motor.isStandby()) Serial.print(" after waking standby relay");
+#endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && ENABLE_MUTE_RELAYS
         if (g.muteRelayLinkStartStop) Serial.print(", then request staggered unmute");
+#endif
         Serial.println();
     }
 
@@ -2599,10 +2807,18 @@ static void printSafetyDiagnostic() {
         Serial.println(brakeModeName(g.brakeMode));
     }
 
-    Serial.print("emergencyStop: would clear relay test, mute relays, disable waveform, enter ");
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    Serial.print("emergencyStop: would disable the bridge and waveform, then enter ");
+#else
+    Serial.print("emergencyStop: would clear relay test, de-energize relays, disable waveform, then enter ");
+#endif
     Serial.println(ENABLE_STANDBY ? "STANDBY" : "STOPPED");
     if (ENABLE_STANDBY) {
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+        Serial.println("standby: would disable the bridge and waveform, then enter logical STANDBY");
+#else
         Serial.println("standby: would mute relays, disable waveform, drop standby relay, enter STANDBY");
+#endif
     } else {
         Serial.println("standby: disabled at compile time");
     }
@@ -2631,7 +2847,9 @@ void printHelp() {
     Serial.println("export preset <1-5> - Dump JSON");
     Serial.println("import preset <1-5> <json> - Load JSON");
     Serial.println("brake test start|stop");
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && (ENABLE_STANDBY || ENABLE_MUTE_RELAYS)
     Serial.println("relay test <0-N|off>");
+#endif
 #if CLOSED_LOOP_SPEED_ENABLE
     Serial.println("cl status|reset|help");
     Serial.println("cl setup start|status|apply|stop");
@@ -3045,6 +3263,13 @@ static void printSettingsDump() {
     Serial.println("--- Settings Dump ---");
     Serial.print("Schema: "); Serial.println(g.schemaVersion);
     Serial.print("Phase Mode: "); Serial.println(g.phaseMode);
+    Serial.print("Motor Topology: "); Serial.println(g.motorTopology);
+    Serial.print("Output Backend: "); Serial.println(powerStage.backendName());
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    Serial.print("Regenerative Braking: "); Serial.println(g.activeBrakingAllowed ? "Bus energy path verified" : "Inhibited");
+#endif
+    Serial.print("Phase Slew: "); Serial.print(g.phaseSlewDegreesPerSecond); Serial.println(" deg/s");
+    Serial.print("Gain Slew: "); Serial.print(g.gainSlewPercentPerSecond); Serial.println(" %/s");
     Serial.print("Max Amp: "); Serial.print(g.maxAmplitude); Serial.println("%");
     Serial.print("Ramp Type: "); Serial.println(rampTypeName(g.rampType));
     Serial.print("Smooth Switch: "); Serial.println(g.smoothSwitching ? "ON" : "OFF");
@@ -3054,7 +3279,9 @@ static void printSettingsDump() {
     Serial.print("Amp Warn: "); Serial.print(g.ampTempWarnC); Serial.println("C");
     Serial.print("Amp Shutdown: "); Serial.print(g.ampTempShutdownC); Serial.println("C");
 #endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && (ENABLE_STANDBY || ENABLE_MUTE_RELAYS)
     Serial.print("Relay Active High: "); Serial.println(g.relayActiveHigh ? "YES" : "NO");
+#endif
     Serial.print("Boot Speed: "); Serial.println(g.bootSpeed);
     Serial.print("Runtime: "); Serial.print(settings.getTotalRuntime()); Serial.println("s");
 #if CLOSED_LOOP_SPEED_ENABLE
@@ -3185,6 +3412,12 @@ static void handlePresetCommand(const String& input) {
 
 static void handleRelayTestCommand(const String& input) {
     // Relay test energizes exactly one stage at a time and refuses to start while the motor is in motion.
+    uint8_t stageCount = motor.getRelayTestStageCount();
+    if (stageCount == 0) {
+        Serial.println("Relay test is not available in this output configuration.");
+        return;
+    }
+
     String arg = "";
     if (input.length() > 10) {
         arg = input.substring(10);
@@ -3200,9 +3433,9 @@ static void handleRelayTestCommand(const String& input) {
     int stage = -1;
     parseStrictInt(arg, stage);
 
-    if (stage < 0 || stage >= motor.getRelayTestStageCount()) {
+    if (stage < 0 || stage >= stageCount) {
         Serial.print("Usage: relay test <0-");
-        Serial.print(motor.getRelayTestStageCount() - 1);
+        Serial.print(stageCount - 1);
         Serial.println("|off>");
         return;
     }

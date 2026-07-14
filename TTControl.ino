@@ -25,6 +25,7 @@
 #include "network_manager.h"
 #include "web_interface.h"
 #include "system_monitor.h"
+#include "power_stage.h"
 
 /*
  * --- Global Objects ---
@@ -83,6 +84,8 @@ static void checkWaveformHealth(uint32_t now) {
 void setup() {
     // Initialize Hardware Abstraction Layer
     hal.begin();
+    // Assert the bridge interlock before filesystem, display, UI, or motor initialization can delay hardware-safe GPIO levels.
+    powerStage.begin();
     ResetCause resetCause = hal.getResetCause();
 
     /*
@@ -147,6 +150,7 @@ void loop() {
 
     // Keep each subsystem non-blocking. This loop owns all user-facing work and must leave regular time for motor state transitions and network polling.
     ui.update();
+    powerStage.update();
     motor.update();
     ampMonitor.update();
     

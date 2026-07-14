@@ -231,16 +231,19 @@ void UserInterface::handleInput() {
     InputEvent evt = _input.getEvent();
     int delta = _input.getEncoderDelta();
 
-    // Resonance sweep has a dedicated modal behavior: any exit-style press locks the current swept phase offsets, saves them, and leaves the menu.
+    // A short/double press locks the current value; Back cancels and restores the complete pre-sweep tune.
     if (motor.isSweepingMode()) {
-        if (evt == EVT_SELECT || evt == EVT_DOUBLE_CLICK || evt == EVT_BACK || evt == EVT_EXIT) {
-            motor.stopSymmetricSweep(true);
+        if (evt == EVT_SELECT || evt == EVT_DOUBLE_CLICK) {
+            motor.stopOutputSweep(true);
             if (settings.save(false, true)) {
                 showMessage("Locked & Saved!", 2000);
                 exitMenu();
             } else {
                 showError(safeModeActive ? "Safe Mode Read Only" : "Save Failed", 2000);
             }
+        } else if (evt == EVT_BACK || evt == EVT_EXIT) {
+            motor.stopOutputSweep(false);
+            showMessage("Sweep Cancelled", 1500);
         }
         // Encoder rotation is intentionally ignored during the sweep so the diagnostic value is controlled only by the configured sweep range.
         return;
@@ -1045,19 +1048,16 @@ void UserInterface::drawSweepScreen() {
     display.print("SWEEPING RESONANCE");
     display.setTextColor(SSD1306_WHITE);
 
-    float ph2 = settings.getCurrentSpeedSettings().phaseOffset[1];
-    float ph3 = settings.getCurrentSpeedSettings().phaseOffset[2];
-
     display.setCursor(0, 25);
-    display.print("Phase 2: "); display.print(ph2, 1); display.print((char)247);
+    display.print(motor.getOutputSweepParameterName());
+    display.print(": "); display.print(motor.getOutputSweepValue(), 1);
+    if (motor.getOutputSweepParameter() <= MotorController::SWEEP_PHASE_D) display.print((char)247);
 
-    if (settings.get().phaseMode == 3) {
-        display.setCursor(0, 40);
-        display.print("Phase 3: "); display.print(ph3, 1); display.print((char)247);
-    }
+    display.setCursor(0, 40);
+    display.print("Listen / measure");
 
     display.setCursor(0, 56);
-    display.print("PRESS TO LOCK & SAVE");
+    display.print("PRESS=LOCK HOLD=BACK");
 }
 
 void UserInterface::drawMessage() {

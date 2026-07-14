@@ -92,6 +92,17 @@ struct ClosedLoopTuningStatus {
  */
 class MotorController {
 public:
+    enum OutputSweepParameter : uint8_t {
+        SWEEP_SYMMETRIC_PHASE = 0,
+        SWEEP_PHASE_A,
+        SWEEP_PHASE_B,
+        SWEEP_PHASE_C,
+        SWEEP_PHASE_D,
+        SWEEP_GAIN_A,
+        SWEEP_GAIN_B,
+        SWEEP_GAIN_C,
+        SWEEP_GAIN_D
+    };
     MotorController();
     
     // Initialize hardware pins and load settings
@@ -164,8 +175,11 @@ public:
     void applySettings();
 
     // --- Diagnostic Modes ---
-    void startSymmetricSweep(float minSep, float maxSep, float speed);
-    void stopSymmetricSweep(bool keepCurrentPhase = false);
+    bool startOutputSweep(OutputSweepParameter parameter, float minimum, float maximum, float speed);
+    void stopOutputSweep(bool keepCurrentValue = false);
+    OutputSweepParameter getOutputSweepParameter() const { return _sweepParameter; }
+    float getOutputSweepValue() const { return _sweepCurrentValue; }
+    const char* getOutputSweepParameterName() const;
 
 private:
     MotorState _state;
@@ -175,6 +189,7 @@ private:
     float _targetFreq;
     float _currentAmp;
     float _targetAmp;
+    float _appliedAmp;
     
     int _pitchRange; // Range in percent (e.g., 10%)
     
@@ -187,6 +202,7 @@ private:
     // Startup Kick
     bool _isKicking;
     uint32_t _kickEndTime;
+    bool _waitingForPowerStage;
     
     // Amplitude Reduction
     uint32_t _ampReductionStartTime;
@@ -260,6 +276,9 @@ private:
     uint8_t _closedLoopTrendCount;
     
     float calculateSoftStartAmp(float elapsed, float duration);
+    float calculateVfScale(float frequency) const;
+    void applyDriveAmplitude();
+    void setOutputAmplitude(float amplitude);
     void handleBraking(uint32_t now);
     float calculatePitchAdjustedFrequencyForSpeed(SpeedMode speed) const;
     float calculateClosedLoopTargetRpm() const;
@@ -290,12 +309,16 @@ private:
     // Diagnostic Sweep State
     bool _isSweepingMode;
     bool _wasRunningBeforeSweep;
-    float _sweepMinSeparation;
-    float _sweepMaxSeparation;
+    OutputSweepParameter _sweepParameter;
+    float _sweepMinimum;
+    float _sweepMaximum;
     float _sweepSpeed;
+    float _sweepCurrentValue;
+    uint32_t _sweepStartMs;
     float _sweepOriginalPhaseOffset[4];
+    uint8_t _sweepOriginalChannelAmplitude[4];
     SpeedMode _sweepOriginalSpeedMode;
-    bool _sweepHasOriginalPhase;
+    bool _sweepHasOriginalTuning;
     
     /*
      * Deferred Settings Save
@@ -305,7 +328,7 @@ private:
     bool _settingsDirty;
     uint32_t _lastSettingsChange;
 
-    void restoreSweepPhaseOffsets();
+    void restoreSweepTuning();
     void setCommandedFrequency(float frequency);
 };
 

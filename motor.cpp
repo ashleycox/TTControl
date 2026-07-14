@@ -12,6 +12,7 @@
 #include "hal.h"
 #include "speed_feedback.h"
 #include "error_handler.h"
+#include "power_stage.h"
 #include <math.h>
 
 // The waveform generator accepts signed frequencies for braking, but all public settings still need to remain inside the hardware-safe output limit.
@@ -35,6 +36,13 @@ static bool deadlinePending(uint32_t now, uint32_t deadline) {
     return deadline != 0 && (int32_t)(now - deadline) < 0;
 }
 
+static BrakeMode effectiveBrakeMode() {
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    if (!settings.get().activeBrakingAllowed) return BRAKE_OFF;
+#endif
+    return (BrakeMode)settings.get().brakeMode;
+}
+
 MotorController::MotorController() {
     _state = ENABLE_STANDBY ? STATE_STANDBY : STATE_STOPPED;
     _currentSpeedMode = SPEED_33;
@@ -42,12 +50,14 @@ MotorController::MotorController() {
     _targetFreq = 50.0;
     _currentAmp = 0.0;
     _targetAmp = 0.0;
+    _appliedAmp = 0.0;
     _pitchRange = 10;
     _stateStartTime = 0;
     _lastUpdate = 0;
     _startDuration = 0.0;
     _isKicking = false;
     _kickEndTime = 0;
+    _waitingForPowerStage = false;
     _ampReductionStartTime = 0;
     _isReducedAmp = false;
     _brakePulseLastToggle = 0;
@@ -106,19 +116,27 @@ MotorController::MotorController() {
     _powerOnTime = 0;
     _isSweepingMode = false;
     _wasRunningBeforeSweep = false;
-    _sweepMinSeparation = 0.0;
-    _sweepMaxSeparation = 0.0;
+    _sweepParameter = SWEEP_SYMMETRIC_PHASE;
+    _sweepMinimum = 0.0;
+    _sweepMaximum = 0.0;
     _sweepSpeed = 0.0;
-    for (int i = 0; i < 4; i++) _sweepOriginalPhaseOffset[i] = 0.0f;
+    _sweepCurrentValue = 0.0;
+    _sweepStartMs = 0;
+    for (int i = 0; i < 4; i++) {
+        _sweepOriginalPhaseOffset[i] = 0.0f;
+        _sweepOriginalChannelAmplitude[i] = 100;
+    }
     _sweepOriginalSpeedMode = SPEED_33;
-    _sweepHasOriginalPhase = false;
+    _sweepHasOriginalTuning = false;
     _settingsDirty = false;
     _lastSettingsChange = 0;
 }
 
 void MotorController::begin() {
     // Configure relay pins before any state transition can energize outputs.
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM
     hal.setPinMode(PIN_RELAY_STANDBY, OUTPUT);
+#endif
 
     if (ENABLE_MUTE_RELAYS) {
         if (ENABLE_DPDT_RELAYS) {
@@ -163,35 +181,47 @@ void MotorController::begin() {
     }
 }
 
-void MotorController::startSymmetricSweep(float minSep, float maxSep, float speed) {
-    if (_relayTestMode) return;
-    if (errorHandler.hasCriticalError()) return;
-    if (settings.get().phaseMode == PHASE_4) return; // Invalid for 4-phase twin motors
+bool MotorController::startOutputSweep(OutputSweepParameter parameter, float minimum, float maximum, float speed) {
+    if (_relayTestMode || errorHandler.hasCriticalError()) return false;
+    if (minimum >= maximum || speed <= 0.0f) return false;
+    if (parameter > SWEEP_GAIN_D) return false;
+    if (parameter >= SWEEP_GAIN_A && (minimum < 50.0f || maximum > 150.0f)) return false;
+    uint8_t channel = parameter >= SWEEP_GAIN_A ? parameter - SWEEP_GAIN_A : parameter - SWEEP_PHASE_A;
+    if (parameter != SWEEP_SYMMETRIC_PHASE && channel >= settings.get().phaseMode) return false;
+    if (parameter == SWEEP_SYMMETRIC_PHASE && settings.get().phaseMode == PHASE_4) return false;
 
     SpeedSettings& activeSpeed = settings.getCurrentSpeedSettings();
     for (int i = 0; i < 4; i++) {
         _sweepOriginalPhaseOffset[i] = activeSpeed.phaseOffset[i];
+        _sweepOriginalChannelAmplitude[i] = activeSpeed.channelAmplitude[i];
     }
     _sweepOriginalSpeedMode = _currentSpeedMode;
-    _sweepHasOriginalPhase = true;
+    _sweepHasOriginalTuning = true;
 
     _wasRunningBeforeSweep = isRunning();
     if (!isRunning()) {
         start();
+        if (!isRunning()) {
+            _sweepHasOriginalTuning = false;
+            return false;
+        }
     }
 
     _isSweepingMode = true;
-    _sweepMinSeparation = minSep;
-    _sweepMaxSeparation = maxSep;
+    _sweepParameter = parameter;
+    _sweepMinimum = minimum;
+    _sweepMaximum = maximum;
     _sweepSpeed = speed;
+    _sweepCurrentValue = minimum;
+    _sweepStartMs = hal.getMillis();
+    return true;
 }
 
-void MotorController::stopSymmetricSweep(bool keepCurrentPhase) {
-    if (keepCurrentPhase) {
-        // A UI "lock" intentionally keeps the swept offsets in RAM so the caller can save them. Other exits restore the pre-sweep values.
-        _sweepHasOriginalPhase = false;
+void MotorController::stopOutputSweep(bool keepCurrentValue) {
+    if (keepCurrentValue) {
+        _sweepHasOriginalTuning = false;
     } else {
-        restoreSweepPhaseOffsets();
+        restoreSweepTuning();
     }
     _isSweepingMode = false;
 
@@ -215,6 +245,14 @@ void MotorController::update() {
 
         case STATE_STARTING:
             // Motor is accelerating. Startup kick can briefly overdrive frequency for torque, then soft-start controls amplitude.
+
+            // Bridge enable is non-blocking: hold a neutral waveform until complete DMA buffers and the driver wake delay have elapsed.
+            if (_waitingForPowerStage) {
+                setOutputAmplitude(0.0f);
+                if (!powerStage.isEnabled()) break;
+                _waitingForPowerStage = false;
+                _stateStartTime = now;
+            }
 
             // 1. Startup Kick Logic (High torque start)
             if (_isKicking) {
@@ -260,6 +298,7 @@ void MotorController::update() {
                 if (elapsed >= duration) {
                     // Soft start complete, transition to RUNNING
                     _state = STATE_RUNNING;
+                    powerStage.notifyRunning();
                     _currentAmp = _targetAmp;
                     _ampReductionStartTime = now; // Start timer for amplitude reduction
                     speedFeedback.reset();
@@ -268,52 +307,7 @@ void MotorController::update() {
                     _currentAmp = calculateSoftStartAmp(elapsed, duration);
                 }
 
-                /*
-                 * Apply frequency-dependent amplitude scaling during startup.
-                 * This approximates a V/f curve so low-frequency starts can get
-                 * extra torque without overdriving the running amplitude.
-                 */
-                if (settings.get().freqDependentAmplitude > 0) {
-                    float fdaRatio = (float)settings.get().freqDependentAmplitude / 100.0;
-                    // 3-Point V/f Curve Interpolation
-                    float currentF = waveform.getFrequency();
-
-                    // User coordinates
-                    float fLow = settings.get().vfLowFreq;
-                    float vLow = (float)settings.get().vfLowBoost / 100.0;
-                    float fMid = settings.get().vfMidFreq;
-                    float vMid = (float)settings.get().vfMidBoost / 100.0;
-                    float fHigh = _targetFreq;
-                    float vHigh = 1.0; // Target freq implies 100% of calculated soft-start target
-
-                    float scaleFactor = 1.0;
-
-                    // Prevent divide-by-zero or malformed curves.
-                    if (fLow >= fMid) fMid = fLow + 0.1;
-                    if (fMid >= fHigh) fHigh = fMid + 0.1;
-
-                    if (currentF <= fLow) {
-                        // Point 1 - Flat line up to fLow (or linear ramp from 0 to vLow) Most motors need instant boost at 0Hz to break friction
-                        scaleFactor = vLow;
-                    } else if (currentF > fLow && currentF <= fMid) {
-                        // Segment 1: Low to Mid
-                        float segmentProgress = (currentF - fLow) / (fMid - fLow);
-                        scaleFactor = vLow + ((vMid - vLow) * segmentProgress);
-                    } else {
-                        // Segment 2: Mid to High
-                        float segmentProgress = (currentF - fMid) / (fHigh - fMid);
-                        if (segmentProgress > 1.0) segmentProgress = 1.0;
-                        scaleFactor = vMid + ((vHigh - vMid) * segmentProgress);
-                    }
-
-                    // The FDA master percentage can act as an overall multiplier/mix for the curve If FDA = 100%, we use the full calculated curve. If FDA = 50%, we blend it halfway towards 1.0.
-                    float blendFDA = fdaRatio * scaleFactor + (1.0 - fdaRatio);
-
-                    // Apply this factor to the current amplitude state
-                    _currentAmp = _currentAmp * blendFDA;
-                }
-
-                waveform.setAmplitude(_currentAmp);
+                applyDriveAmplitude();
             }
             break;
 
@@ -388,7 +382,6 @@ void MotorController::update() {
                         _isReducedAmp = true;
                         float reducePercent = (float)settings.getCurrentSpeedSettings().reducedAmplitude / 100.0;
                         _currentAmp = _targetAmp * reducePercent;
-                        waveform.setAmplitude(_currentAmp);
                     }
                 }
 
@@ -403,10 +396,10 @@ void MotorController::update() {
                 // Runtime is counted only while the motor is running.
                 settings.updateRuntime();
 
-                // Diagnostic resonance sweep temporarily changes phase offsets in RAM, then restoreSweepPhaseOffsets() puts them back.
+                // Diagnostic sweep temporarily changes tuning in RAM; normal exits restore it.
                 if (_isSweepingMode) {
-                    float timeSec = now / 1000.0;
-                    float range = _sweepMaxSeparation - _sweepMinSeparation;
+                    float timeSec = (now - _sweepStartMs) / 1000.0f;
+                    float range = _sweepMaximum - _sweepMinimum;
                     if (range > 0 && _sweepSpeed > 0) {
                         float period = (range * 2.0) / _sweepSpeed;
                         float modTime = fmod(timeSec, period);
@@ -414,18 +407,26 @@ void MotorController::update() {
 
                         if (modTime < period / 2.0) {
                             // Rising
-                            currentSep = _sweepMinSeparation + (modTime * _sweepSpeed);
+                            currentSep = _sweepMinimum + (modTime * _sweepSpeed);
                         } else {
                             // Falling
-                            currentSep = _sweepMaxSeparation - ((modTime - period / 2.0) * _sweepSpeed);
+                            currentSep = _sweepMaximum - ((modTime - period / 2.0) * _sweepSpeed);
                         }
 
                         SpeedSettings& s = settings.getCurrentSpeedSettings();
-                        if (settings.get().phaseMode == 2) {
-                            s.phaseOffset[1] = currentSep;
-                        } else if (settings.get().phaseMode == 3) {
-                            s.phaseOffset[1] = currentSep;
-                            s.phaseOffset[2] = currentSep * 2.0;
+                        _sweepCurrentValue = currentSep;
+                        if (_sweepParameter == SWEEP_SYMMETRIC_PHASE) {
+                            if (settings.get().motorTopology == MOTOR_TOPOLOGY_TWIN_PHASE_SYNCHRONOUS && settings.get().phaseMode >= PHASE_3) {
+                                s.phaseOffset[0] = 0.0f;
+                                s.phaseOffset[1] = currentSep * 2.0f;
+                                s.phaseOffset[2] = currentSep + 180.0f;
+                            } else {
+                                for (uint8_t i = 1; i < settings.get().phaseMode; i++) s.phaseOffset[i] = currentSep * i;
+                            }
+                        } else if (_sweepParameter >= SWEEP_PHASE_A && _sweepParameter <= SWEEP_PHASE_D) {
+                            s.phaseOffset[_sweepParameter - SWEEP_PHASE_A] = currentSep;
+                        } else {
+                            s.channelAmplitude[_sweepParameter - SWEEP_GAIN_A] = (uint8_t)constrain(lroundf(currentSep), 50L, 150L);
                         }
 
                         waveform.updateSettings(_targetFreq, s, settings.get().phaseMode);
@@ -433,6 +434,9 @@ void MotorController::update() {
                         currentFrequency = _currentFreq;
                     }
                 }
+
+                // Re-evaluate the curve even when frequency is steady so live settings changes take effect without restarting the motor.
+                applyDriveAmplitude();
             }
             break;
 
@@ -527,6 +531,7 @@ void MotorController::update() {
 void MotorController::start() {
     if (_relayTestMode) return;
     if (errorHandler.hasCriticalError()) return;
+    if (powerStage.hasFault()) return;
     if (_state == STATE_RUNNING || _state == STATE_STARTING) return;
 
     if (_state == STATE_STANDBY) {
@@ -561,13 +566,19 @@ void MotorController::start() {
         setCommandedFrequency(_targetFreq);
     }
 
-    // Unmute relays if linked to start/stop. The actual relay writes may be delayed/staggered by setRelays().
+    setOutputAmplitude(0.0f);
+    waveform.setEnabled(true);
+    if (!powerStage.requestEnable()) {
+        waveform.setEnabled(false);
+        _state = STATE_STOPPED;
+        return;
+    }
+    _waitingForPowerStage = !powerStage.isEnabled();
+
+    // Linear builds can now unmute their downstream amplifier. Bridge builds keep this relay feature compiled out.
     if (settings.get().muteRelayLinkStartStop) {
         setRelays(true);
     }
-
-    waveform.setAmplitude(0.0);
-    waveform.setEnabled(true);
 }
 
 void MotorController::stop() {
@@ -575,17 +586,20 @@ void MotorController::stop() {
     if (_state == STATE_STOPPED || _state == STATE_STANDBY) return;
 
     _state = STATE_STOPPING;
+    powerStage.notifyStopping();
     _stateStartTime = hal.getMillis();
     resetClosedLoopControl(false);
 
     // Configure braking before entering the periodic braking handler.
-    if (settings.get().brakeMode == BRAKE_PULSE) {
+    BrakeMode brakeMode = effectiveBrakeMode();
+    if (brakeMode == BRAKE_PULSE) {
         _brakePulseState = true;
         _brakePulseLastToggle = hal.getMillis();
         // Reverse frequency for braking torque
         setCommandedFrequency(-_targetFreq);
-        waveform.setAmplitude(_targetAmp);
-    } else if (settings.get().brakeMode == BRAKE_RAMP) {
+        _currentAmp = _targetAmp;
+        applyDriveAmplitude();
+    } else if (brakeMode == BRAKE_RAMP) {
         setCommandedFrequency(settings.get().brakeStartFreq);
     }
 
@@ -597,12 +611,14 @@ void MotorController::stop() {
 void MotorController::handleBraking(uint32_t now) {
     float duration = settings.get().brakeDuration * 1000.0;
     float elapsed = now - _stateStartTime;
+    BrakeMode brakeMode = effectiveBrakeMode();
 
     // Check if braking is complete
     if (elapsed >= duration) {
         _state = STATE_STOPPED;
         _currentAmp = 0.0;
-        waveform.setAmplitude(0.0);
+        setOutputAmplitude(0.0f);
+        powerStage.disable();
         waveform.setEnabled(false);
 
         if (settings.get().muteRelayLinkStartStop) {
@@ -615,7 +631,7 @@ void MotorController::handleBraking(uint32_t now) {
     }
 
     // Handle specific braking modes
-    if (settings.get().brakeMode == BRAKE_RAMP) {
+    if (brakeMode == BRAKE_RAMP) {
         // Linearly ramp frequency down
         float startF = settings.get().brakeStartFreq;
         float stopF = settings.get().brakeStopFreq;
@@ -624,22 +640,24 @@ void MotorController::handleBraking(uint32_t now) {
 
         // Ramp amplitude down
         _currentAmp = _targetAmp * (1.0 - (elapsed / duration));
-        waveform.setAmplitude(_currentAmp);
+        applyDriveAmplitude();
     }
-    else if (settings.get().brakeMode == BRAKE_PULSE) {
+    else if (brakeMode == BRAKE_PULSE) {
         // Pulse the reverse torque on/off
         float gap = settings.get().brakePulseGap * 1000.0;
         if (now - _brakePulseLastToggle >= gap) {
             _brakePulseLastToggle = now;
             _brakePulseState = !_brakePulseState;
             if (_brakePulseState) {
-                waveform.setAmplitude(_targetAmp);
+                _currentAmp = _targetAmp;
+                applyDriveAmplitude();
             } else {
-                waveform.setAmplitude(0.0);
+                _currentAmp = 0.0f;
+                setOutputAmplitude(0.0f);
             }
         }
     }
-    else if (settings.get().brakeMode == BRAKE_SOFT_STOP) {
+    else if (brakeMode == BRAKE_SOFT_STOP) {
         // Active Coasting: Gently bring frequency down to the configured cutoff point while maintaining driving torque
         float startF = fabsf(_targetFreq);
         float stopF = settings.get().softStopCutoff;
@@ -647,13 +665,14 @@ void MotorController::handleBraking(uint32_t now) {
         // If we're already below the cutoff, or duration is 0, just stop instantly like BRAKE_OFF
         if (startF <= stopF || duration <= 0) {
             _currentAmp = 0.0;
-            waveform.setAmplitude(0.0);
+            setOutputAmplitude(0.0f);
         } else {
             // Ramp frequency down
             float currentF = startF - ((startF - stopF) * (elapsed / duration));
             setCommandedFrequency(currentF);
-            // Maintain full intended amplitude throughout the coast to ensure load tracks frequency
-            waveform.setAmplitude(_targetAmp);
+            // Keep the configured drive envelope while V/f scaling follows the falling frequency.
+            _currentAmp = _targetAmp;
+            applyDriveAmplitude();
         }
     }
     else {
@@ -663,7 +682,7 @@ void MotorController::handleBraking(uint32_t now) {
         } else {
             _currentAmp = _targetAmp * (1.0 - (elapsed / duration));
         }
-        waveform.setAmplitude(_currentAmp);
+        applyDriveAmplitude();
     }
 }
 
@@ -688,6 +707,53 @@ float MotorController::calculateSoftStartAmp(float elapsed, float duration) {
             return _targetAmp * t;
         }
     }
+}
+
+float MotorController::calculateVfScale(float frequency) const {
+    const GlobalSettings& g = settings.get();
+    if (g.vfBlend == 0) return 1.0f;
+
+    float f = fabsf(frequency);
+    float fLow = isfinite(g.vfLowFreq) ? g.vfLowFreq : 0.0f;
+    float fMid = isfinite(g.vfMidFreq) ? g.vfMidFreq : fLow;
+    if (fLow < 0.0f) fLow = 0.0f;
+
+    float fHigh = isfinite(g.vfBaseFreq) ? g.vfBaseFreq : 0.0f;
+    if (fHigh <= fLow || fHigh <= 0.0f) return 1.0f;
+
+    float vLow = (float)g.vfLowLevel / 100.0f;
+    float vMid = (float)g.vfMidLevel / 100.0f;
+    if (vMid < vLow) vMid = vLow;
+    float curveScale;
+    if (f >= fHigh) {
+        curveScale = 1.0f;
+    } else if (f <= fLow) {
+        curveScale = vLow;
+    } else if (fMid <= fLow || fMid >= fHigh) {
+        float progress = (f - fLow) / (fHigh - fLow);
+        curveScale = vLow + ((1.0f - vLow) * progress);
+    } else if (f <= fMid) {
+        float progress = (f - fLow) / (fMid - fLow);
+        curveScale = vLow + ((vMid - vLow) * progress);
+    } else {
+        float progress = (f - fMid) / (fHigh - fMid);
+        curveScale = vMid + ((1.0f - vMid) * progress);
+    }
+
+    float blend = (float)g.vfBlend / 100.0f;
+    return 1.0f + ((curveScale - 1.0f) * blend);
+}
+
+void MotorController::applyDriveAmplitude() {
+    setOutputAmplitude(_currentAmp * calculateVfScale(_currentFreq));
+}
+
+void MotorController::setOutputAmplitude(float amplitude) {
+    if (!isfinite(amplitude) || amplitude < 0.0f) amplitude = 0.0f;
+    if (amplitude > 1.0f) amplitude = 1.0f;
+    if (amplitude == _appliedAmp) return;
+    _appliedAmp = amplitude;
+    waveform.setAmplitude(amplitude);
 }
 
 void MotorController::toggleStartStop() {
@@ -717,7 +783,7 @@ void MotorController::toggleStandby() {
         }
     } else {
         // Going to sleep
-        restoreSweepPhaseOffsets();
+        restoreSweepTuning();
         clearMotionState();
         resetPitch();
         resetClosedLoopControl(true);
@@ -746,7 +812,7 @@ void MotorController::emergencyStop() {
     _state = ENABLE_STANDBY ? STATE_STANDBY : STATE_STOPPED;
     currentMotorState = _state;
 
-    restoreSweepPhaseOffsets();
+    restoreSweepTuning();
     clearMotionState();
     resetClosedLoopControl(true);
     forceDriveOutputsOff();
@@ -880,6 +946,7 @@ void MotorController::applySettings() {
         resetClosedLoopControl(false);
     }
     waveform.updateSettings(_currentFreq, s, settings.get().phaseMode);
+    powerStage.refreshPhaseEnables();
 }
 
 void MotorController::resetClosedLoop() {
@@ -1807,7 +1874,7 @@ void MotorController::updateClosedLoopAmpRecovery(uint32_t now, const SpeedFeedb
             _closedLoopAmpRecoveryActive = true;
             _isReducedAmp = false;
             _currentAmp = _targetAmp;
-            waveform.setAmplitude(_currentAmp);
+            applyDriveAmplitude();
             _ampReductionStartTime = now;
             _closedLoopMetrics.ampRecoveryEvents++;
         }
@@ -1836,11 +1903,13 @@ void MotorController::clearMotionState() {
 
 void MotorController::forceDriveOutputsOff() {
     // Common shutdown path for standby, emergency stop, and relay test entry.
+    powerStage.disable();
+    _waitingForPowerStage = false;
     _relayActivationPending = false;
     _relaysActive = false;
     _relayStage = 0;
     setRelays(false);
-    waveform.setAmplitude(0.0);
+    setOutputAmplitude(0.0f);
     waveform.setEnabled(false);
 }
 
@@ -1892,12 +1961,18 @@ void MotorController::setRelays(bool active) {
 }
 
 void MotorController::setStandbyRelay(bool active) {
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    // Standby is a logical state in bridge builds; PowerStage owns GP16 and is disabled by forceDriveOutputsOff().
+    (void)active;
+    return;
+#else
     if (!ENABLE_STANDBY) {
         active = true;
     }
 
     bool activeHigh = settings.get().relayActiveHigh;
     hal.digitalWrite(PIN_RELAY_STANDBY, active ? (activeHigh ? HIGH : LOW) : (activeHigh ? LOW : HIGH));
+#endif
 }
 
 void MotorController::writeRelayOutput(int pin, bool active) {
@@ -1906,21 +1981,29 @@ void MotorController::writeRelayOutput(int pin, bool active) {
 }
 
 uint8_t MotorController::getRelayTestStageCount() {
-    uint8_t count = 1; // All off
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    return 0;
+#else
+    uint8_t count = 0;
+    if (ENABLE_STANDBY || ENABLE_MUTE_RELAYS) count++; // All off
     if (ENABLE_STANDBY) count++;
     if (ENABLE_MUTE_RELAYS) {
         count += ENABLE_DPDT_RELAYS ? 2 : MAX_ACTIVE_PHASE_OUTPUTS;
     }
     return count;
+#endif
 }
 
 bool MotorController::beginRelayTest() {
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    return false;
+#else
     if (errorHandler.hasCriticalError()) return false;
     if (_state == STATE_STARTING || _state == STATE_RUNNING || _state == STATE_STOPPING) {
         return false;
     }
 
-    restoreSweepPhaseOffsets();
+    restoreSweepTuning();
     clearMotionState();
     forceDriveOutputsOff();
     _relayTestMode = true;
@@ -1929,9 +2012,14 @@ bool MotorController::beginRelayTest() {
 
     setRelayTestStage(0);
     return true;
+#endif
 }
 
 void MotorController::setRelayTestStage(uint8_t stage) {
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    (void)stage;
+    return;
+#endif
     uint8_t count = getRelayTestStageCount();
     if (count == 0) return;
     if (stage >= count) stage = count - 1;
@@ -2027,19 +2115,25 @@ float MotorController::getMotionProgress() {
     return 0.0;
 }
 
-void MotorController::restoreSweepPhaseOffsets() {
-    if (!_sweepHasOriginalPhase) return;
+void MotorController::restoreSweepTuning() {
+    if (!_sweepHasOriginalTuning) return;
 
     SpeedSettings& originalSpeed = settings.get().speeds[(uint8_t)_sweepOriginalSpeedMode];
     for (int i = 0; i < 4; i++) {
         originalSpeed.phaseOffset[i] = _sweepOriginalPhaseOffset[i];
+        originalSpeed.channelAmplitude[i] = _sweepOriginalChannelAmplitude[i];
     }
 
     if (_currentSpeedMode == _sweepOriginalSpeedMode) {
         waveform.updateSettings(_targetFreq, originalSpeed, settings.get().phaseMode);
     }
 
-    _sweepHasOriginalPhase = false;
+    _sweepHasOriginalTuning = false;
+}
+
+const char* MotorController::getOutputSweepParameterName() const {
+    static const char* const names[] = {"Sym Phase", "Phase A", "Phase B", "Phase C", "Phase D", "Gain A", "Gain B", "Gain C", "Gain D"};
+    return names[(uint8_t)_sweepParameter <= SWEEP_GAIN_D ? (uint8_t)_sweepParameter : 0];
 }
 
 void MotorController::setCommandedFrequency(float frequency) {

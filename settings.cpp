@@ -53,6 +53,24 @@ struct SettingsBootMarker {
 };
 
 // Legacy layouts preserve exact field order and padding for schema migration. Do not edit these structs unless you are correcting an older schema definition.
+struct SpeedSettingsV9 {
+    float frequency;
+    float minFrequency;
+    float maxFrequency;
+    float phaseOffset[4];
+    float softStartDuration;
+    uint8_t reducedAmplitude;
+    uint8_t amplitudeDelay;
+    uint8_t startupKick;
+    uint8_t startupKickDuration;
+    float startupKickRampDuration;
+    uint8_t filterType;
+    float iirAlpha;
+    uint8_t firProfile;
+};
+
+static_assert(sizeof(SpeedSettingsV9) == 52, "SpeedSettingsV9 must match schema 9 storage size.");
+
 struct GlobalSettingsV5 {
     uint32_t schemaVersion;
     uint8_t phaseMode;
@@ -81,7 +99,7 @@ struct GlobalSettingsV5 {
     bool autoStart;
     bool autoBoot;
     bool pitchResetOnStop;
-    SpeedSettings speeds[3];
+    SpeedSettingsV9 speeds[3];
     char presetNames[5][17];
     uint32_t totalRuntime;
     bool reverseEncoder;
@@ -133,7 +151,7 @@ struct GlobalSettingsV6 {
     bool autoStart;
     bool autoBoot;
     bool pitchResetOnStop;
-    SpeedSettings speeds[3];
+    SpeedSettingsV9 speeds[3];
     char presetNames[5][17];
     uint32_t totalRuntime;
     bool reverseEncoder;
@@ -208,7 +226,7 @@ struct GlobalSettingsV7 {
     bool autoStart;
     bool autoBoot;
     bool pitchResetOnStop;
-    SpeedSettings speeds[3];
+    SpeedSettingsV9 speeds[3];
     char presetNames[5][17];
     uint32_t totalRuntime;
     bool reverseEncoder;
@@ -279,6 +297,61 @@ struct GlobalSettingsV8 {
 };
 
 static_assert(sizeof(GlobalSettingsV8) == 588, "GlobalSettingsV8 must match schema 8 storage size.");
+
+struct GlobalSettingsV9 {
+    GlobalSettingsV8 base;
+    uint8_t closedLoopPitchTargetMode;
+};
+
+static_assert(sizeof(GlobalSettingsV9) == 592, "GlobalSettingsV9 must match schema 9 storage size.");
+
+// Schema 10 is byte-for-byte the prefix of schema 11. Its former direction byte is retained as a reserved byte in the new layout.
+struct GlobalSettingsV10 {
+    uint8_t bytes[608];
+};
+
+static_assert(sizeof(GlobalSettingsV10) == 608, "GlobalSettingsV10 must match schema 10 storage size.");
+
+struct GlobalSettingsV11 {
+    uint8_t bytes[616];
+};
+
+static_assert(sizeof(GlobalSettingsV11) == 616, "GlobalSettingsV11 must match schema 11 storage size.");
+
+void copySpeedFromV9(const SpeedSettingsV9& source, SpeedSettings& target) {
+    target.frequency = source.frequency;
+    target.minFrequency = source.minFrequency;
+    target.maxFrequency = source.maxFrequency;
+    for (int i = 0; i < 4; i++) {
+        target.phaseOffset[i] = source.phaseOffset[i];
+        target.channelAmplitude[i] = 100;
+    }
+    target.softStartDuration = source.softStartDuration;
+    target.reducedAmplitude = source.reducedAmplitude;
+    target.amplitudeDelay = source.amplitudeDelay;
+    target.startupKick = source.startupKick;
+    target.startupKickDuration = source.startupKickDuration;
+    target.startupKickRampDuration = source.startupKickRampDuration;
+    target.filterType = source.filterType;
+    target.iirAlpha = source.iirAlpha;
+    target.firProfile = source.firProfile;
+}
+
+void setOutputArchitectureMigrationDefaults(GlobalSettings& target) {
+    // Older schemas stored raw phase tunes only. Custom topology preserves those tunes exactly instead of imposing a new nominal map.
+    target.motorTopology = MOTOR_TOPOLOGY_CUSTOM;
+    target.outputConfigReserved = 0;
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    target.activeBrakingAllowed = false;
+#else
+    target.activeBrakingAllowed = true;
+#endif
+}
+
+void setOutputTuningDefaults(GlobalSettings& target) {
+    target.phaseSlewDegreesPerSecond = 180.0f;
+    target.gainSlewPercentPerSecond = 50.0f;
+}
 
 void copyGlobalClosedLoopTuningToSpeed(const GlobalSettings& source, ClosedLoopSpeedTuning& target) {
     // Schema 6/7 stored a single global tuning block. Newer schemas keep one tuning block per speed, so migration copies the global values to all three.
@@ -359,6 +432,9 @@ void setClosedLoopDefaults(GlobalSettings& data) {
 void applyMotorPreset(const GlobalSettings& source, GlobalSettings& target) {
     // Presets are motor tunes, not whole-device snapshots. Preserve runtime, names, display/UI choices, relay wiring, boot policy, and the live speed selection.
     target.phaseMode = source.phaseMode;
+    target.motorTopology = source.motorTopology;
+    target.phaseSlewDegreesPerSecond = source.phaseSlewDegreesPerSecond;
+    target.gainSlewPercentPerSecond = source.gainSlewPercentPerSecond;
     target.maxAmplitude = source.maxAmplitude;
     target.softStartCurve = source.softStartCurve;
     target.smoothSwitching = source.smoothSwitching;
@@ -370,11 +446,12 @@ void applyMotorPreset(const GlobalSettings& source, GlobalSettings& target) {
     target.brakeStopFreq = source.brakeStopFreq;
     target.softStopCutoff = source.softStopCutoff;
     target.rampType = source.rampType;
-    target.freqDependentAmplitude = source.freqDependentAmplitude;
+    target.vfBlend = source.vfBlend;
     target.vfLowFreq = source.vfLowFreq;
-    target.vfLowBoost = source.vfLowBoost;
+    target.vfLowLevel = source.vfLowLevel;
     target.vfMidFreq = source.vfMidFreq;
-    target.vfMidBoost = source.vfMidBoost;
+    target.vfMidLevel = source.vfMidLevel;
+    target.vfBaseFreq = source.vfBaseFreq;
 
     for (int i = 0; i < 3; i++) {
         target.speeds[i] = source.speeds[i];
@@ -454,7 +531,7 @@ void copyFromV5(const GlobalSettingsV5& source, GlobalSettings& target) {
     target.autoBoot = source.autoBoot;
     target.pitchResetOnStop = source.pitchResetOnStop;
     for (int i = 0; i < 3; i++) {
-        target.speeds[i] = source.speeds[i];
+        copySpeedFromV9(source.speeds[i], target.speeds[i]);
     }
     for (int i = 0; i < MAX_PRESET_SLOTS; i++) {
         strncpy(target.presetNames[i], source.presetNames[i], 16);
@@ -466,11 +543,12 @@ void copyFromV5(const GlobalSettingsV5& source, GlobalSettings& target) {
     target.rampType = source.rampType;
     target.screensaverMode = source.screensaverMode;
     target.enable78rpm = source.enable78rpm;
-    target.freqDependentAmplitude = source.freqDependentAmplitude;
+    target.vfBlend = source.freqDependentAmplitude;
     target.vfLowFreq = source.vfLowFreq;
-    target.vfLowBoost = source.vfLowBoost;
+    target.vfLowLevel = source.vfLowBoost;
     target.vfMidFreq = source.vfMidFreq;
-    target.vfMidBoost = source.vfMidBoost;
+    target.vfMidLevel = source.vfMidBoost;
+    target.vfBaseFreq = DEFAULT_VF_BASE_FREQUENCY_HZ;
     target.bootSpeed = source.bootSpeed;
     target.currentSpeed = source.currentSpeed;
     target.ampTempWarnC = source.ampTempWarnC;
@@ -479,6 +557,8 @@ void copyFromV5(const GlobalSettingsV5& source, GlobalSettings& target) {
     target.showMemoryDashboard = source.showMemoryDashboard;
     target.showFlashDashboard = source.showFlashDashboard;
     setClosedLoopDefaults(target);
+    setOutputArchitectureMigrationDefaults(target);
+    setOutputTuningDefaults(target);
 }
 
 void copyFromV6(const GlobalSettingsV6& source, GlobalSettings& target) {
@@ -510,7 +590,7 @@ void copyFromV6(const GlobalSettingsV6& source, GlobalSettings& target) {
     target.autoBoot = source.autoBoot;
     target.pitchResetOnStop = source.pitchResetOnStop;
     for (int i = 0; i < 3; i++) {
-        target.speeds[i] = source.speeds[i];
+        copySpeedFromV9(source.speeds[i], target.speeds[i]);
     }
     for (int i = 0; i < MAX_PRESET_SLOTS; i++) {
         strncpy(target.presetNames[i], source.presetNames[i], 16);
@@ -522,11 +602,12 @@ void copyFromV6(const GlobalSettingsV6& source, GlobalSettings& target) {
     target.rampType = source.rampType;
     target.screensaverMode = source.screensaverMode;
     target.enable78rpm = source.enable78rpm;
-    target.freqDependentAmplitude = source.freqDependentAmplitude;
+    target.vfBlend = source.freqDependentAmplitude;
     target.vfLowFreq = source.vfLowFreq;
-    target.vfLowBoost = source.vfLowBoost;
+    target.vfLowLevel = source.vfLowBoost;
     target.vfMidFreq = source.vfMidFreq;
-    target.vfMidBoost = source.vfMidBoost;
+    target.vfMidLevel = source.vfMidBoost;
+    target.vfBaseFreq = DEFAULT_VF_BASE_FREQUENCY_HZ;
     target.bootSpeed = source.bootSpeed;
     target.currentSpeed = source.currentSpeed;
     target.ampTempWarnC = source.ampTempWarnC;
@@ -561,6 +642,8 @@ void copyFromV6(const GlobalSettingsV6& source, GlobalSettings& target) {
     target.closedLoopDropoutAction = source.closedLoopDropoutAction;
     setClosedLoopAdvancedDefaults(target);
     copyGlobalClosedLoopTuningToSpeeds(target);
+    setOutputArchitectureMigrationDefaults(target);
+    setOutputTuningDefaults(target);
 }
 
 void copyFromV7(const GlobalSettingsV7& source, GlobalSettings& target) {
@@ -592,7 +675,7 @@ void copyFromV7(const GlobalSettingsV7& source, GlobalSettings& target) {
     target.autoBoot = source.autoBoot;
     target.pitchResetOnStop = source.pitchResetOnStop;
     for (int i = 0; i < 3; i++) {
-        target.speeds[i] = source.speeds[i];
+        copySpeedFromV9(source.speeds[i], target.speeds[i]);
     }
     for (int i = 0; i < MAX_PRESET_SLOTS; i++) {
         strncpy(target.presetNames[i], source.presetNames[i], 16);
@@ -604,11 +687,12 @@ void copyFromV7(const GlobalSettingsV7& source, GlobalSettings& target) {
     target.rampType = source.rampType;
     target.screensaverMode = source.screensaverMode;
     target.enable78rpm = source.enable78rpm;
-    target.freqDependentAmplitude = source.freqDependentAmplitude;
+    target.vfBlend = source.freqDependentAmplitude;
     target.vfLowFreq = source.vfLowFreq;
-    target.vfLowBoost = source.vfLowBoost;
+    target.vfLowLevel = source.vfLowBoost;
     target.vfMidFreq = source.vfMidFreq;
-    target.vfMidBoost = source.vfMidBoost;
+    target.vfMidLevel = source.vfMidBoost;
+    target.vfBaseFreq = DEFAULT_VF_BASE_FREQUENCY_HZ;
     target.bootSpeed = source.bootSpeed;
     target.currentSpeed = source.currentSpeed;
     target.ampTempWarnC = source.ampTempWarnC;
@@ -660,6 +744,8 @@ void copyFromV7(const GlobalSettingsV7& source, GlobalSettings& target) {
     target.closedLoopAmpRecoveryMode = source.closedLoopAmpRecoveryMode;
     target.closedLoopAmpRecoveryDelayMs = source.closedLoopAmpRecoveryDelayMs;
     copyGlobalClosedLoopTuningToSpeeds(target);
+    setOutputArchitectureMigrationDefaults(target);
+    setOutputTuningDefaults(target);
 }
 
 void copyFromV8(const GlobalSettingsV8& source, GlobalSettings& target) {
@@ -668,6 +754,28 @@ void copyFromV8(const GlobalSettingsV8& source, GlobalSettings& target) {
         target.closedLoopTuning[i] = source.closedLoopTuning[i];
     }
     target.closedLoopPitchTargetMode = CLOSED_LOOP_PITCH_TARGET_FOLLOW;
+}
+
+void copyFromV9(const GlobalSettingsV9& source, GlobalSettings& target) {
+    copyFromV8(source.base, target);
+    target.closedLoopPitchTargetMode = source.closedLoopPitchTargetMode;
+}
+
+void copyFromV10(const GlobalSettingsV10& source, GlobalSettings& target) {
+    memset(&target, 0, sizeof(target));
+    memcpy(&target, source.bytes, sizeof(source.bytes));
+    target.schemaVersion = SETTINGS_SCHEMA_VERSION;
+    target.outputConfigReserved = 0;
+    setOutputTuningDefaults(target);
+    target.vfBaseFreq = DEFAULT_VF_BASE_FREQUENCY_HZ;
+}
+
+void copyFromV11(const GlobalSettingsV11& source, GlobalSettings& target) {
+    memset(&target, 0, sizeof(target));
+    memcpy(&target, source.bytes, sizeof(source.bytes));
+    target.schemaVersion = SETTINGS_SCHEMA_VERSION;
+    target.outputConfigReserved = 0;
+    target.vfBaseFreq = DEFAULT_VF_BASE_FREQUENCY_HZ;
 }
 
 uint32_t settingsCrc32(const uint8_t* data, size_t length) {
@@ -794,6 +902,48 @@ bool readSettingsBlob(const char* path, uint32_t magic, GlobalSettings& target, 
         if (crc != header.crc32) return false;
 
         copyFromV8(legacy, target);
+        if (migrated) *migrated = true;
+        return true;
+    }
+
+    if (header.schemaVersion == 9 && header.payloadSize == sizeof(GlobalSettingsV9)) {
+        GlobalSettingsV9 legacy;
+        if (f.read((uint8_t*)&legacy, sizeof(legacy)) != sizeof(legacy)) {
+            f.close();
+            return false;
+        }
+        f.close();
+
+        uint32_t crc = settingsCrc32((const uint8_t*)&legacy, sizeof(legacy));
+        if (crc != header.crc32) return false;
+
+        copyFromV9(legacy, target);
+        if (migrated) *migrated = true;
+        return true;
+    }
+
+    if (header.schemaVersion == 10 && header.payloadSize == sizeof(GlobalSettingsV10)) {
+        GlobalSettingsV10 legacy;
+        if (f.read((uint8_t*)&legacy, sizeof(legacy)) != sizeof(legacy)) {
+            f.close();
+            return false;
+        }
+        f.close();
+        if (settingsCrc32((const uint8_t*)&legacy, sizeof(legacy)) != header.crc32) return false;
+        copyFromV10(legacy, target);
+        if (migrated) *migrated = true;
+        return true;
+    }
+
+    if (header.schemaVersion == 11 && header.payloadSize == sizeof(GlobalSettingsV11)) {
+        GlobalSettingsV11 legacy;
+        if (f.read((uint8_t*)&legacy, sizeof(legacy)) != sizeof(legacy)) {
+            f.close();
+            return false;
+        }
+        f.close();
+        if (settingsCrc32((const uint8_t*)&legacy, sizeof(legacy)) != header.crc32) return false;
+        copyFromV11(legacy, target);
         if (migrated) *migrated = true;
         return true;
     }
@@ -1161,6 +1311,7 @@ void Settings::validate() {
     _data.pitchStepSize = finiteOr(_data.pitchStepSize, 0.1f);
     _data.vfLowFreq = finiteOr(_data.vfLowFreq, 5.0f);
     _data.vfMidFreq = finiteOr(_data.vfMidFreq, 25.0f);
+    _data.vfBaseFreq = finiteOr(_data.vfBaseFreq, DEFAULT_VF_BASE_FREQUENCY_HZ);
     _data.ampTempWarnC = finiteOr(_data.ampTempWarnC, AMP_TEMP_WARN_C);
     _data.ampTempShutdownC = finiteOr(_data.ampTempShutdownC, AMP_TEMP_SHUTDOWN_C);
     const float defaultClosedLoopTargetRpm[3] = {33.3333f, 45.0f, 78.0f};
@@ -1186,6 +1337,14 @@ void Settings::validate() {
 
     // Enforce global ranges before per-speed ranges so dependent calculations see sane values.
     if (_data.phaseMode < PHASE_1 || _data.phaseMode > MAX_PHASE_MODE) _data.phaseMode = DEFAULT_PHASE_MODE;
+    if (_data.motorTopology > MOTOR_TOPOLOGY_THREE_PHASE) _data.motorTopology = MOTOR_TOPOLOGY_CUSTOM;
+    _data.outputConfigReserved = 0;
+    _data.phaseSlewDegreesPerSecond = finiteOr(_data.phaseSlewDegreesPerSecond, 180.0f);
+    _data.gainSlewPercentPerSecond = finiteOr(_data.gainSlewPercentPerSecond, 50.0f);
+    if (_data.phaseSlewDegreesPerSecond < 0.0f) _data.phaseSlewDegreesPerSecond = 0.0f;
+    if (_data.phaseSlewDegreesPerSecond > 3600.0f) _data.phaseSlewDegreesPerSecond = 3600.0f;
+    if (_data.gainSlewPercentPerSecond < 0.0f) _data.gainSlewPercentPerSecond = 0.0f;
+    if (_data.gainSlewPercentPerSecond > 1000.0f) _data.gainSlewPercentPerSecond = 1000.0f;
     if (_data.currentSpeed < SPEED_33 || _data.currentSpeed > SPEED_78) _data.currentSpeed = SPEED_33;
     if (_data.maxAmplitude > 100) _data.maxAmplitude = 100;
     if (_data.softStartCurve > 2) _data.softStartCurve = 0;
@@ -1208,13 +1367,18 @@ void Settings::validate() {
     if (_data.pitchStepSize > 1.0) _data.pitchStepSize = 1.0;
     if (_data.rampType > RAMP_SCURVE) _data.rampType = RAMP_LINEAR;
     if (_data.screensaverMode > SAVER_LISSAJOUS) _data.screensaverMode = SAVER_BOUNCE;
-    if (_data.freqDependentAmplitude > 100) _data.freqDependentAmplitude = 100;
-    if (_data.vfLowBoost > 100) _data.vfLowBoost = 100;
-    if (_data.vfMidBoost > 100) _data.vfMidBoost = 100;
+    if (_data.vfBlend > 100) _data.vfBlend = 100;
+    if (_data.vfLowLevel > 100) _data.vfLowLevel = 100;
+    if (_data.vfMidLevel > 100) _data.vfMidLevel = 100;
     if (_data.vfLowFreq < 0.0) _data.vfLowFreq = 0.0;
     if (_data.vfLowFreq > 50.0) _data.vfLowFreq = 50.0;
     if (_data.vfMidFreq < 0.0) _data.vfMidFreq = 0.0;
     if (_data.vfMidFreq > 100.0) _data.vfMidFreq = 100.0;
+    if (_data.vfMidFreq <= _data.vfLowFreq) _data.vfMidFreq = _data.vfLowFreq + 0.1f;
+    if (_data.vfBaseFreq < MIN_OUTPUT_FREQUENCY_HZ) _data.vfBaseFreq = MIN_OUTPUT_FREQUENCY_HZ;
+    if (_data.vfBaseFreq > MAX_OUTPUT_FREQUENCY_HZ) _data.vfBaseFreq = MAX_OUTPUT_FREQUENCY_HZ;
+    if (_data.vfBaseFreq <= _data.vfMidFreq) _data.vfBaseFreq = _data.vfMidFreq + 0.1f;
+    if (_data.vfMidLevel < _data.vfLowLevel) _data.vfMidLevel = _data.vfLowLevel;
     if (_data.bootSpeed > 3) _data.bootSpeed = 3;
     if (_data.ampTempShutdownC < (AMP_TEMP_MIN_C + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C)) {
         _data.ampTempShutdownC = AMP_TEMP_MIN_C + AMP_TEMP_MIN_SHUTDOWN_MARGIN_C;
@@ -1367,6 +1531,8 @@ void Settings::validate() {
         _data.speeds[i].iirAlpha = finiteOr(_data.speeds[i].iirAlpha, 0.5f);
         for (int p = 0; p < 4; p++) {
             _data.speeds[i].phaseOffset[p] = finiteOr(_data.speeds[i].phaseOffset[p], defaultPhaseOffset[p]);
+            if (_data.speeds[i].channelAmplitude[p] < 50) _data.speeds[i].channelAmplitude[p] = 50;
+            if (_data.speeds[i].channelAmplitude[p] > 150) _data.speeds[i].channelAmplitude[p] = 150;
         }
 
         if (_data.speeds[i].minFrequency < MIN_OUTPUT_FREQUENCY_HZ) _data.speeds[i].minFrequency = MIN_OUTPUT_FREQUENCY_HZ;
@@ -1415,6 +1581,13 @@ void Settings::setDefaults() {
     }
 
     _data.phaseMode = (PhaseMode)DEFAULT_PHASE_MODE;
+    _data.motorTopology = DEFAULT_MOTOR_TOPOLOGY;
+    _data.outputConfigReserved = 0;
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    _data.activeBrakingAllowed = false;
+#else
+    _data.activeBrakingAllowed = true;
+#endif
     _data.maxAmplitude = 68;
     _data.softStartCurve = 0; // Linear
     _data.smoothSwitching = true;
@@ -1503,6 +1676,12 @@ void Settings::setDefaults() {
     _data.speeds[SPEED_78].phaseOffset[2] = 240.0;
     _data.speeds[SPEED_78].phaseOffset[3] = 270.0;
 
+    for (int speed = 0; speed < 3; speed++) {
+        for (int channel = 0; channel < 4; channel++) {
+            _data.speeds[speed].channelAmplitude[channel] = 100;
+        }
+    }
+
     _data.enable78rpm = true;
     _data.totalRuntime = 0;
 
@@ -1511,15 +1690,17 @@ void Settings::setDefaults() {
     _data.pitchStepSize = 0.1;
     _data.rampType = 1; // Default to S-Curve
     _data.screensaverMode = 0; // Default to Bounce
-    _data.freqDependentAmplitude = 0; // Default 0% (Disabled)
+    _data.vfBlend = 0; // Disabled by default
     _data.vfLowFreq = 5.0;
-    _data.vfLowBoost = 100;
+    _data.vfLowLevel = 100;
     _data.vfMidFreq = 25.0;
-    _data.vfMidBoost = 100;
+    _data.vfMidLevel = 100;
+    _data.vfBaseFreq = DEFAULT_VF_BASE_FREQUENCY_HZ;
     _data.bootSpeed = 3; // Default to Last Used
     _data.ampTempWarnC = AMP_TEMP_WARN_C;
     _data.ampTempShutdownC = AMP_TEMP_SHUTDOWN_C;
     setClosedLoopDefaults(_data);
+    setOutputTuningDefaults(_data);
 }
 
 bool Settings::loadPreset(uint8_t slot) {
@@ -1588,15 +1769,19 @@ bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
     // ArduinoJson 7 allocates JsonDocument dynamically. The short keys keep the preset export compact enough for serial and web workflows.
     JsonDocument doc;
 
-    // Global motor parameters exported with compact keys for backward-compatible preset files.
+    // Global motor parameters use compact keys so preset export remains practical over Serial Monitor.
     doc["pm"] = target.phaseMode;
+    doc["top"] = target.motorTopology;
+    doc["phSlew"] = target.phaseSlewDegreesPerSecond;
+    doc["gainSlew"] = target.gainSlewPercentPerSecond;
     doc["maxAmp"] = target.maxAmplitude;
     doc["ssCurve"] = target.softStartCurve;
-    doc["fda"] = target.freqDependentAmplitude;
+    doc["vfBlend"] = target.vfBlend;
     doc["vfLF"] = target.vfLowFreq;
-    doc["vfLB"] = target.vfLowBoost;
+    doc["vfLL"] = target.vfLowLevel;
     doc["vfMF"] = target.vfMidFreq;
-    doc["vfMB"] = target.vfMidBoost;
+    doc["vfML"] = target.vfMidLevel;
+    doc["vfBase"] = target.vfBaseFreq;
     doc["clEn"] = target.closedLoopEnabled;
     doc["clCtrl"] = target.closedLoopControlMode;
     doc["clMd"] = target.closedLoopSensorMode;
@@ -1675,6 +1860,9 @@ bool Settings::exportPresetToJSON(uint8_t slot, String& outStr) {
         JsonArray ph = spd["ph"].to<JsonArray>();
         for (int p=0; p<4; p++) ph.add(target.speeds[i].phaseOffset[p]);
 
+        JsonArray gains = spd["gain"].to<JsonArray>();
+        for (int p=0; p<4; p++) gains.add(target.speeds[i].channelAmplitude[p]);
+
         spd["ssD"] = target.speeds[i].softStartDuration;
         spd["rAmp"] = target.speeds[i].reducedAmplitude;
         spd["aDly"] = target.speeds[i].amplitudeDelay;
@@ -1711,13 +1899,17 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
 
     // Every imported field is optional. validate() below clamps unsafe or out-of-range values before the slot is saved.
     if (doc["pm"].is<uint8_t>()) target.phaseMode = doc["pm"].as<uint8_t>();
+    if (doc["top"].is<uint8_t>()) target.motorTopology = doc["top"].as<uint8_t>();
+    if (doc["phSlew"].is<float>()) target.phaseSlewDegreesPerSecond = doc["phSlew"].as<float>();
+    if (doc["gainSlew"].is<float>()) target.gainSlewPercentPerSecond = doc["gainSlew"].as<float>();
     if (doc["maxAmp"].is<uint8_t>()) target.maxAmplitude = doc["maxAmp"].as<uint8_t>();
     if (doc["ssCurve"].is<uint8_t>()) target.softStartCurve = doc["ssCurve"].as<uint8_t>();
-    if (doc["fda"].is<uint8_t>()) target.freqDependentAmplitude = doc["fda"].as<uint8_t>();
+    if (doc["vfBlend"].is<uint8_t>()) target.vfBlend = doc["vfBlend"].as<uint8_t>();
     if (doc["vfLF"].is<float>()) target.vfLowFreq = doc["vfLF"].as<float>();
-    if (doc["vfLB"].is<uint8_t>()) target.vfLowBoost = doc["vfLB"].as<uint8_t>();
+    if (doc["vfLL"].is<uint8_t>()) target.vfLowLevel = doc["vfLL"].as<uint8_t>();
     if (doc["vfMF"].is<float>()) target.vfMidFreq = doc["vfMF"].as<float>();
-    if (doc["vfMB"].is<uint8_t>()) target.vfMidBoost = doc["vfMB"].as<uint8_t>();
+    if (doc["vfML"].is<uint8_t>()) target.vfMidLevel = doc["vfML"].as<uint8_t>();
+    if (doc["vfBase"].is<float>()) target.vfBaseFreq = doc["vfBase"].as<float>();
     if (doc["clEn"].is<bool>()) target.closedLoopEnabled = doc["clEn"].as<bool>();
     if (doc["clCtrl"].is<uint8_t>()) target.closedLoopControlMode = doc["clCtrl"].as<uint8_t>();
     if (doc["clMd"].is<uint8_t>()) target.closedLoopSensorMode = doc["clMd"].as<uint8_t>();
@@ -1812,6 +2004,13 @@ bool Settings::importPresetFromJSON(uint8_t slot, const String& jsonStr) {
             if (!ph.isNull()) {
                 for (size_t p=0; p<4 && p<ph.size(); p++) {
                     if (ph[p].is<float>()) target.speeds[i].phaseOffset[p] = ph[p].as<float>();
+                }
+            }
+
+            JsonArray gains = spd["gain"].as<JsonArray>();
+            if (!gains.isNull()) {
+                for (size_t p=0; p<4 && p<gains.size(); p++) {
+                    if (gains[p].is<uint8_t>()) target.speeds[i].channelAmplitude[p] = gains[p].as<uint8_t>();
                 }
             }
 

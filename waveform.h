@@ -71,6 +71,10 @@ public:
     uint32_t getDmaDesyncCount() const;
     float getSampleRateHz() const;
     bool isDmaRunning() const;
+    uint32_t getClippingCount(int channel) const;
+    float getModulationHeadroomPercent(int channel);
+    float getAppliedPhaseDegrees(int channel) const;
+    float getAppliedChannelGainPercent(int channel) const;
 
 private:
     // Double-buffered configuration state. Frequency, phase, amplitude, and filters are copied as a unit so Core 1 never sees a partially changed tune.
@@ -78,6 +82,9 @@ private:
         float frequency;
         uint32_t phaseInc;
         uint32_t phaseOffsets[4];
+        float channelGain[4];
+        float phaseSlewDegreesPerSecond;
+        float gainSlewPercentPerSecond;
         float amplitude; // 0.0 - 1.0
         FilterType filterType;
         float iirAlpha;
@@ -106,6 +113,10 @@ private:
     float _firBuffer[4][8]; // [Channel][Tap]
     uint8_t _firIndex;
     volatile int16_t _lastSamples[4];
+    uint32_t _appliedPhaseOffsets[4];
+    float _appliedChannelGain[4];
+    bool _appliedTuningInitialized;
+    volatile uint32_t _clippingCount[4];
     
     int16_t _lut[LUT_MAX_SIZE];
     int _lutSize;
@@ -149,6 +160,7 @@ private:
     uint32_t frequencyToPhaseIncrement(float freq) const;
     uint32_t phaseOffsetToAccumulator(float degrees) const;
     void rearmDmaChannel(int channel, const uint32_t* readAddr);
+    void updateAppliedTuning(const volatile WaveformState* state);
     bool enabledAtomic() const;
     bool swapPendingAtomic() const;
     void storeEnabled(bool enabled);

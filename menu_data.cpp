@@ -13,6 +13,8 @@
 #include "settings.h"
 #include "network_manager.h"
 #include "speed_feedback.h"
+#include "power_stage.h"
+#include "waveform.h"
 #include <vector>
 
 extern UserInterface ui;
@@ -27,6 +29,11 @@ static MenuPage* pageMotorStartup = nullptr;
 static MenuPage* pageMotorAmplitude = nullptr;
 static MenuPage* pageMotorRamping = nullptr;
 static MenuPage* pageMotorBraking = nullptr;
+static MenuPage* pageOutputLayout = nullptr;
+static MenuPage* pageOutputPhase = nullptr;
+static MenuPage* pageOutputGain = nullptr;
+static MenuPage* pageOutputTuning = nullptr;
+static MenuPage* pagePowerStageStatus = nullptr;
 static MenuPage* pageNetworkStation = nullptr;
 static MenuPage* pageNetworkIpPower = nullptr;
 static MenuPage* pageNetworkAccessPoint = nullptr;
@@ -52,12 +59,15 @@ static MenuPage* pageClosedLoopTune = nullptr;
  * --- Sweep Diagnostic ---
  * These are temporary diagnostic parameters, not persisted settings.
  */
-float sweepMinSep = 80.0;
-float sweepMaxSep = 100.0;
+uint8_t sweepParameter = MotorController::SWEEP_SYMMETRIC_PHASE;
+float sweepMinimum = 80.0;
+float sweepMaximum = 100.0;
 float sweepSpeed = 1.0;
 MenuPage* pageSweep = nullptr;
 
 static const char* const phaseModeLabels[] = {"-", "1P", "2P", "3P", "4P"};
+static const char* const motorTopologyLabels[] = {"Custom", "Twin Sync", "3-Phase"};
+static const char* const sweepParameterLabels[] = {"Sym Phase", "Phase A", "Phase B", "Phase C", "Phase D", "Gain A", "Gain B", "Gain C", "Gain D"};
 // OLED menu labels are deliberately short enough for a 128x64 display.
 static const char* const filterLabels[] = {"None", "IIR", "FIR"};
 static const char* const firLabels[] = {"Gentle", "Medium", "Agg"};
@@ -413,23 +423,68 @@ void actionEnterPresets() {
 }
 
 void actionEnterSweep() {
-    // Sweep is a live diagnostic. MotorController restores original phase offsets when sweep exits/stops.
-    if (settings.get().phaseMode == 4) {
-        ui.showError("N/A 4-Phase", 2000);
-        return;
-    }
-
-    if (!pageSweep) pageSweep = new MenuPage("Symmetric Sweep");
+    if (!pageSweep) pageSweep = new MenuPage("Output Sweep");
     pageSweep->clear();
-    pageSweep->addItem(new MenuFloat("Min Sep", &sweepMinSep, 1.0, 0.0, 180.0));
-    pageSweep->addItem(new MenuFloat("Max Sep", &sweepMaxSep, 1.0, 0.0, 180.0));
+    pageSweep->addItem(new MenuByte("Parameter", &sweepParameter, 0, MotorController::SWEEP_GAIN_D,
+        sweepParameterLabels, MotorController::SWEEP_GAIN_D + 1));
+    pageSweep->addItem(new MenuFloat("Minimum", &sweepMinimum, 1.0, -360.0, 360.0));
+    pageSweep->addItem(new MenuFloat("Maximum", &sweepMaximum, 1.0, -360.0, 360.0));
     pageSweep->addItem(new MenuFloat("Speed/s", &sweepSpeed, 0.1, 0.1, 10.0));
     pageSweep->addItem(new MenuAction("Start Sweep", [](){
-        motor.startSymmetricSweep(sweepMinSep, sweepMaxSep, sweepSpeed);
-        // UI intercepts draw and input now
+        settings.get().speeds[menuShadowSpeedIndex] = menuShadowSettings;
+        motor.setSpeed((SpeedMode)menuShadowSpeedIndex);
+        if (!motor.startOutputSweep((MotorController::OutputSweepParameter)sweepParameter,
+                sweepMinimum, sweepMaximum, sweepSpeed)) {
+            ui.showError("Invalid Sweep", 2000);
+        }
     }));
     pageSweep->addItem(new MenuAction("Back", [](){ ui.back(); }));
     ui.navigateTo(pageSweep);
+}
+
+static void actionShowPowerStageStatus() {
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    if (!pagePowerStageStatus) pagePowerStageStatus = new MenuPage("Driver Status");
+#else
+    if (!pagePowerStageStatus) pagePowerStageStatus = new MenuPage("Output Status");
+#endif
+    pagePowerStageStatus->clear();
+    pagePowerStageStatus->addItem(new MenuDynamicInfo(String("Mode: ") + powerStage.backendName()));
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    pagePowerStageStatus->addItem(new MenuDynamicInfo(String("State: ") + powerStage.stateName()));
+    PowerStageMetrics metrics = powerStage.metrics();
+#else
+    pagePowerStageStatus->addItem(new MenuDynamicInfo(String("DMA: ") + (waveform.isDmaRunning() ? "Running" : "Stopped")));
+    pagePowerStageStatus->addItem(new MenuDynamicInfo(String("Rate: ") + String(waveform.getSampleRateHz(), 0) + "Hz"));
+#endif
+    float minimumHeadroom = 100.0f;
+    for (uint8_t channel = 0; channel < settings.get().phaseMode; channel++) {
+        minimumHeadroom = min(minimumHeadroom, waveform.getModulationHeadroomPercent(channel));
+    }
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    pagePowerStageStatus->addItem(new MenuDynamicInfo(String("Starts: ") + metrics.successfulEnables + "/" + metrics.enableAttempts));
+    pagePowerStageStatus->addItem(new MenuDynamicInfo(String("Faults: ") + metrics.faultCount));
+#endif
+    pagePowerStageStatus->addItem(new MenuDynamicInfo(String("Headroom: ") + String(minimumHeadroom, 1) + "%"));
+    pagePowerStageStatus->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    ui.navigateTo(pagePowerStageStatus);
+}
+
+static void actionResetOutputTune() {
+    settings.get().phaseMode = PHASE_3;
+    if (settings.get().motorTopology == MOTOR_TOPOLOGY_TWIN_PHASE_SYNCHRONOUS) {
+        menuShadowSettings.phaseOffset[0] = 0.0f;
+        menuShadowSettings.phaseOffset[1] = 180.0f;
+        menuShadowSettings.phaseOffset[2] = 270.0f;
+    } else if (settings.get().motorTopology == MOTOR_TOPOLOGY_THREE_PHASE) {
+        menuShadowSettings.phaseOffset[0] = 0.0f;
+        menuShadowSettings.phaseOffset[1] = 120.0f;
+        menuShadowSettings.phaseOffset[2] = 240.0f;
+    }
+    for (int channel = 0; channel < 4; channel++) {
+        menuShadowSettings.channelAmplitude[channel] = 100;
+    }
+    ui.showMessage("Tune Defaults Set", 1200);
 }
 
 void actionEnterBrakeTune() {
@@ -979,25 +1034,62 @@ void buildMenuSystem() {
     pageSpeedTuning->addItem(firProfile);
     pageSpeedTuning->addItem(new MenuAction("Back", [](){ ui.back(); }));
 
-    /*
-     * --- Phase Page (Mixed) ---
-     * Phase mode is global; phase offsets are per-speed shadow values.
-     */
-    pagePhase = new MenuPage("Phase Control");
-    pagePhase->addItem(new MenuByte("Mode (Glb)", &settings.get().phaseMode, 1, MAX_PHASE_MODE, phaseModeLabels, MAX_PHASE_MODE + 1));
-    MenuItem* phase2 = new MenuFloat("Ph 2 Offs", &menuShadowSettings.phaseOffset[1], 0.1, -360.0, 360.0);
+    /* Output configuration separates electrical layout, per-speed tuning,
+     * transition behaviour, and live diagnostics into short OLED pages. */
+    pagePhase = new MenuPage("Output");
+    pageOutputLayout = new MenuPage("Motor Layout");
+    pageOutputPhase = new MenuPage("Phase Trim");
+    pageOutputGain = new MenuPage("Gain Trim");
+    pageOutputTuning = new MenuPage("Output Tuning");
+
+    addNavItem(pagePhase, "Motor Layout", pageOutputLayout);
+    addNavItem(pagePhase, "Phase Trim", pageOutputPhase);
+    addNavItem(pagePhase, "Gain Trim", pageOutputGain);
+    addNavItem(pagePhase, "Transitions", pageOutputTuning);
+    pagePhase->addItem(new MenuAction("Sweep Tool", actionEnterSweep));
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    pagePhase->addItem(new MenuAction("Driver Status", actionShowPowerStageStatus));
+#else
+    pagePhase->addItem(new MenuAction("Output Status", actionShowPowerStageStatus));
+#endif
+    addBackItem(pagePhase);
+
+    pageOutputLayout->addItem(new MenuByte("Topology", &settings.get().motorTopology,
+        MOTOR_TOPOLOGY_CUSTOM, MOTOR_TOPOLOGY_THREE_PHASE, motorTopologyLabels, 3));
+    pageOutputLayout->addItem(new MenuByte("Phases", &settings.get().phaseMode, 1, MAX_PHASE_MODE, phaseModeLabels, MAX_PHASE_MODE + 1));
+    pageOutputLayout->addItem(new MenuAction("Reset Tune", actionResetOutputTune));
+    addBackItem(pageOutputLayout);
+
+    pageOutputPhase->addItem(new MenuFloat("Phase A", &menuShadowSettings.phaseOffset[0], 0.1, -360.0, 360.0));
+    MenuItem* phase2 = new MenuFloat("Phase B", &menuShadowSettings.phaseOffset[1], 0.1, -360.0, 360.0);
     phase2->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_2; });
-    pagePhase->addItem(phase2);
-    MenuItem* phase3 = new MenuFloat("Ph 3 Offs", &menuShadowSettings.phaseOffset[2], 0.1, -360.0, 360.0);
+    pageOutputPhase->addItem(phase2);
+    MenuItem* phase3 = new MenuFloat("Phase C", &menuShadowSettings.phaseOffset[2], 0.1, -360.0, 360.0);
     phase3->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_3; });
-    pagePhase->addItem(phase3);
-    MenuItem* phase4 = new MenuFloat("Ph 4 Offs", &menuShadowSettings.phaseOffset[3], 0.1, -360.0, 360.0);
+    pageOutputPhase->addItem(phase3);
+    MenuItem* phase4 = new MenuFloat("Phase D", &menuShadowSettings.phaseOffset[3], 0.1, -360.0, 360.0);
     phase4->setVisibleWhen([](){ return ENABLE_4_CHANNEL_SUPPORT && settings.get().phaseMode >= PHASE_4; });
-    pagePhase->addItem(phase4);
-    MenuItem* sweepDiag = new MenuAction("Sweep Diag.", actionEnterSweep);
-    sweepDiag->setVisibleWhen([](){ return settings.get().phaseMode == PHASE_2 || settings.get().phaseMode == PHASE_3; });
-    pagePhase->addItem(sweepDiag);
-    pagePhase->addItem(new MenuAction("Back", [](){ ui.back(); }));
+    pageOutputPhase->addItem(phase4);
+    addBackItem(pageOutputPhase);
+
+    pageOutputGain->addItem(new MenuByte("Gain A %", &menuShadowSettings.channelAmplitude[0], 50, 150));
+    MenuItem* gainB = new MenuByte("Gain B %", &menuShadowSettings.channelAmplitude[1], 50, 150);
+    gainB->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_2; });
+    pageOutputGain->addItem(gainB);
+    MenuItem* gainC = new MenuByte("Gain C %", &menuShadowSettings.channelAmplitude[2], 50, 150);
+    gainC->setVisibleWhen([](){ return settings.get().phaseMode >= PHASE_3; });
+    pageOutputGain->addItem(gainC);
+    MenuItem* gainD = new MenuByte("Gain D %", &menuShadowSettings.channelAmplitude[3], 50, 150);
+    gainD->setVisibleWhen([](){ return ENABLE_4_CHANNEL_SUPPORT && settings.get().phaseMode >= PHASE_4; });
+    pageOutputGain->addItem(gainD);
+    addBackItem(pageOutputGain);
+
+    pageOutputTuning->addItem(new MenuFloat("Phase Slew", &settings.get().phaseSlewDegreesPerSecond, 10.0, 0.0, 3600.0));
+    pageOutputTuning->addItem(new MenuFloat("Gain Slew", &settings.get().gainSlewPercentPerSecond, 5.0, 0.0, 1000.0));
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    pageOutputTuning->addItem(new MenuBool("Regen Safe", &settings.get().activeBrakingAllowed));
+#endif
+    addBackItem(pageOutputTuning);
 
     /*
      * --- Motor Pages (Mixed) ---
@@ -1028,19 +1120,22 @@ void buildMenuSystem() {
 
     pageMotorAmplitude->addItem(new MenuByte("Red. Amp %", &menuShadowSettings.reducedAmplitude, 10, 100));
     pageMotorAmplitude->addItem(new MenuByte("Amp Delay", &menuShadowSettings.amplitudeDelay, 0, 60));
-    pageMotorAmplitude->addItem(new MenuByte("V/f Blend%", &settings.get().freqDependentAmplitude, 0, 100));
+    pageMotorAmplitude->addItem(new MenuByte("V/f Blend%", &settings.get().vfBlend, 0, 100));
     MenuItem* vfLowHz = new MenuFloat("V/f LowHz", &settings.get().vfLowFreq, 1.0, 0.0, 50.0);
-    vfLowHz->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
+    vfLowHz->setVisibleWhen([](){ return settings.get().vfBlend > 0; });
     pageMotorAmplitude->addItem(vfLowHz);
-    MenuItem* vfLowBoost = new MenuByte("V/f Low%", &settings.get().vfLowBoost, 0, 100);
-    vfLowBoost->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
-    pageMotorAmplitude->addItem(vfLowBoost);
+    MenuItem* vfLowLevel = new MenuByte("V/f Low%", &settings.get().vfLowLevel, 0, 100);
+    vfLowLevel->setVisibleWhen([](){ return settings.get().vfBlend > 0; });
+    pageMotorAmplitude->addItem(vfLowLevel);
     MenuItem* vfMidHz = new MenuFloat("V/f MidHz", &settings.get().vfMidFreq, 1.0, 0.0, 100.0);
-    vfMidHz->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
+    vfMidHz->setVisibleWhen([](){ return settings.get().vfBlend > 0; });
     pageMotorAmplitude->addItem(vfMidHz);
-    MenuItem* vfMidBoost = new MenuByte("V/f Mid%", &settings.get().vfMidBoost, 0, 100);
-    vfMidBoost->setVisibleWhen([](){ return settings.get().freqDependentAmplitude > 0; });
-    pageMotorAmplitude->addItem(vfMidBoost);
+    MenuItem* vfMidLevel = new MenuByte("V/f Mid%", &settings.get().vfMidLevel, 0, 100);
+    vfMidLevel->setVisibleWhen([](){ return settings.get().vfBlend > 0; });
+    pageMotorAmplitude->addItem(vfMidLevel);
+    MenuItem* vfBaseHz = new MenuFloat("V/f BaseHz", &settings.get().vfBaseFreq, 1.0, MIN_OUTPUT_FREQUENCY_HZ, MAX_OUTPUT_FREQUENCY_HZ);
+    vfBaseHz->setVisibleWhen([](){ return settings.get().vfBlend > 0; });
+    pageMotorAmplitude->addItem(vfBaseHz);
     pageMotorAmplitude->addItem(new MenuByte("Max Amp %", &settings.get().maxAmplitude, 0, 100));
     addBackItem(pageMotorAmplitude);
 
@@ -1080,21 +1175,29 @@ void buildMenuSystem() {
      */
     pagePower = new MenuPage("Power Control");
 
-    if (ENABLE_MUTE_RELAYS) {
-        pagePower->addItem(new MenuBool("Rly: ActHi", &settings.get().relayActiveHigh));
-        if (ENABLE_STANDBY) {
-            pagePower->addItem(new MenuBool("Rly: Stby", &settings.get().muteRelayLinkStandby));
-        }
-        pagePower->addItem(new MenuBool("Rly: S/S", &settings.get().muteRelayLinkStartStop));
-        pagePower->addItem(new MenuByte("Rly: Delay", &settings.get().powerOnRelayDelay, 0, 10));
-    }
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+    pagePower->addItem(new MenuInfo("Output: 3PWM Bridge"));
+#else
+    pagePower->addItem(new MenuInfo("Output: Linear"));
+#endif
+
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && (ENABLE_STANDBY || ENABLE_MUTE_RELAYS)
+    pagePower->addItem(new MenuBool("Rly: ActHi", &settings.get().relayActiveHigh));
+#endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && ENABLE_MUTE_RELAYS && ENABLE_STANDBY
+    pagePower->addItem(new MenuBool("Rly: Stby", &settings.get().muteRelayLinkStandby));
+#endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && ENABLE_MUTE_RELAYS
+    pagePower->addItem(new MenuBool("Rly: S/S", &settings.get().muteRelayLinkStartStop));
+    pagePower->addItem(new MenuByte("Rly: Delay", &settings.get().powerOnRelayDelay, 0, 10));
+#endif
 
     if (ENABLE_STANDBY) {
         pagePower->addItem(new MenuByte("Auto Stby", &settings.get().autoStandbyDelay, 0, 60));
+        pagePower->addItem(new MenuBool("Auto Boot", &settings.get().autoBoot));
     }
 
-    pagePower->addItem(new MenuBool("Auto Boot", &settings.get().autoBoot));
-    if (ENABLE_STANDBY || ENABLE_MUTE_RELAYS) {
+    if (OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM && (ENABLE_STANDBY || ENABLE_MUTE_RELAYS)) {
         pagePower->addItem(new MenuAction("Relay Test", actionEnterRelayTest));
     }
     pagePower->addItem(new MenuAction("Back", [](){ ui.back(); }));
@@ -1162,7 +1265,7 @@ void buildMenuSystem() {
     pageMain->addItem(menuSpeedSelector);
 
     pageMain->addItem(new MenuNav("Speed Tuning", pageSpeedTuning));
-    pageMain->addItem(new MenuNav("Phase", pagePhase));
+    pageMain->addItem(new MenuNav("Output", pagePhase));
     pageMain->addItem(new MenuNav("Motor", pageMotor));
     pageMain->addItem(new MenuNav("Power", pagePower));
     pageMain->addItem(new MenuNav("Display", pageDisplay));

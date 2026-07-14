@@ -9,12 +9,12 @@
 #include "waveform.h"
 #include "hal.h"
 #include "system_monitor.h"
+#include "settings.h"
 #include <math.h>
 
 // Global pointer for ISR access. Only one WaveformGenerator exists in this sketch, so a static thunk is simpler than passing context through the IRQ API.
 static WaveformGenerator* _waveformInstance = nullptr;
 static const uint16_t PWM_WRAP_VALUE = 1023;
-static const float PWM_CLOCK_DIVIDER = 2.44f;
 static const float FALLBACK_SAMPLE_RATE_HZ = 50000.0f;
 static const double DDS_ACCUMULATOR_SCALE = 4294967296.0;
 
@@ -41,7 +41,15 @@ WaveformGenerator::WaveformGenerator() {
     _stateA.iirAlpha = 0.0;
     _stateA.firProfile = FIR_GENTLE;
     _stateA.activePhaseOutputs = DEFAULT_PHASE_MODE;
-    for(int i=0; i<4; i++) _stateA.phaseOffsets[i] = 0;
+    _stateA.phaseSlewDegreesPerSecond = 180.0f;
+    _stateA.gainSlewPercentPerSecond = 50.0f;
+    for(int i=0; i<4; i++) {
+        _stateA.phaseOffsets[i] = 0;
+        _stateA.channelGain[i] = 1.0f;
+        _appliedPhaseOffsets[i] = 0;
+        _appliedChannelGain[i] = 1.0f;
+        _clippingCount[i] = 0;
+    }
     
     // Start pending and active states identical so the first swap is safe even before any settings have been applied.
     *_pendingState = *((WaveformState*)_activeState);
@@ -57,6 +65,7 @@ WaveformGenerator::WaveformGenerator() {
         for(int j=0; j<8; j++) _firBuffer[i][j] = 0;
     }
     _firIndex = 0;
+    _appliedTuningInitialized = false;
     // Number of top accumulator bits used as the LUT index.
     _lutShift = 32 - (int)log2(_lutSize);
     
@@ -78,9 +87,8 @@ void WaveformGenerator::begin() {
     fillBuffer(0);
     fillBuffer(1);
     
-    // Start one channel per PWM slice. Chaining keeps the paired ping-pong channels running after this point.
-    dma_channel_start(_dmaChan0);
-    dma_channel_start(_dmaChan2);
+    // Arm both slices together. Chaining keeps the paired ping-pong channels running after this point.
+    dma_start_channel_mask((1u << _dmaChan0) | (1u << _dmaChan2));
     _dmaStarted = true;
 }
 
@@ -106,16 +114,17 @@ void WaveformGenerator::setupPWM() {
     pwm_config config = pwm_get_default_config();
     
     /*
-     * Set PWM frequency to approximately 50 kHz. The DDS phase increment is
-     * derived from the same wrap/divider values below so clock changes do not
-     * silently retune the motor.
-     * SysClock = 125MHz (usually)
-     * Wrap = 1023 (10-bit)
-     * Div = 125000000 / (50000 * 1024) = ~2.44
+     * Derive the carrier divider from the live system clock. The DDS phase
+     * increment uses the resulting sample rate, keeping both 125 MHz RP2040 and
+     * 150 MHz RP2350 builds on the configured carrier and motor frequency.
      */
+    float clockDivider = (float)clock_get_hz(clk_sys) /
+        (PWM_CARRIER_FREQUENCY_HZ * ((float)PWM_WRAP_VALUE + 1.0f));
+    if (!isfinite(clockDivider) || clockDivider < 1.0f) clockDivider = 1.0f;
+    if (clockDivider > 255.0f) clockDivider = 255.0f;
     pwm_config_set_wrap(&config, PWM_WRAP_VALUE);
-    pwm_config_set_clkdiv(&config, PWM_CLOCK_DIVIDER);
-    _sampleRateHz = ((float)clock_get_hz(clk_sys) / PWM_CLOCK_DIVIDER) / ((float)PWM_WRAP_VALUE + 1.0f);
+    pwm_config_set_clkdiv(&config, clockDivider);
+    _sampleRateHz = ((float)clock_get_hz(clk_sys) / clockDivider) / ((float)PWM_WRAP_VALUE + 1.0f);
     if (!isfinite(_sampleRateHz) || _sampleRateHz <= 0.0f) {
         _sampleRateHz = FALLBACK_SAMPLE_RATE_HZ;
     }
@@ -303,10 +312,15 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
     _bufferFillCount++;
 
     if (!enabledAtomic()) {
-        // Fill with zero duty while disabled. MotorController ramps amplitude to zero before disabling for normal stops.
+        // Bridge inputs idle at neutral common-mode duty; the hardware enable remains the real safety interlock. Linear builds retain the legacy zero-duty idle.
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+        const uint32_t disabledSliceWord = (512u << 16) | 512u;
+#else
+        const uint32_t disabledSliceWord = 0;
+#endif
         for (int i = 0; i < DMA_BUFFER_SIZE; i++) {
-            _dmaBufferSlice0[bufferIndex][i] = 0;
-            _dmaBufferSlice1[bufferIndex][i] = 0;
+            _dmaBufferSlice0[bufferIndex][i] = disabledSliceWord;
+            _dmaBufferSlice1[bufferIndex][i] = disabledSliceWord;
         }
         return;
     }
@@ -325,6 +339,7 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
     }
     
     const volatile WaveformState* state = _activeState;
+    updateAppliedTuning(state);
     
     for (int i = 0; i < DMA_BUFFER_SIZE; i++) {
         // Calculate samples for enabled phases; unused channels stay at the neutral sample before the 512 PWM offset is applied.
@@ -344,19 +359,24 @@ void __not_in_flash_func(WaveformGenerator::fillBuffer)(int bufferIndex) {
          */
         
         // Offset to 0-1023 range (Center 512)
-        uint16_t valA = (uint16_t)(512 + samples[0]);
-        uint16_t valB = (uint16_t)(512 + samples[1]);
-        uint16_t valC = (uint16_t)(512 + samples[2]);
-        uint16_t valD = (uint16_t)(512 + samples[3]);
+        int32_t valA = 512 + samples[0];
+        int32_t valB = 512 + samples[1];
+        int32_t valC = 512 + samples[2];
+        int32_t valD = 512 + samples[3];
+
+        if (valA < 0 || valA > 1023) _clippingCount[0]++;
+        if (valB < 0 || valB > 1023) _clippingCount[1]++;
+        if (valC < 0 || valC > 1023) _clippingCount[2]++;
+        if (valD < 0 || valD > 1023) _clippingCount[3]++;
         
         // Clamp to the 10-bit PWM range after offsetting the signed samples.
-        if (valA > 1023) valA = 1023;
-        if (valB > 1023) valB = 1023;
-        if (valC > 1023) valC = 1023;
-        if (valD > 1023) valD = 1023;
+        if (valA < 0) valA = 0; else if (valA > 1023) valA = 1023;
+        if (valB < 0) valB = 0; else if (valB > 1023) valB = 1023;
+        if (valC < 0) valC = 0; else if (valC > 1023) valC = 1023;
+        if (valD < 0) valD = 0; else if (valD > 1023) valD = 1023;
         
-        _dmaBufferSlice0[bufferIndex][i] = (valB << 16) | valA;
-        _dmaBufferSlice1[bufferIndex][i] = (valD << 16) | valC;
+        _dmaBufferSlice0[bufferIndex][i] = ((uint32_t)valB << 16) | (uint32_t)valA;
+        _dmaBufferSlice1[bufferIndex][i] = ((uint32_t)valD << 16) | (uint32_t)valC;
     }
 }
 
@@ -387,7 +407,10 @@ void WaveformGenerator::configure(const SpeedSettings& s) {
     
     for(int i=0; i<4; i++) {
         _pendingState->phaseOffsets[i] = phaseOffsetToAccumulator(s.phaseOffset[i]);
+        _pendingState->channelGain[i] = (float)s.channelAmplitude[i] / 100.0f;
     }
+    _pendingState->phaseSlewDegreesPerSecond = settings.get().phaseSlewDegreesPerSecond;
+    _pendingState->gainSlewPercentPerSecond = settings.get().gainSlewPercentPerSecond;
     storeSwapPending(true);
     unlockState();
 }
@@ -438,7 +461,10 @@ void WaveformGenerator::updateSettings(float freq, const SpeedSettings& s, uint8
     
     for(int i=0; i<4; i++) {
         _pendingState->phaseOffsets[i] = phaseOffsetToAccumulator(s.phaseOffset[i]);
+        _pendingState->channelGain[i] = (float)s.channelAmplitude[i] / 100.0f;
     }
+    _pendingState->phaseSlewDegreesPerSecond = settings.get().phaseSlewDegreesPerSecond;
+    _pendingState->gainSlewPercentPerSecond = settings.get().gainSlewPercentPerSecond;
     
     storeSwapPending(true);
     unlockState();
@@ -484,6 +510,56 @@ bool WaveformGenerator::isDmaRunning() const {
     return _dmaStarted &&
            (dma_channel_is_busy(_dmaChan0) || dma_channel_is_busy(_dmaChan1) ||
             dma_channel_is_busy(_dmaChan2) || dma_channel_is_busy(_dmaChan3));
+}
+
+uint32_t WaveformGenerator::getClippingCount(int channel) const {
+    return channel >= 0 && channel < 4 ? _clippingCount[channel] : 0;
+}
+
+float WaveformGenerator::getModulationHeadroomPercent(int channel) {
+    if (channel < 0 || channel >= 4) return 0.0f;
+    lockState();
+    float headroom = 100.0f - (_pendingState->amplitude * _pendingState->channelGain[channel] * 100.0f);
+    unlockState();
+    return headroom;
+}
+
+float WaveformGenerator::getAppliedPhaseDegrees(int channel) const {
+    if (channel < 0 || channel >= 4) return 0.0f;
+    return ((double)_appliedPhaseOffsets[channel] * 360.0) / DDS_ACCUMULATOR_SCALE;
+}
+
+float WaveformGenerator::getAppliedChannelGainPercent(int channel) const {
+    return channel >= 0 && channel < 4 ? _appliedChannelGain[channel] * 100.0f : 0.0f;
+}
+
+void WaveformGenerator::updateAppliedTuning(const volatile WaveformState* state) {
+    if (!_appliedTuningInitialized || state->phaseSlewDegreesPerSecond <= 0.0f) {
+        for (int channel = 0; channel < 4; channel++) _appliedPhaseOffsets[channel] = state->phaseOffsets[channel];
+    } else {
+        double maxStepD = state->phaseSlewDegreesPerSecond * ((double)DMA_BUFFER_SIZE / _sampleRateHz) *
+            (DDS_ACCUMULATOR_SCALE / 360.0);
+        int32_t maxStep = (int32_t)fmax(1.0, fmin(maxStepD, 2147483647.0));
+        for (int channel = 0; channel < 4; channel++) {
+            int32_t delta = (int32_t)(state->phaseOffsets[channel] - _appliedPhaseOffsets[channel]);
+            if (delta > maxStep) delta = maxStep;
+            if (delta < -maxStep) delta = -maxStep;
+            _appliedPhaseOffsets[channel] += delta;
+        }
+    }
+
+    if (!_appliedTuningInitialized || state->gainSlewPercentPerSecond <= 0.0f) {
+        for (int channel = 0; channel < 4; channel++) _appliedChannelGain[channel] = state->channelGain[channel];
+    } else {
+        float maxGainStep = (state->gainSlewPercentPerSecond / 100.0f) * ((float)DMA_BUFFER_SIZE / _sampleRateHz);
+        for (int channel = 0; channel < 4; channel++) {
+            float delta = state->channelGain[channel] - _appliedChannelGain[channel];
+            if (delta > maxGainStep) delta = maxGainStep;
+            if (delta < -maxGainStep) delta = -maxGainStep;
+            _appliedChannelGain[channel] += delta;
+        }
+    }
+    _appliedTuningInitialized = true;
 }
 
 uint32_t WaveformGenerator::frequencyToPhaseIncrement(float freq) const {
@@ -533,7 +609,7 @@ int16_t __not_in_flash_func(WaveformGenerator::generateSample)(int channel) {
     const volatile WaveformState* state = _activeState;
     
     // Use the upper accumulator bits for the LUT index and the next ten bits for linear interpolation between adjacent LUT samples.
-    uint32_t phase = _phaseAcc[0] + state->phaseOffsets[channel];
+    uint32_t phase = _phaseAcc[0] + _appliedPhaseOffsets[channel];
     uint16_t index = phase >> _lutShift;
     uint16_t frac = (phase >> (_lutShift - 10)) & 0x3FF; 
     
@@ -544,7 +620,7 @@ int16_t __not_in_flash_func(WaveformGenerator::generateSample)(int channel) {
     int16_t s2 = _lut[nextIndex];
     
     int32_t val = s1 + (((s2 - s1) * (int32_t)frac) >> 10);
-    val = (int32_t)(val * state->amplitude);
+    val = (int32_t)(val * state->amplitude * _appliedChannelGain[channel]);
     
     if (state->filterType == FILTER_IIR) {
         // Lightweight one-pole smoothing for users who need gentler edges.

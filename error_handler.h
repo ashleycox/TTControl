@@ -26,7 +26,8 @@ enum ErrorCode {
     ERR_SPEED_FEEDBACK = 7,
     ERR_RESET_CAUSE = 8,
     ERR_WAVEFORM_HEALTH = 9,
-    ERR_SETTINGS_ROLLBACK = 10
+    ERR_SETTINGS_ROLLBACK = 10,
+    ERR_POWER_STAGE_FAULT = 11
 };
 
 /**
@@ -67,7 +68,7 @@ private:
     // Latched until reboot. The UI and diagnostics use this to show that a critical fault occurred even if outputs have already been shut down.
     bool _criticalError;
     ErrorCode _criticalCode;
-    char _criticalMessage[96];
+    char _criticalMessage[160];
     uint32_t _sessionId;
     
     void logToFile(ErrorCode code, const char* message);

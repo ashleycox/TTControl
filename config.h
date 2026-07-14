@@ -43,6 +43,68 @@
 #define LUT_MAX_SIZE 16384
 #define MIN_OUTPUT_FREQUENCY_HZ 10.0f
 #define MAX_OUTPUT_FREQUENCY_HZ 1500.0f
+#ifndef PWM_CARRIER_FREQUENCY_HZ
+#define PWM_CARRIER_FREQUENCY_HZ 50000.0f
+#endif
+
+/*
+ * --- Output Stage ---
+ * TTControl can feed either the original filtered linear-amplifier interface or
+ * a controller-free three-half-bridge board. The DRV8313/SimpleFOC-style 3-PWM
+ * interface is the default for new builds; select OUTPUT_STAGE_LINEAR_PWM to
+ * retain the original relay and disabled-duty behavior.
+ */
+#define OUTPUT_STAGE_LINEAR_PWM 0
+#define OUTPUT_STAGE_3PWM_BRIDGE 1
+#ifndef OUTPUT_STAGE_TYPE
+#define OUTPUT_STAGE_TYPE OUTPUT_STAGE_3PWM_BRIDGE
+#endif
+
+#ifndef POWER_STAGE_ENABLE_ACTIVE_HIGH
+#define POWER_STAGE_ENABLE_ACTIVE_HIGH 1
+#endif
+#ifndef POWER_STAGE_SHARED_ENABLE
+#define POWER_STAGE_SHARED_ENABLE 1
+#endif
+#ifndef POWER_STAGE_FAULT_ENABLE
+#define POWER_STAGE_FAULT_ENABLE 1
+#endif
+#ifndef POWER_STAGE_FAULT_ACTIVE_LOW
+#define POWER_STAGE_FAULT_ACTIVE_LOW 1
+#endif
+#ifndef POWER_STAGE_PHASE_ENABLES
+#define POWER_STAGE_PHASE_ENABLES 0
+#endif
+#ifndef POWER_STAGE_PHASE_ENABLE_ACTIVE_HIGH
+#define POWER_STAGE_PHASE_ENABLE_ACTIVE_HIGH 1
+#endif
+#ifndef POWER_STAGE_SLEEP_ENABLE
+#define POWER_STAGE_SLEEP_ENABLE 0
+#endif
+#ifndef POWER_STAGE_SLEEP_ACTIVE_HIGH
+#define POWER_STAGE_SLEEP_ACTIVE_HIGH 1
+#endif
+#ifndef POWER_STAGE_RESET_ENABLE
+#define POWER_STAGE_RESET_ENABLE 0
+#endif
+#ifndef POWER_STAGE_RESET_ACTIVE_HIGH
+#define POWER_STAGE_RESET_ACTIVE_HIGH 0
+#endif
+#ifndef POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN
+#define POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN 0
+#endif
+#ifndef POWER_STAGE_RESET_PULSE_MS
+#define POWER_STAGE_RESET_PULSE_MS 2
+#endif
+#ifndef POWER_STAGE_PHASE_ENABLE_DELAY_MS
+#define POWER_STAGE_PHASE_ENABLE_DELAY_MS 1
+#endif
+#ifndef POWER_STAGE_WAKE_DELAY_MS
+#define POWER_STAGE_WAKE_DELAY_MS 2
+#endif
+#ifndef POWER_STAGE_NEUTRAL_BUFFER_COUNT
+#define POWER_STAGE_NEUTRAL_BUFFER_COUNT 2
+#endif
 
 /*
  * --- Preset Management ---
@@ -99,13 +161,17 @@
 #define ENABLE_STANDBY 1         // Set to 0 to disable all standby functionality
 #endif
 #ifndef ENABLE_MUTE_RELAYS
-#define ENABLE_MUTE_RELAYS 1     // Set to 0 to disable muting relays entirely
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_LINEAR_PWM
+#define ENABLE_MUTE_RELAYS 1     // Linear output default: downstream amplifier mute relays are fitted
+#else
+#define ENABLE_MUTE_RELAYS 0     // Bridge output default: GP16-19 belong to the power-stage interface
+#endif
 #endif
 #ifndef ENABLE_DPDT_RELAYS
 #define ENABLE_DPDT_RELAYS 0     // Set to 1 to use 2x DPDT relays instead of 4x SPST
 #endif
 #ifndef ENABLE_4_CHANNEL_SUPPORT
-#define ENABLE_4_CHANNEL_SUPPORT 0 // Set to 1 to enable optional 4-channel/Premotec bridge modes
+#define ENABLE_4_CHANNEL_SUPPORT 0 // Set to 1 for optional four-channel linear/twin-motor output modes
 #endif
 #ifndef AMP_MONITOR_ENABLE
 #define AMP_MONITOR_ENABLE 0       // Set to 1 only when the amplifier thermal monitor pins are populated and driven
@@ -181,6 +247,33 @@
 #define PIN_AMP_TEMP 26
 #define PIN_AMP_THERM_OK 27
 
+/*
+ * Default controller-free DRV8313/SimpleFOC-style bridge interface. Boards
+ * that expose EN1/EN2/EN3 separately can enable POWER_STAGE_PHASE_ENABLES and
+ * use GP17-19. GP8 is otherwise unused in the default hardware map.
+ */
+#ifndef PIN_POWER_STAGE_ENABLE
+#define PIN_POWER_STAGE_ENABLE 16
+#endif
+#ifndef PIN_POWER_STAGE_PHASE_ENABLE_A
+#define PIN_POWER_STAGE_PHASE_ENABLE_A 17
+#endif
+#ifndef PIN_POWER_STAGE_PHASE_ENABLE_B
+#define PIN_POWER_STAGE_PHASE_ENABLE_B 18
+#endif
+#ifndef PIN_POWER_STAGE_PHASE_ENABLE_C
+#define PIN_POWER_STAGE_PHASE_ENABLE_C 19
+#endif
+#ifndef PIN_POWER_STAGE_FAULT
+#define PIN_POWER_STAGE_FAULT 8
+#endif
+#ifndef PIN_POWER_STAGE_SLEEP
+#define PIN_POWER_STAGE_SLEEP 23
+#endif
+#ifndef PIN_POWER_STAGE_RESET
+#define PIN_POWER_STAGE_RESET 24
+#endif
+
 // Thermal values are validated in settings so user-entered thresholds stay in the same safe range as these firmware defaults.
 #define AMP_TEMP_WARN_C 65.0f
 #define AMP_TEMP_SHUTDOWN_C 75.0f
@@ -216,17 +309,19 @@
  * struct changes, bump SETTINGS_SCHEMA_VERSION and add migration code before
  * changing the expected size.
  */
-#define SETTINGS_SCHEMA_VERSION 9
+#define SETTINGS_SCHEMA_VERSION 12
 #define SETTINGS_FILE_FORMAT_VERSION 1
 #define SETTINGS_FILE_MAGIC 0x54544353UL // "TTCS"
 #define PRESET_FILE_MAGIC 0x54544350UL   // "TTCP"
-#define SPEED_SETTINGS_STORAGE_SIZE 52
+#define SPEED_SETTINGS_STORAGE_SIZE 56
 #define CLOSED_LOOP_TUNING_STORAGE_SIZE 44
-#define GLOBAL_SETTINGS_STORAGE_SIZE 592
+#define GLOBAL_SETTINGS_STORAGE_SIZE 620
 
 // --- Default Values ---
 #define DEFAULT_PHASE_MODE 3 // 3-phase
 #define DEFAULT_SPEED_INDEX 0 // 33.3 RPM
+#define DEFAULT_MOTOR_TOPOLOGY 2 // Balanced three-phase, with fully editable phase/gain tuning
+#define DEFAULT_VF_BASE_FREQUENCY_HZ 58.66f
 
 /*
  * --- Compile-time Safety Checks ---
@@ -254,6 +349,33 @@
 #if (CLOSED_LOOP_SPEED_ENABLE != 0 && CLOSED_LOOP_SPEED_ENABLE != 1)
 #error "CLOSED_LOOP_SPEED_ENABLE must be 0 or 1."
 #endif
+#if (OUTPUT_STAGE_TYPE != OUTPUT_STAGE_LINEAR_PWM && OUTPUT_STAGE_TYPE != OUTPUT_STAGE_3PWM_BRIDGE)
+#error "OUTPUT_STAGE_TYPE must select OUTPUT_STAGE_LINEAR_PWM or OUTPUT_STAGE_3PWM_BRIDGE."
+#endif
+#if (POWER_STAGE_ENABLE_ACTIVE_HIGH != 0 && POWER_STAGE_ENABLE_ACTIVE_HIGH != 1)
+#error "POWER_STAGE_ENABLE_ACTIVE_HIGH must be 0 or 1."
+#endif
+#if (POWER_STAGE_FAULT_ENABLE != 0 && POWER_STAGE_FAULT_ENABLE != 1)
+#error "POWER_STAGE_FAULT_ENABLE must be 0 or 1."
+#endif
+#if (POWER_STAGE_FAULT_ACTIVE_LOW != 0 && POWER_STAGE_FAULT_ACTIVE_LOW != 1)
+#error "POWER_STAGE_FAULT_ACTIVE_LOW must be 0 or 1."
+#endif
+#if (POWER_STAGE_PHASE_ENABLES != 0 && POWER_STAGE_PHASE_ENABLES != 1)
+#error "POWER_STAGE_PHASE_ENABLES must be 0 or 1."
+#endif
+#if (POWER_STAGE_SHARED_ENABLE != 0 && POWER_STAGE_SHARED_ENABLE != 1)
+#error "POWER_STAGE_SHARED_ENABLE must be 0 or 1."
+#endif
+#if (POWER_STAGE_SLEEP_ENABLE != 0 && POWER_STAGE_SLEEP_ENABLE != 1)
+#error "POWER_STAGE_SLEEP_ENABLE must be 0 or 1."
+#endif
+#if (POWER_STAGE_RESET_ENABLE != 0 && POWER_STAGE_RESET_ENABLE != 1)
+#error "POWER_STAGE_RESET_ENABLE must be 0 or 1."
+#endif
+#if (POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN != 0 && POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN != 1)
+#error "POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN must be 0 or 1."
+#endif
 
 #if ENABLE_DPDT_RELAYS && !ENABLE_MUTE_RELAYS
 #error "ENABLE_DPDT_RELAYS requires ENABLE_MUTE_RELAYS."
@@ -261,10 +383,30 @@
 #if ENABLE_DPDT_RELAYS && ENABLE_4_CHANNEL_SUPPORT
 #error "DPDT relay mode does not provide independent mute control for four phase outputs."
 #endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE && ENABLE_4_CHANNEL_SUPPORT
+#error "The 3-PWM bridge backend provides three half-bridge outputs; use the linear backend for four-channel output."
+#endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE && ENABLE_DPDT_RELAYS
+#error "DPDT relay output is only supported by the linear-amplifier backend."
+#endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE && ENABLE_MUTE_RELAYS
+#error "Mute relays belong to the linear-amplifier backend and are not supported by the 3-PWM bridge backend."
+#endif
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE && !POWER_STAGE_SHARED_ENABLE && !POWER_STAGE_PHASE_ENABLES && !POWER_STAGE_SLEEP_ENABLE
+#error "Bridge output requires at least one hardware disable path: shared enable, phase enables, or sleep."
+#endif
+#if POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN && (!POWER_STAGE_SHARED_ENABLE || !POWER_STAGE_FAULT_ENABLE)
+#error "Shared open-drain enable/fault requires shared enable and fault support."
+#endif
 
 static_assert(MIN_OUTPUT_FREQUENCY_HZ > 0.0f, "Minimum output frequency must be positive.");
 static_assert(MAX_OUTPUT_FREQUENCY_HZ > MIN_OUTPUT_FREQUENCY_HZ, "Maximum output frequency must exceed minimum output frequency.");
 static_assert(MAX_OUTPUT_FREQUENCY_HZ <= 2000.0f, "Review waveform timing before allowing output frequencies above 2 kHz.");
+static_assert(PWM_CARRIER_FREQUENCY_HZ >= 20000.0f && PWM_CARRIER_FREQUENCY_HZ <= 100000.0f, "PWM carrier must remain inside the supported power-stage range.");
+static_assert(POWER_STAGE_WAKE_DELAY_MS <= 1000, "Power-stage wake delay must remain non-blocking and reasonably short.");
+static_assert(POWER_STAGE_RESET_PULSE_MS <= 1000, "Power-stage reset pulse must remain non-blocking.");
+static_assert(POWER_STAGE_PHASE_ENABLE_DELAY_MS <= 1000, "Power-stage phase-enable delay must remain non-blocking.");
+static_assert(POWER_STAGE_NEUTRAL_BUFFER_COUNT >= 1 && POWER_STAGE_NEUTRAL_BUFFER_COUNT <= 8, "Neutral buffer confirmation count is unreasonable.");
 static_assert((LUT_MAX_SIZE & (LUT_MAX_SIZE - 1)) == 0, "LUT_MAX_SIZE must be a power of two.");
 static_assert(LUT_MAX_SIZE >= 1024, "LUT_MAX_SIZE is too small for the DDS phase accumulator.");
 static_assert(MAX_PRESET_SLOTS == 5, "Preset storage and UI currently expect exactly five preset slots.");
@@ -295,6 +437,43 @@ TT_PIN_ASSERT_DISTINCT(PIN_RELAY_STANDBY, PIN_PWM_PHASE_C);
 TT_PIN_ASSERT_DISTINCT(PIN_RELAY_STANDBY, PIN_PWM_PHASE_D);
 TT_PIN_ASSERT_DISTINCT(PIN_RELAY_STANDBY, PIN_I2C0_SDA);
 TT_PIN_ASSERT_DISTINCT(PIN_RELAY_STANDBY, PIN_I2C0_SCL);
+
+#if OUTPUT_STAGE_TYPE == OUTPUT_STAGE_3PWM_BRIDGE
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_ENABLE, PIN_PWM_PHASE_A);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_ENABLE, PIN_PWM_PHASE_B);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_ENABLE, PIN_PWM_PHASE_C);
+#if POWER_STAGE_FAULT_ENABLE
+#if !POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_FAULT, PIN_POWER_STAGE_ENABLE);
+#endif
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_FAULT, PIN_PWM_PHASE_A);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_FAULT, PIN_PWM_PHASE_B);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_FAULT, PIN_PWM_PHASE_C);
+#endif
+#if POWER_STAGE_PHASE_ENABLES
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_PHASE_ENABLE_A, PIN_POWER_STAGE_PHASE_ENABLE_B);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_PHASE_ENABLE_A, PIN_POWER_STAGE_PHASE_ENABLE_C);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_PHASE_ENABLE_B, PIN_POWER_STAGE_PHASE_ENABLE_C);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_PHASE_ENABLE_A, PIN_PWM_PHASE_A);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_PHASE_ENABLE_B, PIN_PWM_PHASE_B);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_PHASE_ENABLE_C, PIN_PWM_PHASE_C);
+#endif
+#if POWER_STAGE_SLEEP_ENABLE
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_SLEEP, PIN_PWM_PHASE_A);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_SLEEP, PIN_PWM_PHASE_B);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_SLEEP, PIN_PWM_PHASE_C);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_SLEEP, PIN_POWER_STAGE_ENABLE);
+#endif
+#if POWER_STAGE_RESET_ENABLE
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_RESET, PIN_PWM_PHASE_A);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_RESET, PIN_PWM_PHASE_B);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_RESET, PIN_PWM_PHASE_C);
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_RESET, PIN_POWER_STAGE_ENABLE);
+#if POWER_STAGE_SLEEP_ENABLE
+TT_PIN_ASSERT_DISTINCT(PIN_POWER_STAGE_RESET, PIN_POWER_STAGE_SLEEP);
+#endif
+#endif
+#endif
 
 #if ENABLE_MUTE_RELAYS && !ENABLE_DPDT_RELAYS
 TT_PIN_ASSERT_DISTINCT(PIN_MUTE_PHASE_A, PIN_MUTE_PHASE_B);

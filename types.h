@@ -41,6 +41,12 @@ enum PhaseMode {
     PHASE_4 = 4
 };
 
+enum MotorTopology : uint8_t {
+    MOTOR_TOPOLOGY_CUSTOM = 0,
+    MOTOR_TOPOLOGY_TWIN_PHASE_SYNCHRONOUS = 1,
+    MOTOR_TOPOLOGY_THREE_PHASE = 2
+};
+
 enum FilterType {
     FILTER_NONE,
     FILTER_IIR, // Infinite Impulse Response (Low Pass)
@@ -139,6 +145,9 @@ struct SpeedSettings {
      * Index 0 is Phase 1 (Reference, usually 0)
      */
     float phaseOffset[4];
+
+    // Per-output gain trim permits electrical and mechanical balancing at each speed. 100 means unity gain.
+    uint8_t channelAmplitude[4];
     
     // Motor Control
     float softStartDuration; // Seconds
@@ -176,6 +185,9 @@ struct GlobalSettings {
     
     // Phase Configuration
     uint8_t phaseMode; // 1, 2, 3, 4
+    uint8_t motorTopology; // MotorTopology; presets supply defaults but never lock raw tuning
+    uint8_t outputConfigReserved; // Reserved storage byte; schema 10 used this for a user direction control
+    bool activeBrakingAllowed; // Bridge builds default off until the DC bus can safely absorb returned energy
     
     // Motor Global
     uint8_t maxAmplitude; // 0-100%
@@ -234,13 +246,13 @@ struct GlobalSettings {
     uint8_t screensaverMode; // 0=Bounce, 1=Matrix, 2=Lissajous
     
     bool enable78rpm;
-    uint8_t freqDependentAmplitude; // 0-100% (FDA master toggle/multiplier)
+    uint8_t vfBlend; // 0-100%; zero bypasses V/f scaling
     
     // 3-Point V/f Curve Definitions
     float vfLowFreq; // Hz
-    uint8_t vfLowBoost; // 0-100%
+    uint8_t vfLowLevel; // 0-100% amplitude scale
     float vfMidFreq; // Hz
-    uint8_t vfMidBoost; // 0-100%
+    uint8_t vfMidLevel; // 0-100% amplitude scale
     
     uint8_t bootSpeed; // 0=33, 1=45, 2=78, 3=Last Used
     
@@ -308,6 +320,13 @@ struct GlobalSettings {
     uint16_t closedLoopAmpRecoveryDelayMs;
     ClosedLoopSpeedTuning closedLoopTuning[3];
     uint8_t closedLoopPitchTargetMode; // 0=Fixed preset target, 1=Follow effective pitch ratio
+
+    // Live output tuning changes are slewed to avoid abrupt electrical steps. Zero applies changes immediately.
+    float phaseSlewDegreesPerSecond;
+    float gainSlewPercentPerSecond;
+
+    // Frequency at which the V/f curve reaches the full configured drive amplitude.
+    float vfBaseFreq;
 };
 
 // These assertions catch accidental storage-layout changes during compilation.
