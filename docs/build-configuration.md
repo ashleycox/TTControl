@@ -68,7 +68,7 @@ Build `ENABLE_DPDT_RELAYS=1` separately because DPDT and four-channel support ar
 | 0 | PWM A / IN1 | PWM phase A | |
 | 1 | PWM B / IN2 | PWM phase B | |
 | 2 | PWM C / IN3 | PWM phase C | |
-| 3 | Unused | PWM phase D | Four-channel support only. |
+| 3 | Optional bridge reset | PWM phase D | Reset is bridge-only; phase D is linear four-channel only. |
 | 4 | I2C0 SDA | I2C0 SDA | OLED. |
 | 5 | I2C0 SCL | I2C0 SCL | OLED. |
 | 6 | Speed sensor A | Speed sensor A | Optional pulse or quadrature input. |
@@ -85,11 +85,9 @@ Build `ENABLE_DPDT_RELAYS=1` separately because DPDT and four-channel support ar
 | 17 | Optional EN1 | Phase A mute or DPDT 1 | |
 | 18 | Optional EN2 | Phase B mute or DPDT 2 | |
 | 19 | Optional EN3 | Phase C mute | |
-| 20 | Unused | Phase D mute | Unused in DPDT mode. |
+| 20 | Optional bridge sleep | Phase D mute | Sleep is bridge-only; phase D mute is linear four-channel only. |
 | 21 | Standby button | Standby button | Optional. |
 | 22 | Speed button | Speed button | Optional. |
-| 23 | Optional bridge sleep | Unused | |
-| 24 | Optional bridge reset | Unused | |
 | 26 | Amplifier temperature | Amplifier temperature | Optional analogue input. |
 | 27 | Amplifier thermal OK | Amplifier thermal OK | Optional active-high healthy input. |
 
@@ -132,9 +130,9 @@ The complete electrical and sequencing notes are in [Output configuration](outpu
 | `POWER_STAGE_FAULT_ACTIVE_LOW` | `1` | Fault-input polarity. |
 | `POWER_STAGE_PHASE_ENABLES` | `0` | Uses EN1, EN2, and EN3 on GP17-GP19. |
 | `POWER_STAGE_PHASE_ENABLE_ACTIVE_HIGH` | `1` | Per-phase-enable polarity. |
-| `POWER_STAGE_SLEEP_ENABLE` | `0` | Uses the optional sleep signal on GP23. |
+| `POWER_STAGE_SLEEP_ENABLE` | `0` | Uses the optional sleep signal on GP20. |
 | `POWER_STAGE_SLEEP_ACTIVE_HIGH` | `1` | Sleep signal operating polarity. |
-| `POWER_STAGE_RESET_ENABLE` | `0` | Uses the optional reset signal on GP24. |
+| `POWER_STAGE_RESET_ENABLE` | `0` | Uses the optional reset signal on GP3. |
 | `POWER_STAGE_RESET_ACTIVE_HIGH` | `0` | Reset assertion polarity. |
 | `POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN` | `0` | Uses the supported shared open-drain enable/fault arrangement. |
 | `POWER_STAGE_RESET_PULSE_MS` | `2` | Reset pulse duration. |

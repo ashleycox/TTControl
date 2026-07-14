@@ -250,7 +250,8 @@
 /*
  * Default controller-free DRV8313/SimpleFOC-style bridge interface. Boards
  * that expose EN1/EN2/EN3 separately can enable POWER_STAGE_PHASE_ENABLES and
- * use GP17-19. GP8 is otherwise unused in the default hardware map.
+ * use GP17-19. Bridge-only sleep/reset reuse GP20/GP3, which are reserved for
+ * fourth-channel linear hardware and therefore unused by the bridge backend.
  */
 #ifndef PIN_POWER_STAGE_ENABLE
 #define PIN_POWER_STAGE_ENABLE 16
@@ -268,10 +269,10 @@
 #define PIN_POWER_STAGE_FAULT 8
 #endif
 #ifndef PIN_POWER_STAGE_SLEEP
-#define PIN_POWER_STAGE_SLEEP 23
+#define PIN_POWER_STAGE_SLEEP 20
 #endif
 #ifndef PIN_POWER_STAGE_RESET
-#define PIN_POWER_STAGE_RESET 24
+#define PIN_POWER_STAGE_RESET 3
 #endif
 
 // Thermal values are validated in settings so user-entered thresholds stay in the same safe range as these firmware defaults.

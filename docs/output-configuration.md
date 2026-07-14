@@ -62,7 +62,7 @@ Boards differ in the signals they expose, so there are no generic board profiles
 #define POWER_STAGE_ENABLE_FAULT_SHARED_OPEN_DRAIN 0
 ```
 
-Boards exposing independent `EN1`, `EN2`, and `EN3` use GP17, GP18, and GP19 by default. Sleep and reset default to GP23 and GP24 when enabled. Each capability has an associated polarity option. At least one real hardware disable path is required in a bridge build: shared enable, phase enables, or sleep. Compile-time pin checks reject conflicting assignments.
+Boards exposing independent `EN1`, `EN2`, and `EN3` use GP17, GP18, and GP19 by default. Sleep and reset default to GP20 and GP3 when enabled. These pins are available on standard Pico 2 W boards and only overlap fourth-channel linear hardware, which is incompatible with the three-phase bridge backend. Each capability has an associated polarity option. At least one real hardware disable path is required in a bridge build: shared enable, phase enables, or sleep. Compile-time pin checks reject conflicting assignments.
 
 The default SimpleFOC-style arrangement is a shared active-high enable plus a separate active-low fault input. Set `POWER_STAGE_SHARED_ENABLE` to `0` for a board that only exposes phase enables. Set `POWER_STAGE_PHASE_ENABLES` to `1` in addition to the shared enable when both are wired; the firmware then uses both interlocks.
 
